@@ -1,0 +1,343 @@
+# Implementación · `varAdmin` + Botones de hitos (Fin cosecha / Fin peso)
+
+Pantalla: **scrSets**
+Sintaxis: locale español — separador `;` · encadenado `;;` · decimales con coma en RGBA
+
+---
+
+## PARTE 0 · Preparación en SharePoint
+
+Antes de tocar Power Apps, agregar en la lista **`DATASUMMARY1`**:
+
+| Columna | Tipo | Formato |
+|---|---|---|
+| `FinCosecha` | Fecha y hora | Fecha y hora |
+| `FinCosechaPor` | Una sola línea de texto | — |
+| `FinPeso` | Fecha y hora | Fecha y hora |
+| `FinPesoPor` | Una sola línea de texto | — |
+
+> Después de crearlas: en Power Apps, panel de **Datos** → `DATASUMMARY1` → **Actualizar** (Refresh), para que el esquema reconozca las columnas nuevas.
+
+---
+
+## PARTE 1 · Control de acceso `varAdmin`
+
+### 1.1 `App.Formulas` — agregar al final
+
+```
+adminEmails =
+[
+    "2015-081484@intecap.edu.gt";
+    "otro.admin@bayer.com";
+    "supervisor.spa@bayer.com"
+];;
+
+varAdmin = Lower(Trim(User().Email)) in adminEmails;;
+```
+
+**Reglas:**
+- Los correos van **en minúsculas**. `Lower(Trim(...))` normaliza lo que devuelve Azure.
+- Separador entre correos: `;`
+- Sustituir por los correos reales de administradores.
+
+### 1.2 Visibilidades — se conserva la lógica actual y se suma `And varAdmin`
+
+| Control | Propiedad | Fórmula |
+|---|---|---|
+| `btnAnaGlobal` | Visible | `=(gVista = "Sets") And (Parent.Width >= bpTablet) And varAdmin` |
+| `btnTabAnaSetFecha` | Visible | `=(Parent.Width >= bpTablet) And varAdmin` |
+| `btnTabAnaSetAcum` | Visible | `=(Parent.Width >= bpTablet) And varAdmin` |
+| `btnTabGeneral1` | Visible | `=varAdmin` |
+
+### 1.3 Protección de vistas (evita vista vacía si quedó `gTab` de sesión previa)
+
+`conVista_AnaSet` → **Visible**
+```
+=(gTab in ["AnaFecha"; "AnaAcum"]) And varAdmin
+```
+
+`conVista_AnaGlobal` → **Visible**
+```
+=(gVista = "AnaGlobal") And varAdmin
+```
+
+### 1.4 Escáner — recomendación
+
+**Dejarlo visible para todos.** Es herramienta de captura, no de análisis; el operador de campo lo necesita.
+
+Si aun así se quiere restringir:
+
+`btnEscaner` → **Visible**
+```
+=(gVista = "Sets") And (Parent.Width >= bpCel) And varAdmin
+```
+
+### 1.5 Motores ocultos — sin cambios
+
+`btnCargarAnaSet`, `btnRecalcAnaSet`, `btnCargarGlobal`, `btnRecalcGlobal` ya tienen `Visible: =false` y solo se disparan desde las pestañas que quedan ocultas. No requieren modificación.
+
+---
+
+## PARTE 2 · Botones de hitos en la tarjeta del set
+
+### 2.1 Ajustes de tamaño
+
+| Control | Propiedad | Fórmula |
+|---|---|---|
+| `galSetss` | TemplateSize | `=280` |
+| `Container9` | Height | `=280` |
+| `btnCardSet` | Height | `=Parent.TemplateHeight - 52` |
+
+> El cambio en `btnCardSet` libera la franja inferior de 44px para los botones nuevos. Sin esto, el botón invisible de la tarjeta los taparía.
+
+### 2.2 NUEVO contenedor `conHitosSet`
+
+`GroupContainer` **AutoLayout**, último hijo de `Container9` (debajo de `Container14`).
+
+| Propiedad | Fórmula |
+|---|---|
+| LayoutDirection | `=LayoutDirection.Horizontal` |
+| LayoutAlignItems | `=LayoutAlignItems.Center` |
+| LayoutJustifyContent | `=LayoutJustifyContent.Center` |
+| LayoutGap | `=8` |
+| FillPortions | `=0` |
+| Height | `=44` |
+| Width | `=Parent.TemplateWidth - 8` |
+| PaddingTop | `=4` |
+| PaddingBottom | `=4` |
+| PaddingLeft | `=8` |
+| PaddingRight | `=8` |
+| DropShadow | `=DropShadow.None` |
+
+---
+
+### 2.3 NUEVO `btnFinCosecha` (Classic/Button, dentro de `conHitosSet`)
+
+**Propiedades de formato**
+
+| Propiedad | Fórmula |
+|---|---|
+| Color | `=colBlanco` |
+| Height | `=32` |
+| FillPortions | `=1` |
+| Size | `=If(Parent.Width >= bpTablet; 10; 9)` |
+| RadiusTopLeft | `=6` |
+| RadiusTopRight | `=6` |
+| RadiusBottomLeft | `=6` |
+| RadiusBottomRight | `=6` |
+
+**Text**
+```
+=If(
+    IsBlank(ThisItem.FinCosecha);
+    "🌾 Fin cosecha";
+    "✔ Cosecha " & Text(ThisItem.FinCosecha; "[$-es]dd/mm")
+)
+```
+
+**Fill**
+```
+=If(IsBlank(ThisItem.FinCosecha); colGris; colGreen)
+```
+
+**Tooltip**
+```
+=If(
+    IsBlank(ThisItem.FinCosecha);
+    "Marcar el cierre de cosecha de este set";
+    "Marcado por " & Coalesce(ThisItem.FinCosechaPor; "—")
+)
+```
+
+**OnSelect**
+```
+=If(
+    IsBlank(ThisItem.FinCosecha);
+
+    Patch(
+        DATASUMMARY1;
+        ThisItem;
+        {
+            FinCosecha: Now();
+            FinCosechaPor: User().FullName
+        }
+    );;
+    Refresh(DATASUMMARY1);;
+    Notify("🌾 Fin de cosecha marcado para " & ThisItem.SetName; NotificationType.Success);
+
+    If(
+        varAdmin;
+        Patch(
+            DATASUMMARY1;
+            ThisItem;
+            {
+                FinCosecha: Blank();
+                FinCosechaPor: "";
+                FinPeso: Blank();
+                FinPesoPor: ""
+            }
+        );;
+        Refresh(DATASUMMARY1);;
+        Notify("↩️ Hitos revertidos en " & ThisItem.SetName; NotificationType.Warning);
+
+        Notify("Ya marcado el " & Text(ThisItem.FinCosecha; "[$-es]dd/mm/yyyy hh:mm") & " por " & Coalesce(ThisItem.FinCosechaPor; "—"); NotificationType.Information)
+    )
+)
+```
+
+**Lógica del botón:**
+- Si no está marcado → marca con fecha/hora y usuario.
+- Si ya está marcado y el usuario **es admin** → revierte (y limpia también `FinPeso`, para no dejar un peso cerrado sobre una cosecha abierta).
+- Si ya está marcado y **no es admin** → solo muestra quién y cuándo lo marcó. Un toque accidental no borra nada.
+
+---
+
+### 2.4 NUEVO `btnFinPeso` (Classic/Button, dentro de `conHitosSet`)
+
+**Propiedades de formato**
+
+| Propiedad | Fórmula |
+|---|---|
+| Color | `=colBlanco` |
+| Height | `=32` |
+| FillPortions | `=1` |
+| Size | `=If(Parent.Width >= bpTablet; 10; 9)` |
+| RadiusTopLeft | `=6` |
+| RadiusTopRight | `=6` |
+| RadiusBottomLeft | `=6` |
+| RadiusBottomRight | `=6` |
+
+**Text**
+```
+=If(
+    IsBlank(ThisItem.FinPeso);
+    "⚖️ Fin peso";
+    "✔ Peso " & Text(ThisItem.FinPeso; "[$-es]dd/mm")
+)
+```
+
+**Fill**
+```
+=If(IsBlank(ThisItem.FinPeso); colGris; ColorValue("#0E7C86"))
+```
+
+**DisplayMode**
+```
+=If(IsBlank(ThisItem.FinCosecha); DisplayMode.Disabled; DisplayMode.Edit)
+```
+
+> Esto encadena los hitos: no se puede cerrar peso sin haber cerrado cosecha.
+> **Si en la operación real los dos hitos son independientes, quitar esta propiedad.**
+
+**Tooltip**
+```
+=If(
+    IsBlank(ThisItem.FinCosecha);
+    "Primero marca el fin de cosecha";
+    If(
+        IsBlank(ThisItem.FinPeso);
+        "Marcar el cierre de pesaje de este set";
+        "Marcado por " & Coalesce(ThisItem.FinPesoPor; "—")
+    )
+)
+```
+
+**OnSelect**
+```
+=If(
+    IsBlank(ThisItem.FinPeso);
+
+    Patch(
+        DATASUMMARY1;
+        ThisItem;
+        {
+            FinPeso: Now();
+            FinPesoPor: User().FullName
+        }
+    );;
+    Refresh(DATASUMMARY1);;
+    Notify("⚖️ Fin de peso marcado para " & ThisItem.SetName; NotificationType.Success);
+
+    If(
+        varAdmin;
+        Patch(
+            DATASUMMARY1;
+            ThisItem;
+            {
+                FinPeso: Blank();
+                FinPesoPor: ""
+            }
+        );;
+        Refresh(DATASUMMARY1);;
+        Notify("↩️ Fin de peso revertido en " & ThisItem.SetName; NotificationType.Warning);
+
+        Notify("Ya marcado el " & Text(ThisItem.FinPeso; "[$-es]dd/mm/yyyy hh:mm") & " por " & Coalesce(ThisItem.FinPesoPor; "—"); NotificationType.Information)
+    )
+)
+```
+
+---
+
+### 2.5 OPCIONAL · Indicador de días entre hitos
+
+NUEVO `Label` llamado `lblDiasHitos`, dentro de `Container14`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Size | `=9` |
+| Color | `=colGris` |
+| Align | `=Align.Center` |
+| FillPortions | `=1` |
+
+**Text**
+```
+=If(
+    IsBlank(ThisItem.FinCosecha) Or IsBlank(ThisItem.FinPeso);
+    "";
+    DateDiff(ThisItem.FinCosecha; ThisItem.FinPeso; TimeUnit.Days) & " d cos→peso"
+)
+```
+
+---
+
+## PARTE 3 · Orden de implementación
+
+1. Crear las 4 columnas en `DATASUMMARY1` y refrescar el origen de datos en Power Apps.
+2. Agregar `adminEmails` y `varAdmin` a `App.Formulas`.
+3. Aplicar las visibilidades de la Parte 1 (1.2 y 1.3).
+4. Ajustar tamaños: `galSetss`, `Container9`, `btnCardSet` (2.1).
+5. Crear `conHitosSet` (2.2).
+6. Crear `btnFinCosecha` (2.3).
+7. Crear `btnFinPeso` (2.4).
+8. Opcional: `lblDiasHitos` (2.5).
+
+---
+
+## PARTE 4 · Verificación
+
+| Prueba | Resultado esperado |
+|---|---|
+| Entrar con correo **no-admin** | No se ven pestañas de análisis ni botón global |
+| Entrar con correo **admin** | Todo visible como antes |
+| Tocar "Fin cosecha" en un set | Se pone verde con la fecha; "Fin peso" se habilita |
+| Tocar de nuevo "Fin cosecha" como **no-admin** | Solo aviso informativo, **no borra** |
+| Tocar de nuevo "Fin cosecha" como **admin** | Revierte ambos hitos |
+| Tocar el centro de la tarjeta | Entra al detalle del set (comportamiento actual) |
+| Tocar los botones de hitos | **No** entra al detalle del set |
+
+**Si al tocar los botones nuevos se abre el detalle del set:** el `Height` de `btnCardSet` quedó alto. Bajar a `=Parent.TemplateHeight - 56`.
+
+**Si los botones no se ven:** revisar que `conHitosSet` sea hijo directo de `Container9` y que `Container9.Height` esté en 280.
+
+---
+
+## Notas de diseño
+
+**¿Por qué los hitos van en `DATASUMMARY1` y no en `REGISTRO_PERSONAL1`?**
+Son hitos **del set**, no de una persona ni de una actividad individual. Guardarlos en el registro de personal obligaría a buscar "el último registro de cosecha" cada vez, y no habría forma de marcar el cierre si nadie registró actividad ese día.
+
+**¿Por qué solo admin puede revertir?**
+Estos botones estarán en la pantalla principal, al alcance de cualquier operador. Un toque accidental que borre un hito ya confirmado corrompería el histórico sin dejar rastro. El bloqueo hace que el error requiera intención.
+
+**Sobre `FinCosechaPor` / `FinPesoPor`:**
+Son opcionales para el funcionamiento, pero permiten auditar quién marcó cada hito. Si se omiten, hay que quitar esas líneas de los dos `Patch` y de los `Tooltip`.
