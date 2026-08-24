@@ -1,0 +1,559 @@
+# Export · Agregar SET manual inline + Botones Packing List
+
+Pantalla: **procesos01** → sección `vExport` → `DetallInformation`
+Sintaxis: locale español — separador `;` · encadenado `;;` · RGBA con coma decimal
+
+> Los controles que ya cargan sets desde `DATASUMMARY1` (`conPopupAddSetsExport`, `btnGuardarSetsExport`) **no se tocan**. Este documento agrega el alta manual directamente en la galería del ID.
+
+---
+
+## PARTE 0 · Preparación
+
+### 0.1 SharePoint · Columnas nuevas
+
+**`EXPORT-IMPORT`**
+
+| Columna | Tipo | Formato |
+|---|---|---|
+| `PackingListEmitida` | Fecha y hora | Solo fecha |
+| `PackingListEmpacado` | Fecha y hora | Solo fecha |
+| `EsSetManual` | Sí/No | — |
+
+**`SOLICITUDESPA1`**
+
+| Columna | Tipo | Formato |
+|---|---|---|
+| `PackingListEmitida` | Fecha y hora | Solo fecha |
+| `PackingListEmpacado` | Fecha y hora | Solo fecha |
+| `EsSetManual` | Sí/No | — |
+
+Después de crearlas: Power Apps → panel **Datos** → actualizar ambas listas.
+
+### 0.2 Opciones de estatus
+
+Si `SHIPMENT_PROGRESS` (en `EXPORT-IMPORT`) es columna **Opción**, agregar:
+
+```
+Packing List Emitida
+Packing List Empacado
+```
+
+Si `Estatus` (en `SOLICITUDESPA1`) es columna **Opción**, agregar los mismos dos valores.
+
+> **Si `Estatus` es Choice**, en todos los `Patch` de este documento cambiar
+> `Estatus: "Packing List Emitida"` por `Estatus: {Value: "Packing List Emitida"}`
+
+### 0.3 `App.OnStart` — agregar
+
+```
+Set(varAddManualInline; false);;
+```
+
+---
+
+## PARTE 1 · Icono para abrir la fila de captura
+
+NUEVO `ModernIcon` llamado **`icoAgregarSetManual`**, dentro de **`Container19_1`** (encabezado de `DetallInformation`), después de `Icon3_3`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `="Add"` |
+| IconColor | `=ColorValue("#88BC30")` |
+| Height | `=26` |
+| Width | `=26` |
+| Tooltip | `="Agregar un SET manualmente a este ID"` |
+| DisplayMode | `=If(IsBlank(varFiltroID); DisplayMode.Disabled; DisplayMode.Edit)` |
+
+**OnSelect**
+```
+=Set(varAddManualInline; !varAddManualInline);;
+Reset(txtSetInline);;
+Reset(cmbCropInline);;
+Reset(txtPacketsInline);;
+Reset(txtPesoInline)
+```
+
+### Contador de sets del ID (opcional)
+
+NUEVO `Label` **`lblSetsDelID`**, también en `Container19_1`.
+
+**Text**
+```
+=CountRows(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID)) & " set(s) en este ID"
+```
+
+| Propiedad | Fórmula |
+|---|---|
+| Size | `=10` |
+| Color | `=clrMuted` |
+| Align | `=Align.Center` |
+| FillPortions | `=1` |
+
+---
+
+## PARTE 2 · Fila inline de captura
+
+NUEVO `GroupContainer` **AutoLayout** llamado **`conFilaManualInline`**, dentro de `DetallInformation`, **entre** `Container19_1` y la galería `DallaInformation`.
+
+| Propiedad | Fórmula |
+|---|---|
+| LayoutDirection | `=LayoutDirection.Horizontal` |
+| LayoutAlignItems | `=LayoutAlignItems.Center` |
+| LayoutGap | `=8` |
+| Height | `=42` |
+| FillPortions | `=0` |
+| Fill | `=ColorValue("#FBF1DC")` |
+| PaddingTop | `=4` |
+| PaddingBottom | `=4` |
+| PaddingLeft | `=8` |
+| PaddingRight | `=8` |
+| Visible | `=varAddManualInline` |
+
+### 2.1 `txtSetInline` — Classic/TextInput
+
+| Propiedad | Fórmula |
+|---|---|
+| Default | `=""` |
+| HintText | `="Nombre del SET"` |
+| FillPortions | `=2,5` |
+| Height | `=30` |
+| Align | `=Align.Center` |
+| Size | `=11` |
+| PaddingLeft | `=5` |
+
+### 2.2 `cmbCropInline` — ModernCombobox
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `=["Tomato"; "Pepper"; "Melon"; "Watermelon"; "Cucumber"]` |
+| ItemDisplayText | `=ThisItem.Value` |
+| InputTextPlaceholder | `="Cultivo"` |
+| SelectMultiple | `=false` |
+| FillPortions | `=1` |
+| Height | `=30` |
+
+### 2.3 `txtPacketsInline` — Classic/TextInput
+
+| Propiedad | Fórmula |
+|---|---|
+| Default | `=""` |
+| HintText | `="Packets"` |
+| Format | `=TextFormat.Number` |
+| FillPortions | `=1` |
+| Height | `=30` |
+| Align | `=Align.Center` |
+| Size | `=11` |
+
+### 2.4 `txtPesoInline` — Classic/TextInput
+
+| Propiedad | Fórmula |
+|---|---|
+| Default | `=""` |
+| HintText | `="Net weight"` |
+| FillPortions | `=1` |
+| Height | `=30` |
+| Align | `=Align.Center` |
+| Size | `=11` |
+
+### 2.5 `btnGuardarSetInline` — Classic/Button
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `="✓ Agregar"` |
+| Fill | `=ColorValue("#88BC30")` |
+| Color | `=RGBA(255; 255; 255; 1)` |
+| Height | `=30` |
+| Width | `=110` |
+| Size | `=11` |
+| RadiusTopLeft / TopRight / BottomLeft / BottomRight | `=6` |
+| DisplayMode | `=If(IsBlank(Trim(txtSetInline.Text)) Or IsBlank(cmbCropInline.Selected.Value); DisplayMode.Disabled; DisplayMode.Edit)` |
+
+**OnSelect**
+```
+=Set(varCabID; First(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID)));;
+Set(varNomSet; Trim(txtSetInline.Text));;
+If(
+    CountRows(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID; SET = varNomSet)) > 0;
+    Notify("Ese SET ya existe en este ID."; NotificationType.Warning);
+
+    If(
+        IsBlank(varCabID.SET);
+
+        Patch('EXPORT-IMPORT'; varCabID;
+            {
+                SET: varNomSet;
+                CROP: {Value: cmbCropInline.Selected.Value};
+                Packets: Value(Coalesce(txtPacketsInline.Text; "0"));
+                Net_Weight: txtPesoInline.Text;
+                Actividad: "Envio de semillas";
+                EsSetManual: true;
+                PACKING_LIST: varFiltroID & " - " & Coalesce(varCabID.Area; "SSD");
+                BOAEmail: Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email)
+            }
+        );
+
+        Patch('EXPORT-IMPORT'; Defaults('EXPORT-IMPORT');
+            {
+                Actividad: "Envio de semillas";
+                SET: varNomSet;
+                CROP: {Value: cmbCropInline.Selected.Value};
+                Packets: Value(Coalesce(txtPacketsInline.Text; "0"));
+                Net_Weight: txtPesoInline.Text;
+                Program: Coalesce(varCabID.Program; "NA");
+                Trial_Intent: Coalesce(varCabID.Trial_Intent; "NA");
+                OperationType: Coalesce(varCabID.OperationType; "NA");
+                Field: Coalesce(varCabID.Field; "");
+                Season: Coalesce(varCabID.Season; "");
+                Area: Coalesce(varCabID.Area; "SSD");
+                Request_ID: varFiltroID;
+                SHIP_TO_LOCATION: varCabID.SHIP_TO_LOCATION;
+                SHIP_TO_COUNTRY: varCabID.SHIP_TO_COUNTRY;
+                TYPE_OF_SHIPMENT: varCabID.TYPE_OF_SHIPMENT;
+                REQUESTED_SHIP_DATE: varCabID.REQUESTED_SHIP_DATE;
+                CreatedDate: Coalesce(varCabID.CreatedDate; Now());
+                SHIPMENT_PROGRESS: varCabID.SHIPMENT_PROGRESS;
+                PackingListEmitida: varCabID.PackingListEmitida;
+                PackingListEmpacado: varCabID.PackingListEmpacado;
+                PEA: varCabID.PEA;
+                BOA: Coalesce(varCabID.BOA; gloUsuario);
+                BOAEmail: Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad: Coalesce(varCabID.Prioridad; "Estandar");
+                PACKING_LIST: varFiltroID & " - " & Coalesce(varCabID.Area; "SSD");
+                EsSetManual: true
+            }
+        )
+    );;
+    Patch(SOLICITUDESPA1; Defaults(SOLICITUDESPA1);
+        {
+            Actividad: "Envio de semillas";
+            SetName: varNomSet;
+            Crop: cmbCropInline.Selected.Value;
+            Program: Coalesce(varCabID.Program; "NA");
+            Generation: "NA";
+            MCT: "NA";
+            Trial_Intent: Coalesce(varCabID.Trial_Intent; "NA");
+            OperationType: Coalesce(varCabID.OperationType; "NA");
+            Field: Coalesce(varCabID.Field; "");
+            PEA: varCabID.PEA;
+            Area: Coalesce(varCabID.Area; "SSD");
+            Season: Coalesce(varCabID.Season; "");
+            Packets: Coalesce(txtPacketsInline.Text; "0");
+            Net_Weight: txtPesoInline.Text;
+            Request_ID: varFiltroID;
+            SHIP_TO_LOCATION: varCabID.SHIP_TO_LOCATION;
+            'Requested Date': Coalesce(varCabID.REQUESTED_SHIP_DATE; gloFechaEntregaEst);
+            FechaSolicitud: Coalesce(varCabID.CreatedDate; Now());
+            Estatus: "Solicitado";
+            BOA: Coalesce(varCabID.BOA; gloUsuario);
+            BOAEmail: Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email);
+            Prioridad: Coalesce(varCabID.Prioridad; "Estandar");
+            PACKING_LIST: varFiltroID & " - " & Coalesce(varCabID.Area; "SSD");
+            EsSetManual: true
+        }
+    );;
+    Refresh('EXPORT-IMPORT');;
+    Refresh(SOLICITUDESPA1);;
+    Select(btnBuildDash);;
+    Reset(txtSetInline);;
+    Reset(cmbCropInline);;
+    Reset(txtPacketsInline);;
+    Reset(txtPesoInline);;
+    Notify("✅ SET " & varNomSet & " agregado al ID " & varFiltroID; NotificationType.Success)
+)
+```
+
+**Comportamiento:**
+- Si el ID llegó **sin SET** (fila cabecera vacía) → la actualiza, no duplica.
+- Si el ID **ya tiene SETs** → crea una fila nueva heredando todo el encabezado.
+- **Siempre** crea el registro correspondiente en `SOLICITUDESPA1`.
+- Bloquea duplicados dentro del mismo ID.
+
+### 2.6 `icoCerrarInline` — ModernIcon
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `="Dismiss"` |
+| IconColor | `=ColorValue("#DC2626")` |
+| Width | `=24` |
+
+**OnSelect**
+```
+=Set(varAddManualInline; false)
+```
+
+---
+
+## PARTE 3 · Marcar los sets manuales en la galería
+
+### 3.1 `Container19_2` (fila de `DallaInformation`) → **Fill**
+
+```
+=If(ThisItem.EsSetManual; ColorValue("#FBF1DC"); RGBA(255; 255; 255; 0))
+```
+
+### 3.2 NUEVO `Label` `lblMarcaManual` dentro de `Container19_2`
+
+**Text**
+```
+=If(ThisItem.EsSetManual; "M"; "")
+```
+
+| Propiedad | Fórmula |
+|---|---|
+| Color | `=ColorValue("#E8A93C")` |
+| FontWeight | `=FontWeight.Bold` |
+| Width | `=20` |
+| Align | `=Align.Center` |
+| Size | `=11` |
+| Tooltip | `="SET agregado manualmente — completar datos en DATASUMMARY1"` |
+
+---
+
+## PARTE 4 · Botones de estado en `conColTramites_1`
+
+Los tres se agregan junto a los grupos existentes (donde está `ButtonCanvas14_32`).
+
+Todos los `GroupContainer` de esta sección comparten estas propiedades:
+
+| Propiedad | Fórmula |
+|---|---|
+| LayoutDirection | `=LayoutDirection.Horizontal` |
+| LayoutAlignItems | `=LayoutAlignItems.Center` |
+| LayoutJustifyContent | `=LayoutJustifyContent.SpaceBetween` |
+| LayoutGap | `=10` |
+| Height | `=40` |
+| FillPortions | `=0` |
+| PaddingTop / Bottom | `=8` |
+| PaddingLeft / Right | `=10` |
+
+---
+
+### 4.1 `ButtonCanvas14_32` ("En Proceso") → **OnSelect** (reemplazar)
+
+Para que propague al ID completo, igual que los dos nuevos.
+
+```
+=Set(varReqPack; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; _e; {SHIPMENT_PROGRESS: {Value: "En Proceso"}})
+);;
+ForAll(
+    Filter(SOLICITUDESPA1; Request_ID = varReqPack) As _s;
+    Patch(SOLICITUDESPA1; _s;
+        {
+            Estatus: "En proceso";
+            FechaInicio: Coalesce(_s.FechaInicio; Now());
+            Modificado: Now()
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Select(btnBuildDash);;
+Notify("⚙️ En Proceso · ID " & varReqPack & " · " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqPack)) & " set(s)"; NotificationType.Success)
+```
+
+---
+
+### 4.2 NUEVO grupo `PackingListEmitida`
+
+**`btnPackEmitida`** — `Button@0.0.45`
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `="+ Packing List Emitida"` |
+| FillPortions | `=1` |
+| Width | `=190` |
+| Height | `=30` |
+| FontSize | `=If(App.Width < 600; 80; 12)` |
+| DisplayMode | `=If(IsBlank(ThisItem.Request_ID); DisplayMode.Disabled; DisplayMode.Edit)` |
+
+**OnSelect**
+```
+=Set(varFPack; Today());;
+Set(varReqPack; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            PackingListEmitida: varFPack;
+            SHIPMENT_PROGRESS: {Value: "Packing List Emitida"}
+        }
+    )
+);;
+ForAll(
+    Filter(SOLICITUDESPA1; Request_ID = varReqPack) As _s;
+    Patch(SOLICITUDESPA1; _s;
+        {
+            PackingListEmitida: varFPack;
+            Estatus: "Packing List Emitida";
+            FechaFin: Coalesce(_s.FechaFin; Now());
+            Modificado: Now()
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Select(btnBuildDash);;
+Notify("📄 Packing List Emitida · ID " & varReqPack & " · " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqPack)) & " set(s)"; NotificationType.Success)
+```
+
+**`dpPackEmitida`** — `ModernDatePicker`
+
+| Propiedad | Fórmula |
+|---|---|
+| DefaultDate | `=ThisItem.PackingListEmitida` |
+| Format | `="dd/mm/yyyy"` |
+| FillPortions | `=1` |
+| Placeholder | `="--/--/----"` |
+| Size | `=If(App.Width < 600; 80; 12)` |
+
+**OnChange**
+```
+=Set(varFPack; Self.SelectedDate);;
+Set(varReqPack; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; _e; {PackingListEmitida: varFPack})
+);;
+ForAll(
+    Filter(SOLICITUDESPA1; Request_ID = varReqPack) As _s;
+    Patch(SOLICITUDESPA1; _s; {PackingListEmitida: varFPack; Modificado: Now()})
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Notify("Fecha actualizada en todos los sets del ID " & varReqPack; NotificationType.Success)
+```
+
+---
+
+### 4.3 NUEVO grupo `PackingListEmpacado`
+
+**`btnPackEmpacado`** — `Button@0.0.45`
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `="+ Packing List Empacado"` |
+| FillPortions | `=1` |
+| Width | `=190` |
+| Height | `=30` |
+| FontSize | `=If(App.Width < 600; 80; 12)` |
+| DisplayMode | `=If(IsBlank(ThisItem.PackingListEmitida); DisplayMode.Disabled; DisplayMode.Edit)` |
+
+> Encadenado: no se puede empacar sin haber emitido.
+> Si son independientes, usar `=If(IsBlank(ThisItem.Request_ID); DisplayMode.Disabled; DisplayMode.Edit)`
+
+**OnSelect**
+```
+=Set(varFPack; Today());;
+Set(varReqPack; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            PackingListEmpacado: varFPack;
+            SHIPMENT_PROGRESS: {Value: "Packing List Empacado"}
+        }
+    )
+);;
+ForAll(
+    Filter(SOLICITUDESPA1; Request_ID = varReqPack) As _s;
+    Patch(SOLICITUDESPA1; _s;
+        {
+            PackingListEmpacado: varFPack;
+            Estatus: "Packing List Empacado";
+            FechaFin: Coalesce(_s.FechaFin; Now());
+            FechaEntrega: Coalesce(_s.FechaEntrega; Now());
+            Modificado: Now()
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Select(btnBuildDash);;
+Notify("📦 Packing List Empacado · ID " & varReqPack & " · " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqPack)) & " set(s)"; NotificationType.Success)
+```
+
+**`dpPackEmpacado`** — `ModernDatePicker`
+
+Mismas propiedades que `dpPackEmitida`, con `DefaultDate: =ThisItem.PackingListEmpacado`
+
+**OnChange**
+```
+=Set(varFPack; Self.SelectedDate);;
+Set(varReqPack; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; _e; {PackingListEmpacado: varFPack})
+);;
+ForAll(
+    Filter(SOLICITUDESPA1; Request_ID = varReqPack) As _s;
+    Patch(SOLICITUDESPA1; _s; {PackingListEmpacado: varFPack; Modificado: Now()})
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Notify("Fecha actualizada en todos los sets del ID " & varReqPack; NotificationType.Success)
+```
+
+---
+
+## PARTE 5 · Color del estatus en el drawer
+
+`lblDrPill` → **Fill**
+```
+=Switch(varReg.Estatus;
+    "Solicitado"; clrEstSol;
+    "Recibido"; clrEstSol;
+    "En proceso"; clrEstPro;
+    "Finalizado"; clrEstFin;
+    "Packing List Emitida"; ColorValue("#0E7C86");
+    "Packing List Empacado"; ColorValue("#2f9e5f");
+    "Entregado"; clrEstEnt;
+    clrFaint
+)
+```
+
+---
+
+## PARTE 6 · Orden de implementación
+
+1. Crear las 6 columnas en SharePoint (§0.1) y refrescar orígenes.
+2. Agregar las opciones de estatus (§0.2).
+3. `Set(varAddManualInline; false)` en `App.OnStart` (§0.3).
+4. `icoAgregarSetManual` y `lblSetsDelID` en `Container19_1` (§1).
+5. `conFilaManualInline` con sus 6 controles (§2).
+6. Marca visual de sets manuales (§3).
+7. Reemplazar `OnSelect` de `ButtonCanvas14_32` (§4.1).
+8. Grupos `PackingListEmitida` y `PackingListEmpacado` (§4.2, §4.3).
+9. Color del drawer (§5).
+
+---
+
+## PARTE 7 · Verificación
+
+| Prueba | Resultado esperado |
+|---|---|
+| ID **sin ningún SET** → icono `+` → agregar uno | La fila cabecera se completa, **no se duplica** |
+| ID **con 2 SETs** → agregar un tercero | Aparece en la galería con fondo ámbar y "M" |
+| Intentar agregar un SET repetido en el mismo ID | Aviso de advertencia, no guarda |
+| Revisar `SOLICITUDESPA1` | Un registro nuevo por cada SET manual, `EsSetManual` = Sí |
+| ID con 3 SETs → "Packing List Emitida" | Los 3 cambian; el aviso dice "3 set(s)" |
+| Botón Empacado sin Emitida | Deshabilitado |
+| Cambiar fecha en el datepicker | Se propaga a todos los sets del ID en ambas listas |
+
+---
+
+## Notas de diseño
+
+**¿Por qué `ForAll` sobre `Filter(...Request_ID...)` y no un solo `Patch`?**
+Un Request_ID puede tener varios SETs, cada uno como fila independiente. El `ForAll` los recorre todos, así el estatus queda consistente en el ID completo. Si solo se patcheara la fila visible, quedarían sets del mismo envío con estatus distinto.
+
+**Sets manuales pendientes de completar.**
+Entran con `Generation`, `MCT` y `VCR` en `"NA"`. Funcionan para el envío pero quedan incompletos para el análisis por atributo. Conviene crear una vista en SharePoint filtrada por `EsSetManual = Sí` para revisarlos periódicamente y dar de alta los datos reales en `DATASUMMARY1`.
+
+**Delegación.**
+`Filter('EXPORT-IMPORT'; Request_ID = varReqPack)` es delegable (igualdad sobre texto). Requiere que `Request_ID` esté **indizada** en ambas listas si superan los 5.000 ítems.
+
+**Coexistencia con el popup existente.**
+`conPopupAddSetsExport` sigue siendo la vía para sets que **sí** están en `DATASUMMARY1` (selección múltiple). La fila inline es para los que **no** existen. Ambos escriben en las mismas dos listas con la misma estructura.
