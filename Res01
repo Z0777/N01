@@ -1,0 +1,63 @@
+=Set(varHrsDesde; DateAdd(Today(); -365; TimeUnit.Days));;
+
+Clear(colRegSPA);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Preparacion de semilla para siembra") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Colecta de tejido") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Envio de semillas") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Envio de tejido") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Cosecha") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Collect(colRegSPA;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; FechaFin >= varHrsDesde; Job = "Ingreso semilla a SPA") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Job: Coalesce(_r.Job; ""); Persona: Coalesce(_r.NombrePersona; ""); Fecha: _r.FechaFin; Horas: Coalesce(_r.HorasTotales; 0); Mat: Value(Coalesce(_r.CantidadMateriales; "0")) }
+    )
+);;
+
+Set(varHrsTrunc; false);;
+
+ClearCollect(colHrsSet;
+    ForAll(
+        GroupBy(colRegSPA; "SetName"; "Job"; "_d") As _g;
+        {
+            SetName:   _g.SetName;
+            Job:       _g.Job;
+            Horas:     Round(Sum(_g._d; Horas); 2);
+            Personas:  CountRows(Distinct(_g._d; Persona));
+            Mat:       Sum(_g._d; Mat);
+            Registros: CountRows(_g._d);
+            UltFecha:  First(Sort(_g._d; Fecha; SortOrder.Descending)).Fecha;
+            PrimFecha: First(Sort(_g._d; Fecha; SortOrder.Ascending)).Fecha
+        }
+    )
+)
