@@ -1,0 +1,251 @@
+# Export · Correo automático en botones de estatus (ID completo)
+
+Pantalla: **procesos01** → `vExport` → `conColTramites_1`
+Sintaxis: locale español — separador `;` · encadenado `;;` · RGBA con coma decimal
+
+---
+
+## Contexto
+
+| Pregunta | Estado |
+|---|---|
+| ¿Los botones cambian el estatus de **todos** los sets del ID? | **Sí** — el `ForAll` sobre `Filter(...Request_ID...)` los recorre todos, en las dos listas |
+| ¿Envían correo? | **No** — este documento lo agrega |
+
+Los botones del drawer (`btnEstSol`, `btnEstPro`, etc.) usan `btnEnviarCorreoEstatus`, que trabaja sobre `varReg` — **un solo registro**. Aquí el contexto es distinto: un Request_ID con varios sets. Necesita su propio emisor.
+
+---
+
+## PARTE 0 · Requisitos previos
+
+### 0.1 `App.Formulas` — deben existir
+
+```
+gloMailExportTo = "logistica.export@bayer.com;documentacion@bayer.com;aduanas.gt@bayer.com";;
+gloMailExportCc = "jefatura.spa@bayer.com";;
+gloMailDefault  = "spa.guatemala@bayer.com";;
+```
+
+Correos en minúsculas, separador `;` sin espacios, todo dentro de unas solas comillas.
+
+### 0.2 Variables que usa el emisor
+
+Se setean desde cada botón antes de llamarlo — no requieren declaración en `App.OnStart`:
+
+| Variable | Contenido |
+|---|---|
+| `varReqPack` | Request_ID del envío |
+| `varEstPack` | Texto del estatus alcanzado |
+| `varFPack` | Fecha del cambio |
+
+---
+
+## PARTE 1 · NUEVO `btnCorreoPackingList`
+
+`Classic/Button` dentro de `conColTramites_1`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Visible | `=false` |
+| Width | `=1` |
+| Height | `=1` |
+
+### OnSelect
+
+```
+=With(
+    {
+        _sets: Filter('EXPORT-IMPORT'; Request_ID = varReqPack);
+        _cab:  First(Filter('EXPORT-IMPORT'; Request_ID = varReqPack))
+    };
+    Office365Outlook.SendEmailV2(
+        gloMailExportTo;
+        "SPA · " & varEstPack & " · ID " & varReqPack;
+        "<div style='font-family:Segoe UI,Arial,sans-serif;color:#16273a;font-size:14px'>" &
+        "<p>El envío con <b>Request ID " & varReqPack & "</b> cambió a estatus <b>" & varEstPack & "</b>.</p>" &
+
+        "<table style='border-collapse:collapse;font-size:13px;min-width:360px;margin-bottom:16px'>" &
+        Concat(
+            Table(
+                { k: "Request ID";      v: Text(varReqPack) };
+                { k: "Estatus";         v: varEstPack };
+                { k: "Fecha";           v: Text(varFPack; "[$-es]dd/mm/yyyy") };
+                { k: "Destino";         v: Coalesce(_cab.SHIP_TO_LOCATION; "—") };
+                { k: "País";            v: Coalesce(_cab.SHIP_TO_COUNTRY.Value; "—") };
+                { k: "Tipo de envío";   v: Coalesce(_cab.TYPE_OF_SHIPMENT.Value; "—") };
+                { k: "Fecha requerida"; v: If(IsBlank(_cab.REQUESTED_SHIP_DATE); "—"; Text(_cab.REQUESTED_SHIP_DATE; "[$-es]dd/mm/yyyy")) };
+                { k: "Total de SETs";   v: Text(CountRows(_sets)) };
+                { k: "Total packets";   v: Text(Sum(_sets; Coalesce(Packets; 0))) };
+                { k: "PEA";             v: Coalesce(_cab.PEA; "—") };
+                { k: "Registrado por";  v: User().FullName }
+            ) As F;
+            "<tr><td style='padding:6px 12px;border:1px solid #e3eaf1;background:#f4f8fc;font-weight:600;color:#5a6b7b;white-space:nowrap'>" &
+            F.k & "</td><td style='padding:6px 12px;border:1px solid #e3eaf1'>" & F.v & "</td></tr>"
+        ) &
+        "</table>" &
+
+        "<p style='font-weight:600;color:#5a6b7b;margin-bottom:6px'>SETs incluidos en este envío:</p>" &
+        "<table style='border-collapse:collapse;font-size:12px;min-width:420px'>" &
+        "<tr><th style='padding:5px 10px;border:1px solid #e3eaf1;background:#f4f8fc;text-align:left'>SET</th>" &
+        "<th style='padding:5px 10px;border:1px solid #e3eaf1;background:#f4f8fc;text-align:left'>Crop</th>" &
+        "<th style='padding:5px 10px;border:1px solid #e3eaf1;background:#f4f8fc;text-align:left'>Program</th>" &
+        "<th style='padding:5px 10px;border:1px solid #e3eaf1;background:#f4f8fc;text-align:right'>Packets</th>" &
+        "<th style='padding:5px 10px;border:1px solid #e3eaf1;background:#f4f8fc;text-align:right'>Net weight</th></tr>" &
+        Concat(
+            Sort(_sets; SET; SortOrder.Ascending) As S;
+            "<tr><td style='padding:5px 10px;border:1px solid #e3eaf1'>" & Coalesce(S.SET; "—") &
+            If(S.EsSetManual; " <span style='color:#E8A93C;font-weight:600'>(M)</span>"; "") & "</td>" &
+            "<td style='padding:5px 10px;border:1px solid #e3eaf1'>" & Coalesce(S.CROP.Value; "—") & "</td>" &
+            "<td style='padding:5px 10px;border:1px solid #e3eaf1'>" & Coalesce(S.Program; "—") & "</td>" &
+            "<td style='padding:5px 10px;border:1px solid #e3eaf1;text-align:right'>" & Text(Coalesce(S.Packets; 0)) & "</td>" &
+            "<td style='padding:5px 10px;border:1px solid #e3eaf1;text-align:right'>" & Coalesce(S.Net_Weight; "—") & "</td></tr>"
+        ) &
+        "</table>" &
+
+        "<p style='font-size:12px;color:#93a4b4;margin-top:14px'>Mensaje automático · SPA</p></div>";
+        { Cc: gloMailExportCc & ";" & Coalesce(_cab.BOAEmail; gloMailDefault) }
+    )
+);;
+Notify("📧 Correo enviado · ID " & varReqPack; NotificationType.Success)
+```
+
+**Qué incluye el correo:**
+- Tabla de encabezado con datos del envío (destino, país, fecha requerida, totales)
+- Tabla con **todos los SETs del ID**: nombre, crop, program, packets, net weight
+- Los sets agregados manualmente se marcan con **(M)** en ámbar
+- El solicitante (`BOAEmail`) queda siempre en copia
+
+---
+
+## PARTE 2 · Llamar al emisor desde los tres botones
+
+En cada botón se agregan **dos líneas**: la variable de estatus al inicio y la llamada al final. El resto del `OnSelect` no cambia.
+
+### 2.1 `ButtonCanvas14_32` ("En Proceso")
+
+**Después** de `Set(varReqPack; ThisItem.Request_ID);;` agregar:
+```
+Set(varEstPack; "En proceso");;
+Set(varFPack; Today());;
+```
+
+**Al final**, después de `Select(btnBuildDash);;` agregar:
+```
+Select(btnCorreoPackingList);;
+```
+
+### 2.2 `btnPackEmitida`
+
+**Después** de `Set(varReqPack; ThisItem.Request_ID);;` agregar:
+```
+Set(varEstPack; "Packing List Emitida");;
+```
+
+**Al final**, después de `Select(btnBuildDash);;` agregar:
+```
+Select(btnCorreoPackingList);;
+```
+
+### 2.3 `btnPackEmpacado`
+
+**Después** de `Set(varReqPack; ThisItem.Request_ID);;` agregar:
+```
+Set(varEstPack; "Packing List Empacado");;
+```
+
+**Al final**, después de `Select(btnBuildDash);;` agregar:
+```
+Select(btnCorreoPackingList);;
+```
+
+---
+
+### 2.4 Los datepickers NO llevan correo
+
+`dpPackEmitida` y `dpPackEmpacado` quedan sin cambios.
+
+Corregir una fecha no es un cambio de estatus; enviar aviso por cada ajuste generaría ruido innecesario en las bandejas.
+
+---
+
+## PARTE 3 · Verificar la sincronización del ID
+
+NUEVO `Label` **`lblEstadoID`** dentro de `Container19_1`.
+
+**Text**
+```
+=With(
+    { _s: Filter('EXPORT-IMPORT'; Request_ID = varFiltroID) };
+    CountRows(_s) & " set(s)  |  Estatus: " &
+    Concat(Distinct(_s; SHIPMENT_PROGRESS.Value); Value; " / ")
+)
+```
+
+**Color**
+```
+=If(
+    CountRows(Distinct(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); SHIPMENT_PROGRESS.Value)) > 1;
+    ColorValue("#DC2626");
+    clrMuted
+)
+```
+
+| Propiedad | Fórmula |
+|---|---|
+| Size | `=10` |
+| Align | `=Align.Center` |
+| FillPortions | `=1` |
+
+**Cómo leerlo:**
+- **Gris, un solo estatus** → todos los sets sincronizados. Correcto.
+- **Rojo, dos o más estatus separados por `/`** → algún set quedó desincronizado. Señal de que un `ForAll` no alcanzó a todos (posible problema de delegación o un set agregado después del cambio de estatus).
+
+---
+
+## PARTE 4 · Orden de implementación
+
+1. Confirmar que existen las tres variables de correo en `App.Formulas` (§0.1).
+2. Crear `btnCorreoPackingList` con su `OnSelect` (§1).
+3. Agregar las dos líneas en `ButtonCanvas14_32` (§2.1).
+4. Agregar las dos líneas en `btnPackEmitida` (§2.2).
+5. Agregar las dos líneas en `btnPackEmpacado` (§2.3).
+6. Crear `lblEstadoID` (§3).
+
+---
+
+## PARTE 5 · Prueba
+
+1. Poner **tu propio correo** en `gloMailExportTo`.
+2. Abrir un ID que tenga 3 sets.
+3. Presionar "Packing List Emitida".
+
+**Resultado esperado:**
+
+| Verificación | Debe ocurrir |
+|---|---|
+| Correos recibidos | **Uno solo** (no tres) |
+| Contenido del correo | Tabla con los 3 sets listados |
+| Aviso en pantalla | "📄 Packing List Emitida · ID xxx · 3 set(s)" seguido de "📧 Correo enviado" |
+| `EXPORT-IMPORT` en SharePoint | Los 3 registros con `SHIPMENT_PROGRESS` = Packing List Emitida y fecha |
+| `SOLICITUDESPA1` en SharePoint | Los 3 registros con `Estatus` = Packing List Emitida y fecha |
+| `lblEstadoID` | En gris, mostrando un solo estatus |
+
+**Si llegan varios correos:** revisar que `Select(btnCorreoPackingList)` esté **fuera** de cualquier `ForAll`, al final del `OnSelect`.
+
+**Si `lblEstadoID` sale en rojo:** hay sets desincronizados. Verificar que `Request_ID` esté indizada en ambas listas.
+
+---
+
+## Notas de diseño
+
+**¿Por qué un emisor separado y no reutilizar `btnEnviarCorreoEstatus`?**
+Ese trabaja sobre `varReg`, que es un registro individual de `colTrz`. Aquí el sujeto es el **envío completo** (varios sets bajo un Request_ID). Reutilizarlo obligaría a enviar un correo por set — ruido para el destinatario y sin la visión de conjunto que necesita logística.
+
+**¿Por qué la tabla de SETs dentro del correo?**
+Quien recibe el aviso normalmente necesita saber qué contiene el envío para preparar documentación o revisar el empaque. Sin esa tabla tendría que entrar a la app a consultarlo.
+
+**Marca (M) para sets manuales.**
+Alerta a quien recibe que ese set no está completo en `DATASUMMARY1` — falta generación, MCT y VCR. Útil para detectar a tiempo si falta información de trazabilidad antes del envío.
+
+**Delegación.**
+`Filter('EXPORT-IMPORT'; Request_ID = varReqPack)` es delegable (igualdad sobre texto). Requiere `Request_ID` **indizada** en ambas listas si superan los 5.000 ítems.
