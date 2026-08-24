@@ -1,0 +1,13 @@
+=With(
+    { _s: First(Filter(colTrz; Proceso = "Siembra")) };
+    "Set: " & _s.SetName & Char(10) &
+    "Job buscado: [" & _s.JobPersonal & "]" & Char(10) &
+    "¿Existe en colHrsSet?: " &
+        If(
+            IsBlank(LookUp(colHrsSet; SetName = _s.SetName And Job = _s.JobPersonal));
+            "NO — revisar nombre o que el set tenga registros";
+            "SÍ — " & LookUp(colHrsSet; SetName = _s.SetName And Job = _s.JobPersonal; Horas) & " hrs"
+        ) & Char(10) &
+    "Jobs de ese set: " &
+        Concat(Distinct(Filter(colHrsSet; SetName = _s.SetName); Job); Value; ", ")
+)
