@@ -1,0 +1,313 @@
+# Diagnóstico · `colRegSPA` regresa 0 registros
+
+Pantalla: **procesos01** → `vKpi` → `btnBuildHoras`
+Sintaxis: locale español — separador `;` · encadenado `;;`
+
+---
+
+## Lo que dicen tus labels
+
+```
+0 reg. personal | 0 combinaciones set+actividad | 0 solicitudes con horas | 202 sin horas
+```
+
+`colRegSPA` está **completamente vacío**. Como `colHrsSet` se construye a partir de ella, también sale en 0, y por eso el label de Jobs no muestra nada y el diagnóstico dice "NO".
+
+**Es un solo problema, no tres.** Arreglando la carga se arreglan los tres labels.
+
+Como antes sí funcionaba y ahora no, el cambio está en el código nuevo. Las cinco causas posibles, en orden de probabilidad, están abajo.
+
+---
+
+## PASO 1 · ¿Se está ejecutando `btnBuildHoras`?
+
+Esta es la causa más frecuente y la más fácil de descartar.
+
+### 1.1 Verificar `procesos01` → **OnVisible**
+
+La última línea debe ser exactamente:
+
+```
+Select(btnBuildHoras);; Select(btnBuildDash);; Select(btnBuildCal);; Select(btnBuildCarga)
+```
+
+**`btnBuildHoras` debe ir PRIMERO.** Si `btnBuildDash` corre antes, el `LookUp` a `colHrsSet` trabaja sobre una colección vacía.
+
+### 1.2 Probar el botón manualmente
+
+Como `btnBuildHoras` tiene `Visible: =false`, no se puede tocar en la app. Para probarlo:
+
+1. En el **modo edición** de Power Apps, selecciona `btnBuildHoras` en el árbol.
+2. Mantén **Alt** presionado y haz clic sobre el botón en el lienzo.
+3. Revisa el label de conteo.
+
+**Si después del clic manual sí aparecen registros** → el problema es el `OnVisible` (paso 1.1).
+
+**Si sigue en 0** → continúa al Paso 2.
+
+---
+
+## PASO 2 · ¿El `Filter` devuelve algo?
+
+Crea un `Label` temporal llamado **`lblTest1`** en `vKpi`.
+
+**Text**
+```
+=CountRows(
+    Filter(
+        REGISTRO_PERSONAL1;
+        Estado.Value = "Finalizado";
+        Job = "Preparacion de semilla para siembra"
+    )
+)
+```
+
+| Resultado | Significado | Ir a |
+|---|---|---|
+| **0** | El filtro base no encuentra nada | Paso 3 |
+| **Un número > 0** | El filtro funciona; falla la fecha | Paso 4 |
+
+---
+
+## PASO 3 · Aislar cuál condición falla
+
+Crea un `Label` temporal **`lblTest2`**.
+
+**Text**
+```
+="Total lista: " & CountRows(REGISTRO_PERSONAL1) & Char(10) &
+"Solo Finalizado: " & CountRows(Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado")) & Char(10) &
+"Solo ese Job: " & CountRows(Filter(REGISTRO_PERSONAL1; Job = "Preparacion de semilla para siembra")) & Char(10) &
+"Ambos: " & CountRows(Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado"; Job = "Preparacion de semilla para siembra"))
+```
+
+**AutoHeight** `=true` · **Size** `=11`
+
+### Interpretación
+
+| Lectura | Causa | Solución |
+|---|---|---|
+| `Total lista: 0` | El origen de datos se desconectó o se renombró | Panel **Datos** → reconectar `REGISTRO_PERSONAL1` |
+| `Solo Finalizado: 0` | `Estado` **no es columna Choice** | Ver §3.1 |
+| `Solo ese Job: 0` | El nombre de la actividad no coincide | Ver §3.2 |
+| `Ambos: 0` pero los dos anteriores > 0 | No hay registros finalizados de esa actividad | Es real, no es error |
+
+### 3.1 · Si `Estado` no es Choice
+
+Prueba con esta variante en `lblTest2`:
+
+```
+=CountRows(Filter(REGISTRO_PERSONAL1; Estado = "Finalizado"))
+```
+
+Si **esta sí devuelve datos**, `Estado` es columna de **texto**, no Choice.
+
+**Corrección:** en `btnBuildHoras`, cambiar en los 6 bloques:
+```
+Estado.Value = "Finalizado"
+```
+por:
+```
+Estado = "Finalizado"
+```
+
+> Este es el error más probable si antes funcionaba con otro código. Revisa cómo lo tenías escrito antes.
+
+### 3.2 · Si el nombre del Job no coincide
+
+Consulta directa a la lista (sin pasar por `colRegSPA`), en un label **`lblTest3`**:
+
+```
+=Concat(
+    Sort(
+        Distinct(
+            Filter(REGISTRO_PERSONAL1; Estado.Value = "Finalizado");
+            Job
+        );
+        Value;
+        SortOrder.Ascending
+    );
+    Value;
+    "  ||  "
+)
+```
+
+> **Ojo:** el label que tenías apuntaba a `colRegSPA`, que está vacía — por eso no mostraba nada. Este apunta directo a la lista.
+
+Copia los nombres **exactos** que aparezcan y corrígelos en los 6 bloques de `btnBuildHoras` y en `mapJobSPA`.
+
+Diferencias que rompen el `LookUp`:
+
+| Detalle | Ejemplo |
+|---|---|
+| Mayúsculas | `Colecta de Tejido` ≠ `Colecta de tejido` |
+| Singular/plural | `Envio de semilla` ≠ `Envio de semillas` |
+| Tildes | `Envío` ≠ `Envio` |
+| Espacio doble | `Colecta  de tejido` |
+
+---
+
+## PASO 4 · Si el filtro base funciona pero con fecha da 0
+
+Label temporal **`lblTest4`**:
+
+```
+="varHrsDesde: " & Text(varHrsDesde; "[$-es]dd/mm/yyyy") & Char(10) &
+"Con FechaFin: " & CountRows(
+    Filter(REGISTRO_PERSONAL1;
+        Estado.Value = "Finalizado";
+        Job = "Preparacion de semilla para siembra";
+        FechaFin >= varHrsDesde)
+) & Char(10) &
+"Con FechaInicio: " & CountRows(
+    Filter(REGISTRO_PERSONAL1;
+        Estado.Value = "Finalizado";
+        Job = "Preparacion de semilla para siembra";
+        FechaInicio >= varHrsDesde)
+) & Char(10) &
+"FechaFin vacías: " & CountRows(
+    Filter(REGISTRO_PERSONAL1;
+        Estado.Value = "Finalizado";
+        Job = "Preparacion de semilla para siembra";
+        IsBlank(FechaFin))
+)
+```
+
+**AutoHeight** `=true`
+
+### Interpretación
+
+| Lectura | Causa | Solución |
+|---|---|---|
+| `varHrsDesde` en blanco o fecha rara | La variable no se seteó | El `Set(varHrsDesde; ...)` va **antes** de los `Collect` |
+| `Con FechaFin: 0` pero `Con FechaInicio` > 0 | Los registros no tienen `FechaFin` | Ver §4.1 |
+| `FechaFin vacías` = un número alto | Registros cerrados sin fecha de fin | Ver §4.1 |
+| Ambos > 0 | La carga sí funciona; el problema está en otro lado | Ir al Paso 5 |
+
+### 4.1 · Si `FechaFin` está vacía en muchos registros
+
+Puede pasar si el cierre no la escribió correctamente. Solución tolerante — en los 6 bloques cambiar:
+
+```
+FechaFin >= varHrsDesde
+```
+por:
+```
+FechaInicio >= varHrsDesde
+```
+
+Y en la proyección del registro:
+```
+Fecha: Coalesce(_r.FechaFin; _r.FechaInicio);
+```
+
+> Así usa `FechaFin` cuando existe y cae a `FechaInicio` cuando no. El KPI de "última fecha" sigue siendo correcto para los que sí cerraron bien.
+
+---
+
+## PASO 5 · Si los filtros funcionan pero `colRegSPA` sigue vacía
+
+Entonces el problema está en el `Collect`.
+
+### 5.1 · Verificar que no haya `ClearCollect` de más
+
+En `btnBuildHoras` debe haber **un solo** `Clear(colRegSPA)` al inicio, y luego **seis `Collect`** (no `ClearCollect`).
+
+Si algún bloque quedó como `ClearCollect(colRegSPA; ...)`, cada uno borra lo anterior y solo sobrevive el último — que si está vacío, deja todo en 0.
+
+**Correcto:**
+```
+Clear(colRegSPA);;
+Collect(colRegSPA; ForAll(...));;
+Collect(colRegSPA; ForAll(...));;
+```
+
+**Incorrecto:**
+```
+ClearCollect(colRegSPA; ForAll(...));;
+ClearCollect(colRegSPA; ForAll(...));;
+```
+
+### 5.2 · Verificar el `Set(varHrsDesde)`
+
+Debe ser la **primera línea** del botón:
+
+```
+=Set(varHrsDesde; DateAdd(Today(); -365; TimeUnit.Days));;
+```
+
+Si está después de algún `Collect`, ese bloque filtra contra una variable en blanco.
+
+### 5.3 · Prueba mínima
+
+Crea un botón temporal **`btnTestCollect`** visible, con:
+
+```
+=Clear(colTest);;
+Collect(colTest;
+    ForAll(
+        Filter(REGISTRO_PERSONAL1;
+            Estado.Value = "Finalizado";
+            Job = "Preparacion de semilla para siembra") As _r;
+        { SetName: Coalesce(_r.SetName; ""); Horas: Coalesce(_r.HorasTotales; 0) }
+    )
+);;
+Notify("colTest: " & CountRows(colTest); NotificationType.Information)
+```
+
+Sin filtro de fecha. Si esto devuelve registros, el problema es la fecha (Paso 4). Si devuelve 0, es el filtro base (Paso 3).
+
+---
+
+## PASO 6 · Índices en SharePoint
+
+Con más de 5.000 ítems, un filtro sobre columna sin índice **falla silenciosamente** o devuelve parcial.
+
+`REGISTRO_PERSONAL1` → Configuración de la lista → Columnas indizadas:
+
+| Columna | Necesaria |
+|---|---|
+| `Estado` | Sí |
+| `FechaFin` | Sí |
+| `Job` | **Sí — agregar si falta** |
+
+`Job` es nueva en este enfoque. Si no la indizaste al aplicar el código de las 6 consultas, esa puede ser la causa exacta de que dejara de funcionar cuando antes sí lo hacía.
+
+---
+
+## Resumen de causas más probables
+
+Ordenadas por frecuencia en este tipo de cambio:
+
+1. **`Job` sin índice en SharePoint** — el enfoque nuevo filtra por `Job`, el anterior no. (Paso 6)
+2. **`Estado` no es Choice** — `Estado.Value` no aplica. (§3.1)
+3. **`btnBuildHoras` no se ejecuta** — orden en `OnVisible`. (Paso 1)
+4. **Nombres de Job con diferencia de escritura.** (§3.2)
+5. **`FechaFin` vacía** en los registros. (§4.1)
+
+---
+
+## Después de corregir
+
+1. Guarda y **cierra la app por completo**.
+2. Vuelve a abrirla (los cambios en `App.Formulas` requieren recarga total).
+3. Entra a la pantalla de KPIs.
+4. El label de conteo debe mostrar números distintos de cero.
+5. **Borra los labels temporales** `lblTest1` a `lblTest4`.
+
+### Label de conteo corregido
+
+Mientras diagnosticas, usa esta versión ampliada:
+
+```
+=CountRows(colRegSPA) & " reg. personal  |  " &
+CountRows(colHrsSet) & " combinaciones  |  " &
+CountRows(Filter(colTrz; HorasAct > 0)) & " con horas  |  " &
+CountRows(Filter(colTrz; HorasAct = 0)) & " sin horas" & Char(10) &
+"Desde: " & Text(varHrsDesde; "[$-es]dd/mm/yyyy") & "  |  Jobs cargados: " &
+Concat(Distinct(colRegSPA; Job); Value; ", ")
+```
+
+**AutoHeight** `=true`
+
+La última línea te dice **cuáles** de las 6 actividades sí cargaron. Si aparecen 4 de 6, sabes exactamente qué dos nombres corregir.
