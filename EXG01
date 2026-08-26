@@ -1,0 +1,631 @@
+# Export · Sincronización con Global Shipping + Días entre etapas
+
+Pantalla: **procesos01** → `vExport` → `conColTramites_1` y `conColLogistica_1`
+Sintaxis: locale español — separador `;` · encadenado `;;` · RGBA con coma decimal
+
+> **Sin correos.** Estos botones solo actualizan datos. El correo queda únicamente en los tres de Packing List.
+
+---
+
+## PARTE 0 · Verificación previa (crítica)
+
+### 0.1 Nombre de la columna de enlace
+
+En el código actual, `Button12_2` recoge de Global Shipping:
+
+```
+Request_ID: Text(ThisItem.Request_ID)
+```
+
+Confirma en SharePoint que la columna se llama **`Request_ID`** en las tres listas:
+
+| Lista | Columna | Rol |
+|---|---|---|
+| `Global Shipping Requests` | `Request_ID` | **Una fila por envío** |
+| `EXPORT-IMPORT` | `Request_ID` | Varias filas (una por SET) |
+| `SOLICITUDESPA1` | `Request_ID` | Varias filas (una por SET) |
+
+> Si en Global Shipping se llama distinto (`REQUEST_ID`, `RequestID`, `ID_Request`), ajusta el nombre en todas las fórmulas de este documento.
+
+### 0.2 Valores de `SHIPMENT_PROGRESS` en Global Shipping
+
+**Este paso no se puede saltar.** `SHIPMENT_PROGRESS` es columna **Opción (Choice)**. Si el texto que envía el botón no existe entre las opciones, SharePoint lo **ignora en silencio** — se guardan las fechas pero no el estatus.
+
+Es exactamente el problema que ya tuviste con `Estatus` en `SOLICITUDESPA1`.
+
+**Cómo ver las opciones reales:** crea un `Label` temporal:
+
+```
+=Concat(
+    Distinct('Global Shipping Requests'; SHIPMENT_PROGRESS.Value);
+    Value;
+    "  ||  "
+)
+```
+
+**AutoHeight** `=true`
+
+Copia esos textos exactos y ajusta la columna "Estatus Global" de la tabla del §0.4. Si alguno falta, agrégalo a las opciones de la columna en SharePoint.
+
+### 0.3 Columnas nuevas en `EXPORT-IMPORT`
+
+Todas tipo **Número (entero)**:
+
+| Columna | Mide |
+|---|---|
+| `DiasTesting` | Seed sample ToBRFV → Lab Report |
+| `DiasPackTreat` | Pack/treat start → Pack/treat completed |
+| `DiasIP` | IP Request → IP Received |
+| `DiasGL` | GL Request → GL Received |
+| `DiasReadyShip` | GL Received → Shipping Date |
+| `DiasTransito` | Shipping Date → Arrival to customs |
+| `DiasAduana` | Arrival to customs → Delivery Date |
+| `DiasTotalCiclo` | **CreatedDate → Delivery Date** |
+
+> Estos pares coinciden con los KPIs que ya calculas en pantalla (`Label40_3`, `Label45_3`, `Label46_18`, `Label50_10`, `Label51_5`). Ahora quedan **persistidos**, no solo mostrados.
+
+Después de crearlas: Power Apps → panel **Datos** → actualizar `EXPORT-IMPORT`.
+
+### 0.4 Mapa de etapas
+
+| # | Botón | Campo fecha | Estatus Global | Días que cierra |
+|---|---|---|---|---|
+| 1 | FPPO Sampling | `FPPO Mother plants sampling` | `FPPO Sampling` | — (inicio) |
+| 2 | Mother Plants Lab | `Mother plants Lab report` | `FPPO Sampling` | — |
+| 3 | ToBRFV Sample | `Seed sample ToBRFV` | `ToBRFV Sampling` | — |
+| 4 | Lab Report | `Lab Report` | `ToBRFV Sampling` | `DiasTesting` |
+| 5 | Pack/Treat start | `Pack/treat start` | `Packed & Treated` | — |
+| 6 | Pack/Treat End | `Pack/treat completed` | `Packed & Treated` | `DiasPackTreat` |
+| 7 | IP Request | `IP Request` | `IP Requested` | — |
+| 8 | IP Received | `IP Received` | `IP Received` | `DiasIP` |
+| 9 | GL Request | `GL Request` | `GL Requested` | — |
+| 10 | GL Received | `GL Received` | `Ready to Ship` | `DiasGL` |
+| 11 | Mark Shipped | `Shipping Date` | `En Tránsito` | `DiasReadyShip` |
+| 12 | Mark Customs | `Arrival to customs` | `Aduana Destino` | `DiasTransito` |
+| 13 | Mark Delivered | `Delivery Date` | `Entregado` | `DiasAduana` + `DiasTotalCiclo` |
+
+---
+
+## PARTE 1 · Botón sincronizador (uno solo para todos)
+
+NUEVO `Classic/Button` llamado **`btnSyncGlobalShip`**, dentro de `vExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Visible | `=false` |
+| Width | `=1` |
+| Height | `=1` |
+
+**OnSelect**
+```
+=If(
+    IsBlank(varReqEtapa);
+    Notify("Sin Request ID para sincronizar."; NotificationType.Warning);
+
+    With(
+        { _g: LookUp('Global Shipping Requests'; Request_ID = varReqEtapa) };
+        If(
+            IsBlank(_g);
+            Notify("⚠️ El ID " & varReqEtapa & " no existe en Global Shipping. Solo se actualizó EXPORT-IMPORT."; NotificationType.Warning);
+
+            Patch(
+                'Global Shipping Requests';
+                _g;
+                { SHIPMENT_PROGRESS: { Value: varEstEtapa } }
+            );;
+            Notify("✅ " & varEstEtapa & " · ID " & varReqEtapa & " · " &
+                CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)) & " set(s) + Global Shipping";
+                NotificationType.Success)
+        )
+    )
+)
+```
+
+> **Por qué un solo botón:** Power Fx no permite nombres de columna dinámicos en `Patch`, así que cada botón mantiene su propia línea de fecha. Pero la actualización a Global Shipping sí es idéntica en los 13 casos — centralizarla evita repetir el `LookUp` trece veces.
+
+---
+
+## PARTE 2 · Patrón general
+
+Cada botón sigue esta estructura. Cambia solo la línea de fecha, el estatus y (si aplica) el cálculo de días.
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "<estatus según §0.4>");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            '<campo fecha>': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+**Convención de días:** `-1` significa "no calculable" (falta la fecha de inicio). Nunca `"—"`, para que la columna siga siendo numérica y sumable.
+
+---
+
+## PARTE 3 · Código de cada botón
+
+### 3.1 `ButtonCanvas14_3` · FPPO Sampling
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "FPPO Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'FPPO Mother plants sampling': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.2 `ButtonCanvas14_6` · Mother Plants Lab
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "FPPO Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        { 'Mother plants Lab report': varFEt }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Notify("Mother plants Lab report registrado · " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)) & " set(s)"; NotificationType.Success)
+```
+
+> No cambia el estatus (sigue en FPPO Sampling), por eso no llama al sincronizador.
+
+### 3.3 `ButtonCanvas14_7` · ToBRFV Sample
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "ToBRFV Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Seed sample ToBRFV': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.4 `ButtonCanvas14_9` · Lab Report → cierra `DiasTesting`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "ToBRFV Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Lab Report': varFEt;
+            DiasTesting: If(
+                IsBlank(_e.'Seed sample ToBRFV');
+                -1;
+                Max(0; DateDiff(_e.'Seed sample ToBRFV'; varFEt; TimeUnit.Days))
+            )
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Notify("Lab Report registrado · " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)) & " set(s)"; NotificationType.Success)
+```
+
+### 3.5 `ButtonCanvas14_10` · Pack/Treat start
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "Packed & Treated");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Pack/treat start': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.6 `ButtonCanvas14_12` · Pack/Treat End → cierra `DiasPackTreat`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "Packed & Treated");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Pack/treat completed': varFEt;
+            DiasPackTreat: If(
+                IsBlank(_e.'Pack/treat start');
+                -1;
+                Max(0; DateDiff(_e.'Pack/treat start'; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.7 `ButtonCanvas14_11` · IP Request
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "IP Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'IP Request': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.8 `ButtonCanvas14_13` · IP Received → cierra `DiasIP`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "IP Received");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'IP Received': varFEt;
+            DiasIP: If(
+                IsBlank(_e.'IP Request');
+                -1;
+                Max(0; DateDiff(_e.'IP Request'; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.9 `ButtonCanvas14_14` · GL Request
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "GL Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'GL Request': varFEt;
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.10 `ButtonCanvas14_15` · GL Received → cierra `DiasGL`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "Ready to Ship");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'GL Received': varFEt;
+            DiasGL: If(
+                IsBlank(_e.'GL Request');
+                -1;
+                Max(0; DateDiff(_e.'GL Request'; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.11 `ButtonCanvas14_16` · Mark Shipped → cierra `DiasReadyShip`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "En Tránsito");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Shipping Date': varFEt;
+            DiasReadyShip: If(
+                IsBlank(_e.'GL Received');
+                -1;
+                Max(0; DateDiff(_e.'GL Received'; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.12 `ButtonCanvas14_17` · Mark Customs → cierra `DiasTransito`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "Aduana Destino");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Arrival to customs': varFEt;
+            DiasTransito: If(
+                IsBlank(_e.'Shipping Date');
+                -1;
+                Max(0; DateDiff(_e.'Shipping Date'; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+### 3.13 `ButtonCanvas14_18` · Mark Delivered → cierra `DiasAduana` + `DiasTotalCiclo`
+
+```
+=Set(varFEt; Today());;
+Set(varReqEtapa; ThisItem.Request_ID);;
+Set(varEstEtapa; "Entregado");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'Delivery Date': varFEt;
+            DiasAduana: If(
+                IsBlank(_e.'Arrival to customs');
+                -1;
+                Max(0; DateDiff(_e.'Arrival to customs'; varFEt; TimeUnit.Days))
+            );
+            DiasTotalCiclo: If(
+                IsBlank(_e.CreatedDate);
+                -1;
+                Max(0; DateDiff(_e.CreatedDate; varFEt; TimeUnit.Days))
+            );
+            SHIPMENT_PROGRESS: { Value: varEstEtapa }
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Select(btnSyncGlobalShip)
+```
+
+> **`DiasTotalCiclo`** es el que pediste: desde la fecha de creación del envío hasta la entrega. Es el lead time completo de exportación.
+
+---
+
+## PARTE 4 · Datepickers
+
+Cuando se corrige una fecha manualmente, hay que recalcular los días del par correspondiente.
+
+### 4.1 Patrón para los datepickers que cierran un par
+
+Ejemplo con `DatePicker1_13` (IP Received):
+
+```
+=Set(varFEt; Self.SelectedDate);;
+Set(varReqEtapa; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e;
+        {
+            'IP Received': varFEt;
+            DiasIP: If(
+                IsBlank(_e.'IP Request');
+                -1;
+                Max(0; DateDiff(_e.'IP Request'; varFEt; TimeUnit.Days))
+            )
+        }
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Notify("Fecha actualizada en " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)) & " set(s)"; NotificationType.Success)
+```
+
+Aplica la misma estructura a: `DatePicker1_9` (Lab Report → `DiasTesting`), `DatePicker1_12` (Pack completed → `DiasPackTreat`), `DatePicker1_15` (GL Received → `DiasGL`), `DatePicker1_16` (Shipping → `DiasReadyShip`), `DatePicker1_17` (Customs → `DiasTransito`), `DatePicker1_18` (Delivery → `DiasAduana` y `DiasTotalCiclo`).
+
+### 4.2 Datepickers que solo abren
+
+`DatePicker1_3`, `DatePicker1_6`, `DatePicker1_7`, `DatePicker1_10`, `DatePicker1_11`, `DatePicker1_14`:
+
+```
+=Set(varFEt; Self.SelectedDate);;
+Set(varReqEtapa; ThisItem.Request_ID);;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa) As _e;
+    Patch('EXPORT-IMPORT'; _e; { '<campo fecha>': varFEt })
+);;
+Refresh('EXPORT-IMPORT');;
+Notify("Fecha actualizada en " & CountRows(Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)) & " set(s)"; NotificationType.Success)
+```
+
+---
+
+## PARTE 5 · Mostrar los días guardados
+
+Los KPIs que ya tienes (`Label40_3`, `Label45_3`, etc.) calculan al vuelo. Ahora pueden leer el valor persistido — más rápido y consistente con lo que verá Power BI.
+
+| Control | Text |
+|---|---|
+| `Label40_3` (Testing) | `=If(ThisItem.DiasTesting < 0; "Pendiente"; ThisItem.DiasTesting & " days")` |
+| `Label45_3` (Pack/treat) | `=If(ThisItem.DiasPackTreat < 0; "Pendiente"; ThisItem.DiasPackTreat & " days")` |
+| `Label46_18` (IP) | `=If(ThisItem.DiasIP < 0; "Pendiente"; ThisItem.DiasIP & " days")` |
+| `Label50_10` (GL) | `=If(ThisItem.DiasGL < 0; "Pendiente"; ThisItem.DiasGL & " days")` |
+| `Label51_5` (Transit) | `=If(ThisItem.DiasTransito < 0; "Pendiente"; ThisItem.DiasTransito & " days")` |
+
+### 5.1 NUEVO indicador de ciclo total
+
+`Label` **`lblCicloTotal`** dentro de `conColLogistica_1`:
+
+**Text**
+```
+=If(
+    ThisItem.DiasTotalCiclo < 0;
+    "Ciclo total: en curso (" & If(IsBlank(ThisItem.CreatedDate); "s/f"; DateDiff(ThisItem.CreatedDate; Today(); TimeUnit.Days) & " d") & ")";
+    "Ciclo total: " & ThisItem.DiasTotalCiclo & " días"
+)
+```
+
+**Color**
+```
+=If(
+    ThisItem.DiasTotalCiclo < 0; clrMuted;
+    ThisItem.DiasTotalCiclo > 45; ColorValue("#DC2626");
+    ThisItem.DiasTotalCiclo > 30; ColorValue("#E8A93C");
+    ColorValue("#1E7A33")
+)
+```
+
+| Propiedad | Fórmula |
+|---|---|
+| FontWeight | `=FontWeight.Semibold` |
+| Size | `=11` |
+| Align | `=Align.Center` |
+| Width | `=Parent.Width` |
+
+> Ajusta los umbrales 45 / 30 a lo que sea realista en tu operación.
+
+---
+
+## PARTE 6 · Verificar sincronización con Global Shipping
+
+NUEVO `Label` **`lblSyncGlobal`** dentro de `Container19_1`:
+
+**Text**
+```
+=With(
+    {
+        _e: First(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID));
+        _g: LookUp('Global Shipping Requests'; Request_ID = varFiltroID)
+    };
+    If(
+        IsBlank(_g);
+        "⚠️ ID no encontrado en Global Shipping";
+        _e.SHIPMENT_PROGRESS.Value = _g.SHIPMENT_PROGRESS.Value;
+        "✔ Sincronizado: " & _g.SHIPMENT_PROGRESS.Value;
+        "⚠️ Desincronizado · Export: " & Coalesce(_e.SHIPMENT_PROGRESS.Value; "s/e") &
+            "  |  Global: " & Coalesce(_g.SHIPMENT_PROGRESS.Value; "s/e")
+    )
+)
+```
+
+**Color**
+```
+=With(
+    {
+        _e: First(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID));
+        _g: LookUp('Global Shipping Requests'; Request_ID = varFiltroID)
+    };
+    If(
+        Not(IsBlank(_g)) And _e.SHIPMENT_PROGRESS.Value = _g.SHIPMENT_PROGRESS.Value;
+        ColorValue("#1E7A33");
+        ColorValue("#DC2626")
+    )
+)
+```
+
+| Propiedad | Fórmula |
+|---|---|
+| Size | `=10` |
+| Align | `=Align.Center` |
+| FillPortions | `=1` |
+
+Si sale en rojo, la opción de estatus no existe en Global Shipping (§0.2).
+
+---
+
+## PARTE 7 · Orden de implementación
+
+1. Verificar el nombre de `Request_ID` en las tres listas (§0.1).
+2. **Listar las opciones reales de `SHIPMENT_PROGRESS`** con el label temporal (§0.2) y ajustar la tabla §0.4.
+3. Crear las 8 columnas de días en `EXPORT-IMPORT` (§0.3) y refrescar el origen.
+4. Crear `btnSyncGlobalShip` (§1).
+5. Reemplazar el `OnSelect` de los 13 botones (§3).
+6. Reemplazar el `OnChange` de los datepickers (§4).
+7. Actualizar los labels de KPI (§5) y crear `lblCicloTotal`.
+8. Crear `lblSyncGlobal` (§6).
+9. Borrar el label temporal del §0.2.
+
+---
+
+## PARTE 8 · Verificación
+
+| Prueba | Resultado esperado |
+|---|---|
+| ID con 3 sets → "IP Request" | Los 3 con fecha; aviso menciona 3 set(s) + Global Shipping |
+| Revisar `Global Shipping Requests` | La fila del ID con `SHIPMENT_PROGRESS` = IP Requested |
+| Al día siguiente → "IP Received" | `DiasIP` = 1 en los 3 sets |
+| `lblSyncGlobal` | En verde con el estatus |
+| "Mark Delivered" | `DiasAduana` y `DiasTotalCiclo` con valores |
+| Corregir fecha en datepicker de IP Received | `DiasIP` se recalcula solo |
+| Ningún botón de esta sección | **No envía correo** |
+
+**Si `lblSyncGlobal` sale en rojo:** la opción no existe en la columna Choice de Global Shipping. Vuelve al §0.2.
+
+**Si las fechas se guardan pero el estatus no:** mismo diagnóstico — texto que no coincide con las opciones.
+
+---
+
+## Notas de diseño
+
+**¿Por qué `Max(0; ...)` en los días?**
+Si alguien corrige una fecha y queda anterior a la de inicio, `DateDiff` daría negativo y se confundiría con el centinela `-1`. `Max(0; ...)` lo deja en 0.
+
+**¿Por qué `-1` y no `Blank()`?**
+Una columna numérica con blancos rompe los promedios (`Average` los ignora, pero `Sum` sobre blancos con otras operaciones puede fallar). `-1` es explícito y se filtra con `>= 0` en cualquier análisis.
+
+**Global Shipping tiene una sola fila por envío.**
+Por eso usa `LookUp` y `Patch` directo, no `ForAll`. Los sets viven en `EXPORT-IMPORT`; Global Shipping solo lleva el estado del envío como conjunto.
+
+**`SOLICITUDESPA1` no se toca aquí.**
+Esa lista lleva el flujo interno de SPA (Solicitado → Recibido → En proceso → Finalizado → Packing List). El flujo de exportación posterior (IP, GL, aduanas) es logística externa y vive en `EXPORT-IMPORT` + Global Shipping. Mezclarlos haría que un envío en aduanas apareciera como "no finalizado" en los KPIs de SPA.
+
+**Delegación.**
+`Filter('EXPORT-IMPORT'; Request_ID = varReqEtapa)` y `LookUp('Global Shipping Requests'; Request_ID = varReqEtapa)` son delegables. Requieren `Request_ID` **indizada** en ambas listas si superan los 5.000 ítems.
