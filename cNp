@@ -1,0 +1,76 @@
+1. App.Formulas — agregar
+rutaPesoCorreos =
+Table(
+    {Cultivo: "Tomato";     Para: "tomate1@corro.com;tomate2@corro.com";           Copia: "supervisor.spa@corro.com"};
+    {Cultivo: "Pepper";     Para: "chile1@corro.com;chile2@corro.com";             Copia: "supervisor.spa@corro.com"};
+    {Cultivo: "Melon";      Para: "cucurbitaceas@corro.com;peso.cuc@corro.com";    Copia: "supervisor.spa@corro.com"};
+    {Cultivo: "Watermelon"; Para: "cucurbitaceas@corro.com;peso.cuc@corro.com";    Copia: "supervisor.spa@corro.com"};
+    {Cultivo: "Cucumber";   Para: "cucurbitaceas@corro.com;peso.cuc@corro.com";    Copia: "supervisor.spa@corro.com"}
+);;
+
+gloMailPesoDefault = "spa.guatemala@corro.com";;
+
+Reglas:
+
+Los tres cultivos de cucurbitáceas comparten los mismos correos — repite el texto en cada fila.
+Cultivo debe coincidir exacto con DATASUMMARY1.Crop.Value (Tomato, Pepper, Melon, Watermelon, Cucumber).
+Correos en minúsculas, separador ; sin espacios.
+gloMailPesoDefault cubre cualquier cultivo que no esté en la tabla.
+2. btnRegistrarPeso → OnSelect
+
+En el bloque Office365Outlook.SendEmailV2, reemplaza el destinatario y la copia.
+
+Antes del Office365Outlook, agrega:
+
+Set(varRutaPeso; LookUp(rutaPesoCorreos; Cultivo = gSetPeso.Crop.Value));;
+
+Y en la llamada, cambia:
+
+Office365Outlook.SendEmailV2(
+    Coalesce(varRutaPeso.Para; gloMailPesoDefault);
+    "SPA · Peso " & gNumPeso & " · " & gSetPeso.SetName & " · " & gSetPeso.Crop.Value;
+
+Y al final, el Cc:
+
+    { Cc: Coalesce(varRutaPeso.Copia; "") }
+)
+
+El asunto ahora incluye el cultivo — quien recibe identifica de inmediato si le corresponde.
+
+3. btnFinCosecha → mismo criterio (opcional)
+
+Si también quieres ruteo por cultivo en fin de cosecha, aplica el mismo patrón. Ese botón hoy no envía correo; si lo necesitas, avísame y te lo armo completo.
+
+4. Verificar la cobertura de cultivos
+
+Label temporal para detectar cultivos sin ruta asignada:
+
+lblCultivosSinRuta → Text
+
+=With(
+    { _sin: Filter(Distinct(DATASUMMARY1; Crop.Value); Not(Value in rutaPesoCorreos.Cultivo)) };
+    If(
+        CountRows(_sin) = 0;
+        "✔ Todos los cultivos tienen correo asignado";
+        "⚠️ Sin ruta: " & Concat(_sin; Value; ", ") & " → irán a " & gloMailPesoDefault
+    )
+)
+
+Color
+
+=If(
+    CountRows(Filter(Distinct(DATASUMMARY1; Crop.Value); Not(Value in rutaPesoCorreos.Cultivo))) = 0;
+    ColorValue("#1E7A33");
+    ColorValue("#DC2626")
+)
+
+Si sale en rojo con Onion o Corns (que están en tu combo de creación de sets), agrega esas filas a rutaPesoCorreos.
+
+5. Mostrar el destino en el tooltip
+
+Para que el usuario sepa a quién va antes de presionar:
+
+btnRegistrarPeso → Tooltip (agregar al final de lo que ya tiene)
+
+& Char(10) & "Notifica a: " &
+Coalesce(LookUp(rutaPesoCorreos; Cultivo = ThisItem.Crop.Value; Para); gloMailPesoDefault)
