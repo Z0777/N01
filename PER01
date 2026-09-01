@@ -1,0 +1,550 @@
+1. Variables / colecciones nuevas que se usan
+colFiltroAct → actividades seleccionadas (columna Valor)
+colFiltroPers → personas seleccionadas (columna Valor)
+gRendMedSet, gMedHorasSet, gMedMatSet → medianas globales del set filtrado
+gOrdRendF, gOrdRendA → estado de orden de los botones REND
+2. Carga base (agregar rendimiento por registro, necesario para la mediana)
+
+Control: btnCargarAnaSet
+Ubicación: scrSets > conRaiz_Sets > conVista_Detalle > Container17
+Propiedad: OnSelect
+
+=Set(gSetAnalizado; gSetActivo.SetName);;
+ClearCollect(
+    colBaseSet;
+    ForAll(
+        Filter(
+            REGISTRO_PERSONAL1;
+            SetName = gSetActivo.SetName;
+            Estado.Value = "Finalizado";
+            FechaInicio >= Coalesce(dpDesde.SelectedDate; Date(2020; 1; 1));
+            FechaInicio < DateAdd(Coalesce(dpHasta.SelectedDate; Today()); 1; TimeUnit.Days)
+        ) As _r;
+        With(
+            {
+                _h: Coalesce(_r.HorasTotales; 0);
+                _m: Value(Coalesce(_r.CantidadMateriales; "0"))
+            };
+            {
+                SetName:   Coalesce(_r.SetName; "");
+                FechaRaw:  Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                FechaTxt:  Text(_r.FechaInicio; "[$-es]dd/mm/yyyy");
+                Codigo:    Coalesce(_r.CODIGO; "s/c");
+                Persona:   Coalesce(_r.NombrePersona; "Sin nombre");
+                Actividad: Coalesce(_r.Job; "Sin actividad");
+                SubAct:    Coalesce(_r.SubActividad.Value; "N/A");
+                Horas:     _h;
+                Mat:       _m;
+                Frutos:    Coalesce(_r.NumeroFrutos; 0);
+                Rend:      If(_h > 0; _m / _h; 0)
+            }
+        )
+    )
+);;
+Set(gSetTrunc; CountRows(colBaseSet) >= 2000);;
+Select(btnRecalcAnaSet)
+3. Recálculo con filtros múltiples + mediana
+
+Control: btnRecalcAnaSet
+Ubicación: scrSets > conRaiz_Sets > conVista_Detalle > Container17
+Propiedad: OnSelect
+
+=ClearCollect(
+    colSetFiltrado;
+    Filter(
+        colBaseSet;
+        SetName = gSetActivo.SetName;
+        (IsEmpty(colFiltroAct)  Or Actividad in colFiltroAct.Valor);
+        (IsEmpty(colFiltroPers) Or Persona   in colFiltroPers.Valor);
+        (IsBlank(dpDesde.SelectedDate) Or FechaRaw >= dpDesde.SelectedDate);
+        (IsBlank(dpHasta.SelectedDate) Or FechaRaw <= dpHasta.SelectedDate)
+    )
+);;
+Set(
+    gRendPromSet;
+    With({ _h: Sum(colSetFiltrado; Horas); _m: Sum(colSetFiltrado; Mat) }; If(_h > 0; _m / _h; 0))
+);;
+Set(
+    gRendMedSet;
+    With(
+        { _o: Sort(colSetFiltrado; Rend; SortOrder.Ascending); _n: CountRows(colSetFiltrado) };
+        If(
+            _n = 0; 0;
+            Mod(_n; 2) = 1; Last(FirstN(_o; (_n + 1) / 2)).Rend;
+            (Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2
+        )
+    )
+);;
+Set(
+    gMedHorasSet;
+    With(
+        { _o: Sort(colSetFiltrado; Horas; SortOrder.Ascending); _n: CountRows(colSetFiltrado) };
+        If(
+            _n = 0; 0;
+            Mod(_n; 2) = 1; Last(FirstN(_o; (_n + 1) / 2)).Horas;
+            (Last(FirstN(_o; _n / 2)).Horas + Last(FirstN(_o; _n / 2 + 1)).Horas) / 2
+        )
+    )
+);;
+Set(
+    gMedMatSet;
+    With(
+        { _o: Sort(colSetFiltrado; Mat; SortOrder.Ascending); _n: CountRows(colSetFiltrado) };
+        If(
+            _n = 0; 0;
+            Mod(_n; 2) = 1; Last(FirstN(_o; (_n + 1) / 2)).Mat;
+            (Last(FirstN(_o; _n / 2)).Mat + Last(FirstN(_o; _n / 2 + 1)).Mat) / 2
+        )
+    )
+);;
+ClearCollect(
+    colAnaSetFecha;
+    ForAll(
+        GroupBy(colSetFiltrado; 'FechaRaw'; 'FechaTxt'; 'Codigo'; 'Persona'; 'Actividad'; 'SubAct'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending)
+            };
+            {
+                FechaRaw:  _g.FechaRaw;
+                Fecha:     _g.FechaTxt;
+                Codigo:    _g.Codigo;
+                Persona:   _g.Persona;
+                Actividad: _g.Actividad;
+                SubAct:    _g.SubAct;
+                Horas:     Round(_h; 2);
+                Mat:       _m;
+                Frutos:    Sum(_g._d; Frutos);
+                Registros: _n;
+                Rend:      If(_h > 0; Round(_m / _h; 1); 0);
+                Mediana:   If(
+                               _n = 0; 0;
+                               Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                               Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                           )
+            }
+        )
+    )
+);;
+ClearCollect(
+    colAnaSetAcum;
+    ForAll(
+        GroupBy(colSetFiltrado; 'Codigo'; 'Persona'; 'Actividad'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending)
+            };
+            {
+                Codigo:    _g.Codigo;
+                Persona:   _g.Persona;
+                Actividad: _g.Actividad;
+                SubAct:    Concat(Distinct(_g._d; SubAct); Value; ", ");
+                Dias:      CountRows(Distinct(_g._d; FechaTxt));
+                Registros: _n;
+                Desde:     First(Sort(_g._d; FechaRaw; SortOrder.Ascending)).FechaTxt;
+                Hasta:     First(Sort(_g._d; FechaRaw; SortOrder.Descending)).FechaTxt;
+                Horas:     Round(_h; 2);
+                Mat:       _m;
+                Frutos:    Sum(_g._d; Frutos);
+                Rend:      If(_h > 0; Round(_m / _h; 1); 0);
+                Mediana:   If(
+                               _n = 0; 0;
+                               Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                               Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                           )
+            }
+        )
+    )
+);;
+Set(gSetHayFrutos; Sum(colSetFiltrado; Frutos) > 0);;
+ClearCollect(
+    colKpiSet;
+    With(
+        {
+            _h: Sum(colSetFiltrado; Horas);
+            _m: Sum(colSetFiltrado; Mat);
+            _f: Sum(colSetFiltrado; Frutos)
+        };
+        Table(
+            { Orden: 1; Titulo: "HORAS INVERTIDAS";     Valor: Text(Round(_h; 2)); Hex: "#0E7C86"; Mostrar: true };
+            { Orden: 2; Titulo: "MAT / OPERACIONES";    Valor: Text(_m); Hex: "#2F9E44"; Mostrar: true };
+            { Orden: 3; Titulo: "REND PROMEDIO (m/h)";  Valor: If(_h > 0; Text(Round(_m / _h; 1)); "0"); Hex: "#2563EB"; Mostrar: true };
+            { Orden: 4; Titulo: "REND MEDIANA (m/h)";   Valor: Text(Round(gRendMedSet; 1)); Hex: "#7C3AED"; Mostrar: true };
+            { Orden: 5; Titulo: "MEDIANA HORAS";        Valor: Text(Round(gMedHorasSet; 2)); Hex: "#0E7C86"; Mostrar: true };
+            { Orden: 6; Titulo: "MEDIANA MAT/OPER";     Valor: Text(Round(gMedMatSet; 1)); Hex: "#2F9E44"; Mostrar: true };
+            { Orden: 7; Titulo: "FRUTOS";               Valor: Text(_f); Hex: "#E8A93C"; Mostrar: _f > 0 };
+            { Orden: 8; Titulo: "PERSONAS";             Valor: Text(CountRows(Distinct(colSetFiltrado; Persona))); Hex: "#1E7A33"; Mostrar: true };
+            { Orden: 9; Titulo: "DÍAS TRABAJADOS";      Valor: Text(CountRows(Distinct(colSetFiltrado; FechaTxt))); Hex: "#6B7A6F"; Mostrar: true };
+            { Orden: 10; Titulo: "REGISTROS";           Valor: Text(CountRows(colSetFiltrado)); Hex: "#94A5B3"; Mostrar: true }
+        )
+    )
+)
+
+Control: lblKpiValor
+Ubicación: conVista_AnaSet > Container46 > galKpiSet > Container121
+Propiedad: Text (el RoundUp sobre texto rompe los decimales de la mediana)
+
+=ThisItem.Valor
+4. Combobox reemplazados por el panel
+
+Control: ddactividades — Ubicación: conVista_AnaSet > Container45 — Propiedad: Visible
+
+=false
+
+Control: ddpersona — misma ubicación — Propiedad: Visible
+
+=false
+
+Control: Actividad (botón "Filtros") — Ubicación: conVista_AnaSet > Container45 — Propiedad: Text
+
+="Filtros (" & CountRows(colFiltroAct) + CountRows(colFiltroPers) & ")"
+
+Control: Actividad — Propiedad: OnSelect
+
+=Reset(txtBuscarActFiltro);;
+Reset(txtBuscarPersFiltro);;
+Set(varInformation; true)
+
+Control: Icon24 (limpiar) — Ubicación: conVista_AnaSet > Container45 — Propiedad: OnSelect
+
+=Reset(dpDesde);;
+Reset(dpHasta);;
+Clear(colFiltroAct);;
+Clear(colFiltroPers);;
+Reset(txtBuscarActFiltro);;
+Reset(txtBuscarPersFiltro);;
+Select(btnRecalcAnaSet)
+
+Control: conVista_AnaSet — Propiedad: Height (espacio para los chips)
+
+=If(Parent.Width >= bpTablet; 195; 265)
+5. Visualización del filtro aplicado (chips con quitar)
+
+NUEVO GroupContainer (AutoLayout) conChipsFiltro
+Ubicación: conVista_AnaSet, insertar entre Container45 y Container46
+
+Propiedad	Fórmula
+FillPortions	=0
+Height	=40
+LayoutDirection	=LayoutDirection.Horizontal
+LayoutAlignItems	=LayoutAlignItems.Center
+PaddingLeft / PaddingRight	=8
+Width	=Parent.Width
+
+NUEVO Label lblSinFiltro dentro de conChipsFiltro — Propiedad: Text
+
+="Sin filtros: mostrando todas las actividades y personas"
+
+Propiedad: Visible
+
+=IsEmpty(colFiltroAct) And IsEmpty(colFiltroPers)
+
+NUEVA Gallery (horizontal) galChipsFiltro dentro de conChipsFiltro
+
+Propiedad: Items
+
+=Ungroup(
+    Table(
+        { _t: ForAll(colFiltroAct  As _a; { Tipo: "Actividad"; Valor: _a.Valor }) };
+        { _t: ForAll(colFiltroPers As _p; { Tipo: "Persona";   Valor: _p.Valor }) }
+    );
+    _t
+)
+
+Propiedad: TemplateSize → =170 Propiedad: Height → =36 Propiedad: Width → =Parent.Width Propiedad: ShowScrollbar → =false
+
+Dentro de la plantilla, NUEVO Label lblChipTxt — Propiedad: Text
+
+=If(ThisItem.Tipo = "Actividad"; "🏷️ "; "👤 ") & ThisItem.Valor
+
+Propiedad: Fill
+
+=If(ThisItem.Tipo = "Actividad"; RGBA(37; 99; 235; 0,15); RGBA(47; 158; 68; 0,15))
+
+NUEVO ModernIcon icoChipQuitar dentro de la plantilla — Propiedad: OnSelect
+
+=If(
+    ThisItem.Tipo = "Actividad";
+    RemoveIf(colFiltroAct;  Valor = ThisItem.Valor);
+    RemoveIf(colFiltroPers; Valor = ThisItem.Valor)
+);;
+Select(btnRecalcAnaSet)
+
+Propiedad: Icon → ="Dismiss" Propiedad: IconColor → =RGBA(220; 38; 38; 1)
+
+6. Panel popup (reutilizando conDrawerTL_3)
+
+Control: Label3_4 — Ubicación: conDrawerTL_3 > Selection > Container28_2 > Area > Encabezadoarea — Propiedad: Text
+
+="SELECCIONA PERSONA(S)  —  " & CountRows(colFiltroPers) & " seleccionada(s)"
+
+NUEVO Classic/TextInput txtBuscarPersFiltro
+Ubicación: conDrawerTL_3 > Selection > Container28_2 > Area > Galeria (antes de glAreas)
+
+Propiedad	Fórmula
+Default	=""
+HintText	="Buscar persona..."
+DelayOutput	=true
+Height	=30
+Width	=Parent.Width - 16
+Align	=Align.Center
+
+Control: glAreas — Ubicación: ... > Area > Galeria — Propiedad: Items
+
+=Sort(
+    Filter(
+        Distinct(colBaseSet; Persona);
+        txtBuscarPersFiltro.Text = "" Or StartsWith(Value; txtBuscarPersFiltro.Text)
+    );
+    Value;
+    SortOrder.Ascending
+)
+
+Control: Checkbox2_2 — Ubicación: glAreas > Container36_11 — Propiedad: Default
+
+=ThisItem.Value in colFiltroPers.Valor
+
+Propiedad: OnCheck
+
+=If(
+    !(ThisItem.Value in colFiltroPers.Valor);
+    Collect(colFiltroPers; { Valor: ThisItem.Value })
+);;
+Select(btnRecalcAnaSet)
+
+Propiedad: OnUncheck
+
+=RemoveIf(colFiltroPers; Valor = ThisItem.Value);;
+Select(btnRecalcAnaSet)
+
+Control: Button2_2 — Ubicación: glAreas — Propiedad: OnSelect
+
+=Select(Parent);;
+If(
+    ThisItem.Value in colFiltroPers.Valor;
+    RemoveIf(colFiltroPers; Valor = ThisItem.Value);
+    Collect(colFiltroPers; { Valor: ThisItem.Value })
+);;
+Select(btnRecalcAnaSet)
+
+Propiedad: Fill
+
+=If(ThisItem.Value in colFiltroPers.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+
+Control: Label3_5 — Ubicación: conDrawerTL_3 > Selection > Container28_2 > Persona > Container34_1 — Propiedad: Text
+
+="SELECCIONA ACTIVIDAD(ES)  —  " & CountRows(colFiltroAct) & " seleccionada(s)"
+
+NUEVO Classic/TextInput txtBuscarActFiltro
+Ubicación: conDrawerTL_3 > Selection > Container28_2 > Persona > Container35_1 (antes de glPersonal)
+
+Propiedad	Fórmula
+Default	=""
+HintText	="Buscar actividad..."
+DelayOutput	=true
+Height	=30
+Width	=Parent.Width - 16
+Align	=Align.Center
+
+Control: glPersonal — Ubicación: ... > Persona > Container35_1 — Propiedad: Items
+
+=Sort(
+    Filter(
+        Distinct(colBaseSet; Actividad);
+        txtBuscarActFiltro.Text = "" Or StartsWith(Value; txtBuscarActFiltro.Text)
+    );
+    Value;
+    SortOrder.Ascending
+)
+
+Control: Checkbox3_8 — Ubicación: glPersonal > Container36_12 — Propiedad: Default
+
+=ThisItem.Value in colFiltroAct.Valor
+
+Propiedad: OnCheck
+
+=If(
+    !(ThisItem.Value in colFiltroAct.Valor);
+    Collect(colFiltroAct; { Valor: ThisItem.Value })
+);;
+Select(btnRecalcAnaSet)
+
+Propiedad: OnUncheck
+
+=RemoveIf(colFiltroAct; Valor = ThisItem.Value);;
+Select(btnRecalcAnaSet)
+
+Control: Button2_3 — Ubicación: glPersonal — Propiedad: OnSelect
+
+=Select(Parent);;
+If(
+    ThisItem.Value in colFiltroAct.Valor;
+    RemoveIf(colFiltroAct; Valor = ThisItem.Value);
+    Collect(colFiltroAct; { Valor: ThisItem.Value })
+);;
+Select(btnRecalcAnaSet)
+
+Propiedad: Fill
+
+=If(ThisItem.Value in colFiltroAct.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+
+Control: Button5_2 (pie del panel) — Ubicación: conDrawerTL_3 > Selection — Propiedad: OnSelect
+
+=Select(btnRecalcAnaSet);;
+Set(varInformation; false)
+
+Propiedad: Text
+
+="Aplicar (" & CountRows(colFiltroAct) & " act. / " & CountRows(colFiltroPers) & " pers.)"
+
+Propiedad: DisplayMode
+
+=DisplayMode.Edit
+
+NUEVO Classic/Button btnLimpiarPanel
+Ubicación: conDrawerTL_3 > Selection (junto a Button5_2)
+
+Propiedad: OnSelect
+
+=Clear(colFiltroAct);;
+Clear(colFiltroPers);;
+Reset(txtBuscarActFiltro);;
+Reset(txtBuscarPersFiltro);;
+Select(btnRecalcAnaSet)
+
+Propiedad: Text → ="Limpiar selección" Propiedad: Fill → =RGBA(220; 38; 38; 1) Propiedad: Height → =30 Propiedad: Width → =200
+
+7. Botón de orden REND + columna MEDIANA — Análisis por fecha
+
+Control: Button29 — Ubicación: conTablaSetFecha > Container52_1 — Propiedad: OnSelect
+
+=Set(gOrdRendF; Switch(gOrdRendF; "Desc"; "Asc"; "Asc"; ""; "Desc"))
+
+Propiedad: Text
+
+="REND (m/h) " & Switch(gOrdRendF; "Desc"; "▼"; "Asc"; "▲"; "⇅")
+
+Propiedad: Fill
+
+=If(IsBlank(gOrdRendF) Or gOrdRendF = ""; colDark; colGreen)
+
+Propiedad: FillPortions → =1 Propiedad: AlignInContainer → =AlignInContainer.Stretch
+
+Control: galAnaSetFecha — Ubicación: conTablaSetFecha — Propiedad: Items
+
+=Switch(
+    gOrdRendF;
+    "Desc"; Sort(colAnaSetFecha; Rend; SortOrder.Descending);
+    "Asc";  Sort(colAnaSetFecha; Rend; SortOrder.Ascending);
+    Sort(colAnaSetFecha; FechaRaw; SortOrder.Descending)
+)
+
+NUEVO Label lblHdrMedianaF (encabezado) — Ubicación: conTablaSetFecha > Container52_1, después de Button29
+
+Propiedad	Fórmula
+Text	="MEDIANA (m/h)"
+Align	=Align.Center
+AlignInContainer	=AlignInContainer.Stretch
+FillPortions	=1
+FontWeight	=FontWeight.Semibold
+Size	=If(Parent.Width >= bpTablet; 11; 9)
+
+NUEVO Label lblMedianaF (fila) — Ubicación: conTablaSetFecha > galAnaSetFecha > Container52, después de Label56
+
+Propiedad: Text
+
+=Text(ThisItem.Mediana; "[$-es]0,0")
+
+Propiedad: Color
+
+=If(
+    gRendMedSet <= 0; colGris;
+    ThisItem.Mediana >= gRendMedSet; ColorValue("#1E7A33");
+    ColorValue("#DC2626")
+)
+
+Propiedad: Align → =Align.Center Propiedad: FillPortions → =1 Propiedad: Size → =If(Parent.Width >= bpTablet; 11; 9)
+
+8. Botón de orden REND + columna MEDIANA — Análisis acumulado
+
+NUEVO Classic/Button btnOrdRendAcum
+Ubicación: conTablaSetAcum > Container52_4, en el lugar de Label134_1 (pon Label134_1.Visible = false)
+
+Propiedad: OnSelect
+
+=Set(gOrdRendA; Switch(gOrdRendA; "Desc"; "Asc"; "Asc"; ""; "Desc"))
+
+Propiedad: Text
+
+="REND (m/h) " & Switch(gOrdRendA; "Desc"; "▼"; "Asc"; "▲"; "⇅")
+
+Propiedad: Fill
+
+=If(IsBlank(gOrdRendA) Or gOrdRendA = ""; colDark; colGreen)
+
+Propiedad: Height → =30 Propiedad: FillPortions → =1 Propiedad: AlignInContainer → =AlignInContainer.Stretch Propiedad: Size → =10
+
+Control: Label134_1 — Ubicación: conTablaSetAcum > Container52_4 — Propiedad: Visible
+
+=false
+
+Control: galAnaSetAcum — Ubicación: conTablaSetAcum — Propiedad: Items
+
+=Switch(
+    gOrdRendA;
+    "Asc";  Sort(colAnaSetAcum; Rend; SortOrder.Ascending);
+    "Desc"; Sort(colAnaSetAcum; Rend; SortOrder.Descending);
+    Sort(colAnaSetAcum; Horas; SortOrder.Descending)
+)
+
+NUEVO Label lblHdrMedianaA (encabezado) — Ubicación: conTablaSetAcum > Container52_4, después de btnOrdRendAcum
+
+Propiedad	Fórmula
+Text	="MEDIANA (m/h)"
+Align	=Align.Center
+AlignInContainer	=AlignInContainer.Stretch
+FillPortions	=1
+FontWeight	=FontWeight.Semibold
+Size	=If(Parent.Width >= bpTablet; 11; 9)
+
+NUEVO Label lblMedianaA (fila) — Ubicación: conTablaSetAcum > galAnaSetAcum > Container52_5, después de Label56_3
+
+Propiedad: Text
+
+=Text(ThisItem.Mediana; "[$-es]0,0")
+
+Propiedad: Color
+
+=If(
+    gRendMedSet <= 0; colGris;
+    ThisItem.Mediana >= gRendMedSet; ColorValue("#1E7A33");
+    ColorValue("#DC2626")
+)
+
+Propiedad: Align → =Align.Center Propiedad: FillPortions → =1 Propiedad: Size → =If(Parent.Width >= bpTablet; 11; 9)
+
+NUEVO Label lblVsMedianaA (columna "VS MEDIANA") — Ubicación: conTablaSetAcum > galAnaSetAcum > Container52_5, después de Label141
+
+Propiedad: Text
+
+=If(
+    gRendMedSet <= 0;
+    "—";
+    Text((ThisItem.Rend - gRendMedSet) / gRendMedSet; "[$-es]+0,0%;-0,0%")
+)
+
+Propiedad: Color
+
+=If(
+    gRendMedSet <= 0; colGris;
+    ThisItem.Rend >= gRendMedSet; ColorValue("#1E7A33");
+    ColorValue("#DC2626")
+)
+
+(agrega su encabezado ="VS MEDIANA" en Container52_4 con las mismas propiedades del resto de encabezados)
