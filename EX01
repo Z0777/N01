@@ -1,0 +1,809 @@
+BLOQUE 1 — Motor de etapas (fechas en las 3 bases)
+1.1 NUEVO Classic/Button btnEtapaSync
+
+Ubicación: vExport (hijo directo, junto a Container129)
+Propiedad: Visible → =false
+Propiedad: OnSelect
+
+=ClearCollect(colEtapaExp; Filter('EXPORT-IMPORT'; Request_ID = varReqPack));;
+ForAll(
+    Filter(colEtapaExp; !IsBlank(SET)) As _e;
+    If(
+        IsBlank(LookUp(SOLICITUDESPA1; Request_ID = varReqPack And SetName = _e.SET; ID));
+        Patch(
+            SOLICITUDESPA1;
+            Defaults(SOLICITUDESPA1);
+            {
+                Actividad:        "Envio de semillas";
+                Request_ID:       varReqPack;
+                SetName:          _e.SET;
+                Crop:             _e.CROP.Value;
+                Program:          Coalesce(_e.Program; "NA");
+                Generation:       "NA";
+                MCT:              "NA";
+                Trial_Intent:     Coalesce(_e.Trial_Intent; "NA");
+                OperationType:    Coalesce(_e.'Operation type'.Value; "NA");
+                Field:            Coalesce(_e.Field; "");
+                Season:           Coalesce(_e.Season; "");
+                Area:             Coalesce(_e.Area; "SSD");
+                PEA:              _e.PEA;
+                SHIP_TO_LOCATION: _e.SHIP_TO_LOCATION;
+                Packets:          Coalesce(_e.Packets; 0);
+                Net_Weight:       _e.Net_Weight;
+                Gross_Weight:     _e.Gross_Weight;
+                'Requested Date': _e.REQUESTED_SHIP_DATE;
+                FechaSolicitud:   Coalesce(_e.CreatedDate; Now());
+                BOA:              Coalesce(_e.BOA; gloUsuario);
+                BOAEmail:         Coalesce(_e.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad:        Coalesce(_e.Prioridad; "Estandar");
+                PACKING_LIST:     varReqPack & " - " & Coalesce(_e.Area; "SSD");
+                Etapa:            varEstPack;
+                FechaEtapa:       varFPack;
+                Estatus:          varEstPack;
+                FechaInicio:      If(varEstPack = "En Proceso"; varFPack; Blank());
+                FechaEntrega:     If(varEstPack in ["Packing List Emitida"; "Packing List Empacado"; "Entregado"]; varFPack; Blank());
+                FechaFin:         If(varEstPack in ["Packing List Empacado"; "Entregado"]; varFPack; Blank());
+                Modificado:       Now()
+            }
+        );
+        Patch(
+            SOLICITUDESPA1;
+            LookUp(SOLICITUDESPA1; Request_ID = varReqPack And SetName = _e.SET);
+            {
+                Etapa:        varEstPack;
+                FechaEtapa:   varFPack;
+                Estatus:      varEstPack;
+                FechaInicio:  If(varEstPack = "En Proceso"; varFPack; LookUp(SOLICITUDESPA1; Request_ID = varReqPack And SetName = _e.SET; FechaInicio));
+                FechaEntrega: If(varEstPack in ["Packing List Emitida"; "Packing List Empacado"; "Entregado"]; varFPack; LookUp(SOLICITUDESPA1; Request_ID = varReqPack And SetName = _e.SET; FechaEntrega));
+                FechaFin:     If(varEstPack in ["Packing List Empacado"; "Entregado"]; varFPack; LookUp(SOLICITUDESPA1; Request_ID = varReqPack And SetName = _e.SET; FechaFin));
+                Modificado:   Now()
+            }
+        )
+    )
+);;
+ForAll(
+    Filter(colEtapaExp; !IsBlank(SET)) As _d;
+    If(
+        !IsBlank(LookUp(DATASUMMARY1; SetName = _d.SET; SetName));
+        Patch(
+            DATASUMMARY1;
+            LookUp(DATASUMMARY1; SetName = _d.SET);
+            {
+                Request_ID:    varReqPack;
+                Estatus_Envio: varEstPack;
+                Fecha_Etapa:   varFPack
+            }
+        )
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+Refresh(DATASUMMARY1);;
+Select(btnBuildDash);;
+Notify(
+    "✅ " & varEstPack & " · ID " & varReqPack & " · " &
+    CountRows(colEtapaExp) & " set(s) · " & Text(varFPack; "[$-es]dd/mm/yyyy");
+    NotificationType.Success
+)
+
+Columnas que deben existir: en SOLICITUDESPA1 → Etapa (texto) y FechaEtapa (fecha). En DATASUMMARY1 → Request_ID (texto), Estatus_Envio (texto), Fecha_Etapa (fecha). Si ya tienes otros nombres, cámbialos solo en esas tres líneas.
+
+BLOQUE 2 — Botones y DatePickers de etapa
+
+Todos siguen el mismo patrón: fijan variables, escriben su columna de fecha en todos los SETs del ID y llaman al motor.
+
+2.1 FPPO Sampling
+
+Control: ButtonCanvas14_3 — Ubicación: conColTramites_1 > FPPO Sampling — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "FPPO Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'FPPO Mother plants sampling': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_3 — misma ubicación — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "FPPO Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'FPPO Mother plants sampling': varFPack }
+    )
+);;
+Select(btnEtapaSync)
+2.2 Mother plants Lab report
+
+Control: ButtonCanvas14_6 — Ubicación: conColTramites_1 > Mother plants Lab report — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Mother Plants Lab Report");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Mother plants Lab report': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_6 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Mother Plants Lab Report");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Mother plants Lab report': varFPack })
+);;
+Select(btnEtapaSync)
+2.3 Seed sample ToBRFV
+
+Control: ButtonCanvas14_7 — Ubicación: conColTramites_1 > Seed sample ToBRFV — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "ToBRFV Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Seed sample ToBRFV': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_7 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "ToBRFV Sampling");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Seed sample ToBRFV': varFPack })
+);;
+Select(btnEtapaSync)
+2.4 Lab Report
+
+Control: ButtonCanvas14_9 — Ubicación: conColTramites_1 > Lab Report — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Lab Report");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Lab Report': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_9 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Lab Report");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Lab Report': varFPack })
+);;
+Select(btnEtapaSync)
+2.5 In Progress
+
+Control: ButtonCanvas14_32 — Ubicación: conColTramites_1 > 'Pack/treat completed_2' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "En Proceso");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Pack/treat start': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_32 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "En Proceso");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Pack/treat start': varFPack })
+);;
+Select(btnEtapaSync)
+2.6 Packing List Emitida
+
+Control: ButtonCanvas14_10 — Ubicación: conColTramites_1 > 'Pack/treat completed' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Packing List Emitida");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Pack/treat start': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync);;
+Select(btnCorreoPackingList)
+
+Control: DatePicker1_10 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Packing List Emitida");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Pack/treat start': varFPack })
+);;
+Select(btnEtapaSync)
+2.7 Packing List Empacada
+
+Control: ButtonCanvas14_12 — Ubicación: conColTramites_1 > 'Pack/treat Fin' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Packing List Empacado");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        {
+            'Pack/treat completed': varFPack;
+            SHIPMENT_PROGRESS: { Value: varEstPack }
+        }
+    )
+);;
+Select(btnEtapaSync);;
+Select(btnCorreoPackingList)
+
+Control: DatePicker1_12 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Packing List Empacado");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Pack/treat completed': varFPack })
+);;
+Select(btnEtapaSync)
+2.8 IP Request / IP Received
+
+Control: ButtonCanvas14_11 — Ubicación: conColTramites_1 > 'IP Request_1' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "IP Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'IP Request': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_11 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "IP Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'IP Request': varFPack })
+);;
+Select(btnEtapaSync)
+
+Control: ButtonCanvas14_13 — Ubicación: conColTramites_1 > 'IP Received' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "IP Received");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'IP Received': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_13 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "IP Received");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'IP Received': varFPack })
+);;
+Select(btnEtapaSync)
+2.9 GL Request / GL Received
+
+Control: ButtonCanvas14_14 — Ubicación: conColTramites_1 > 'GL Request' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "GL Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'GL Request': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_14 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "GL Requested");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'GL Request': varFPack })
+);;
+Select(btnEtapaSync)
+
+Control: ButtonCanvas14_15 — Ubicación: conColTramites_1 > 'GL Received' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Ready to Ship");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'GL Received': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_15 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Ready to Ship");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'GL Received': varFPack })
+);;
+Select(btnEtapaSync)
+2.10 Logística (Shipping / Customs / Delivery)
+
+Control: ButtonCanvas14_16 — Ubicación: conColLogistica_1 > 'Shipping Date' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "En Tránsito");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'Shipping Date': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_16 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "En Tránsito");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Shipping Date': varFPack })
+);;
+Select(btnEtapaSync)
+
+Control: ButtonCanvas14_17 — Ubicación: conColLogistica_1 > 'Arrival to customs' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Aduana Destino");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'Arrival to customs': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_17 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Aduana Destino");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Arrival to customs': varFPack })
+);;
+Select(btnEtapaSync)
+
+Control: ButtonCanvas14_18 — Ubicación: conColLogistica_1 > 'Delivery Date' — Propiedad: OnSelect
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Today());;
+Set(varEstPack; "Entregado");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _e.ID);
+        { 'Delivery Date': varFPack; SHIPMENT_PROGRESS: { Value: varEstPack } }
+    )
+);;
+Select(btnEtapaSync)
+
+Control: DatePicker1_18 — Propiedad: OnChange
+
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varFPack; Self.SelectedDate);;
+Set(varEstPack; "Entregado");;
+ForAll(
+    Filter('EXPORT-IMPORT'; Request_ID = varReqPack) As _e;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID); { 'Delivery Date': varFPack })
+);;
+Select(btnEtapaSync)
+2.11 Habilitar los botones (hoy quedan bloqueados)
+
+Todos los ButtonCanvas14_* tienen DisplayMode: =If(IsBlank(ThisItem.'FPPO Mother plants sampling'); DisplayMode.Edit; DisplayMode.Disabled), lo que los deshabilita en cuanto se marca la primera etapa. Cámbialo en cada uno de ellos:
+
+Propiedad: DisplayMode
+
+=DisplayMode.Edit
+BLOQUE 3 — Corregir el borrado de columnas en DetallInformation
+3.1 NUEVO Classic/Button btnCargarDetalleID
+
+Ubicación: DetallInformation (hijo directo, al final)
+Propiedad: Visible → =false
+Propiedad: OnSelect
+
+=ClearCollect(
+    colDetalleID;
+    Filter('EXPORT-IMPORT'; Request_ID = varFiltroID)
+)
+3.2 NUEVO Classic/Button btnSyncSetSPA
+
+Ubicación: DetallInformation (hijo directo, al final)
+Propiedad: Visible → =false
+Propiedad: OnSelect
+
+=ForAll(
+    Filter(colDetalleID; !IsBlank(SET)) As _e;
+    If(
+        IsBlank(LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = _e.SET; ID));
+        Patch(
+            SOLICITUDESPA1;
+            Defaults(SOLICITUDESPA1);
+            {
+                Actividad:        "Envio de semillas";
+                Request_ID:       varFiltroID;
+                SetName:          _e.SET;
+                Crop:             _e.CROP.Value;
+                Program:          Coalesce(_e.Program; "NA");
+                Generation:       "NA";
+                MCT:              "NA";
+                Trial_Intent:     Coalesce(_e.Trial_Intent; "NA");
+                OperationType:    Coalesce(_e.'Operation type'.Value; "NA");
+                Field:            Coalesce(_e.Field; "");
+                Season:           Coalesce(_e.Season; "");
+                Area:             Coalesce(_e.Area; "SSD");
+                PEA:              _e.PEA;
+                SHIP_TO_LOCATION: _e.SHIP_TO_LOCATION;
+                Packets:          Coalesce(_e.Packets; 0);
+                Net_Weight:       _e.Net_Weight;
+                NumBox:           Coalesce(_e.NumBox; 0);
+                Gross_Weight:     _e.Gross_Weight;
+                'Requested Date': _e.REQUESTED_SHIP_DATE;
+                FechaSolicitud:   Coalesce(_e.CreatedDate; Now());
+                Estatus:          "Solicitado";
+                BOA:              Coalesce(_e.BOA; gloUsuario);
+                BOAEmail:         Coalesce(_e.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad:        Coalesce(_e.Prioridad; "Estandar");
+                PACKING_LIST:     varFiltroID & " - " & Coalesce(_e.Area; "SSD");
+                Modificado:       Now()
+            }
+        );
+        Patch(
+            SOLICITUDESPA1;
+            LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = _e.SET);
+            {
+                Program:       Coalesce(_e.Program; "NA");
+                Trial_Intent:  Coalesce(_e.Trial_Intent; "NA");
+                OperationType: Coalesce(_e.'Operation type'.Value; "NA");
+                Packets:       Coalesce(_e.Packets; 0);
+                Net_Weight:    _e.Net_Weight;
+                NumBox:        Coalesce(_e.NumBox; 0);
+                Gross_Weight:  _e.Gross_Weight;
+                Modificado:    Now()
+            }
+        )
+    )
+);;
+ForAll(
+    Filter(colDetalleID; !IsBlank(SET)) As _d;
+    If(
+        !IsBlank(LookUp(DATASUMMARY1; SetName = _d.SET; SetName));
+        Patch(
+            DATASUMMARY1;
+            LookUp(DATASUMMARY1; SetName = _d.SET);
+            { Request_ID: varFiltroID }
+        )
+    )
+)
+3.3 Galería enlazada a la colección (esto elimina el bug)
+
+Control: DallaInformation — Ubicación: DetallInformation — Propiedad: Items
+
+=Sort(colDetalleID; ID; SortOrder.Ascending)
+3.4 Abrir el detalle cargando la colección
+
+Control: ButtonCanvas1_2 ("Show details") — Ubicación: conColInfo_1 > Container20_1 — Propiedad: OnSelect
+
+=UpdateContext({ varFiltroID: ThisItem.Request_ID; varMostrarTable: true });;
+Set(varReqExportSel; ThisItem);;
+Select(btnCargarDetalleID)
+3.5 Agregar fila manual
+
+Control: Icon26 — Ubicación: DetallInformation > Container19_1 — Propiedad: OnSelect
+
+=If(
+    IsBlank(varFiltroID);
+    Notify("Primero selecciona un ID"; NotificationType.Warning);
+    Set(varCabID; LookUp('EXPORT-IMPORT'; Request_ID = varFiltroID));;
+    Set(varFilaNueva;
+        Patch('EXPORT-IMPORT'; Defaults('EXPORT-IMPORT');
+            {
+                Actividad:           "Envio de semillas";
+                Request_ID:          varFiltroID;
+                SET:                 "";
+                CROP:                varCabID.CROP;
+                Program:             Coalesce(varCabID.Program; "NA");
+                Trial_Intent:        Coalesce(varCabID.Trial_Intent; "NA");
+                'Operation type':    varCabID.'Operation type';
+                Packets:             0;
+                Net_Weight:          "";
+                NumBox:              0;
+                Gross_Weight:        "";
+                Field:               Coalesce(varCabID.Field; "");
+                Season:              Coalesce(varCabID.Season; "");
+                Area:                Coalesce(varCabID.Area; "SSD");
+                PEA:                 varCabID.PEA;
+                SHIP_TO_LOCATION:    varCabID.SHIP_TO_LOCATION;
+                SHIP_TO_COUNTRY:     varCabID.SHIP_TO_COUNTRY;
+                TYPE_OF_SHIPMENT:    varCabID.TYPE_OF_SHIPMENT;
+                REQUESTED_SHIP_DATE: varCabID.REQUESTED_SHIP_DATE;
+                CreatedDate:         Coalesce(varCabID.CreatedDate; Now());
+                SHIPMENT_PROGRESS:   varCabID.SHIPMENT_PROGRESS;
+                BOA:                 Coalesce(varCabID.BOA; gloUsuario);
+                BOAEmail:            Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad:           Coalesce(varCabID.Prioridad; "Estandar");
+                PACKING_LIST:        varFiltroID & " - " & Coalesce(varCabID.Area; "SSD")
+            }
+        )
+    );;
+    Collect(colDetalleID; varFilaNueva);;
+    Set(varAddManualInline; true);;
+    Set(varModoEdicion; true);;
+    Set(varIdFilaNueva; varFilaNueva.ID);;
+    Notify("Fila agregada al ID " & varFiltroID & ". Captura Set, Packets, Net Kgs, No. de caja y Gross Kgs."; NotificationType.Success)
+)
+3.6 Eliminar fila
+
+Control: Icon27 — Ubicación: DallaInformation > Container19_2 — Propiedad: OnSelect
+
+=Set(varSpaBorrar; LookUp(SOLICITUDESPA1; Request_ID = ThisItem.Request_ID And SetName = ThisItem.SET));;
+If(!IsBlank(varSpaBorrar); Remove(SOLICITUDESPA1; varSpaBorrar));;
+Remove('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID));;
+RemoveIf(colDetalleID; ID = ThisItem.ID);;
+Select(btnBuildDash);;
+Notify("Set eliminado"; NotificationType.Success; 1500)
+BLOQUE 4 — OnChange de cada columna de la galería interna
+
+Todos siguen el patrón: 1) Patch a 'EXPORT-IMPORT' con LookUp fresco por ID, 2) Patch a SOLICITUDESPA1, 3) UpdateIf sobre colDetalleID. Sin Refresh (ese era el que borraba lo escrito en las otras columnas).
+
+4.1 SET
+
+Control: TextInput2_1 — Ubicación: DallaInformation > Container19_2 — Propiedad: OnChange
+
+=If(
+    IsBlank(Trim(Self.Text));
+    Notify("El nombre del SET no puede quedar vacio"; NotificationType.Warning);
+
+    !IsBlank(LookUp('EXPORT-IMPORT'; Request_ID = varFiltroID And SET = Trim(Self.Text) And ID <> ThisItem.ID; ID));
+    Notify("Ese SET ya existe en este ID"; NotificationType.Warning);
+
+    Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+    Set(varSumFila; LookUp(DATASUMMARY1; SetName = ThisItem.SET));;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { SET: Trim(Self.Text) });;
+    UpdateIf(colDetalleID; ID = ThisItem.ID; { SET: Trim(Self.Text) });;
+    If(
+        IsBlank(varSpaFila);
+        Select(btnSyncSetSPA);
+        Patch(SOLICITUDESPA1; varSpaFila; { SetName: Trim(Self.Text); Request_ID: varFiltroID; Modificado: Now() })
+    );;
+    If(
+        !IsBlank(varSumFila);
+        Patch(DATASUMMARY1; varSumFila; { Request_ID: varFiltroID })
+    );;
+    Notify("Set guardado en ambas bases"; NotificationType.Success; 500)
+)
+4.2 Program
+
+Control: TextInput3_1 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { Program: Self.Text });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { Program: Self.Text });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { Program: Self.Text; Modificado: Now() })
+);;
+Notify("Program guardado"; NotificationType.Success; 500)
+4.3 Trial Intent
+
+Control: TextInput4_1 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { Trial_Intent: Self.Text });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { Trial_Intent: Self.Text });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { Trial_Intent: Self.Text; Modificado: Now() })
+);;
+Notify("Trial Intent guardado"; NotificationType.Success; 500)
+4.4 Operation type
+
+Control: TextInput5_1 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { 'Operation type': { Value: Self.Text } });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { 'Operation type': { Value: Self.Text } });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { OperationType: Self.Text; Modificado: Now() })
+);;
+Notify("Tipo de operacion guardado"; NotificationType.Success; 500)
+4.5 Packets
+
+Control: TextInput6_1 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { Packets: Value(Self.Text) });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { Packets: Value(Self.Text) });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { Packets: Value(Self.Text); Modificado: Now() })
+);;
+Notify("Packets guardado"; NotificationType.Success; 500)
+4.6 Net Weight
+
+Control: TextInput7_1 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { Net_Weight: Self.Text });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { Net_Weight: Self.Text });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { Net_Weight: Self.Text; Modificado: Now() })
+);;
+Notify("Net Weight guardado"; NotificationType.Success; 500)
+4.7 Number Box
+
+Control: TextInput7_2 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { NumBox: Value(Self.Text) });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { NumBox: Value(Self.Text) });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { NumBox: Value(Self.Text); Modificado: Now() })
+);;
+Notify("Number Box guardado"; NotificationType.Success; 500)
+4.8 Gross Weight
+
+Control: TextInput7_3 — Propiedad: OnChange
+
+=Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = ThisItem.ID); { Gross_Weight: Self.Text });;
+UpdateIf(colDetalleID; ID = ThisItem.ID; { Gross_Weight: Self.Text });;
+Set(varSpaFila; LookUp(SOLICITUDESPA1; Request_ID = varFiltroID And SetName = ThisItem.SET));;
+If(
+    IsBlank(varSpaFila);
+    Select(btnSyncSetSPA);
+    Patch(SOLICITUDESPA1; varSpaFila; { Gross_Weight: Self.Text; Modificado: Now() })
+);;
+Notify("Gross Weight guardado"; NotificationType.Success; 500)
+BLOQUE 5 — Totales y botón "Agregar" sobre la colección
+
+Control: Label25_3 — Ubicación: DetallInformation > Container19_3 — Propiedad: Text
+
+=CountRows(colDetalleID) & " sets"
+
+Control: Label31_3 (Packets) — Propiedad: Text
+
+=Sum(colDetalleID; Coalesce(Packets; 0))
+
+Control: Label32_4 (Net Weight) — Propiedad: Text
+
+=Sum(colDetalleID; Value(Coalesce(Net_Weight; "0")))
+
+Control: Label31_4 (NumBox) — Propiedad: Text
+
+=Sum(colDetalleID; Coalesce(NumBox; 0))
+
+Control: Label31_5 (Gross Weight) — Propiedad: Text
+
+=Sum(colDetalleID; Value(Coalesce(Gross_Weight; "0")))
+
+Control: Button29 ("✓ Agregar") — Ubicación: DetallInformation > conFilaManualInline — Propiedad: OnSelect
+
+=Select(btnCargarDetalleID);;
+Set(varSinSet; CountRows(Filter(colDetalleID; IsBlank(SET))));;
+If(
+    varSinSet > 0;
+    Notify("Hay " & varSinSet & " fila(s) sin nombre de SET. Completalas antes de guardar."; NotificationType.Warning);
+
+    Select(btnSyncSetSPA);;
+    Refresh(SOLICITUDESPA1);;
+    Refresh(DATASUMMARY1);;
+    Select(btnBuildDash);;
+    Set(varModoEdicion; false);;
+    Set(varAddManualInline; false);;
+    Set(varIdFilaNueva; Blank());;
+    Notify(CountRows(colDetalleID) & " set(s) sincronizados en el ID " & varFiltroID; NotificationType.Success)
+)
