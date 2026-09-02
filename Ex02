@@ -1,0 +1,627 @@
+# Correcciones — Pantalla vExport (solo controles a modificar)
+
+Sintaxis Power Fx con punto y coma (`;` separador de argumentos, `;;` encadenado, decimales con coma).
+
+**Causa del bug de borrado:** la galería `DallaInformation` tiene `Items` apuntando directo a `Filter('EXPORT-IMPORT'; ...)`. Cada `Patch` dispara una re-consulta asíncrona a SharePoint; cuando llega la respuesta, los `Default` de la fila se re-evalúan y pisan lo que estabas escribiendo en Net/Gross. La solución es alimentar la galería desde una colección local (`colDetalleID`) y que cada `OnChange` haga `Patch` a la lista + `UpdateIf` a la colección.
+
+> Cambia `'Global Shipping Requests'` y la columna `Status` por los nombres reales de tu lista. Si `Status` es texto simple (no columna de opción), usa `{Status: "Shipment in Progress"}` sin `{Value: ...}`.
+
+---
+
+## 1. Fuente de la galería de detalle
+
+### ButtonCanvas1_2 — OnSelect
+
+```
+=UpdateContext({varFiltroID: ThisItem.Request_ID; varMostrarTable: true});;
+Set(varReqExportSel; ThisItem);;
+Set(varModoEdicion; false);;
+ClearCollect(
+    colDetalleID;
+    SortByColumns(
+        Filter('EXPORT-IMPORT'; Request_ID = ThisItem.Request_ID);
+        "ID";
+        SortOrder.Ascending
+    )
+)
+```
+
+### DallaInformation — Items
+
+```
+=colDetalleID
+```
+
+---
+
+## 2. Celdas editables (fin del borrado)
+
+### TextInput2_1 (Set) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _setAnt: ThisItem.SET; _txt: Trim(Self.Text)};
+    If(
+        IsBlank(_txt);
+        Notify("El nombre del SET no puede quedar vacio"; NotificationType.Warning);
+
+        !IsBlank(LookUp(colDetalleID; ID <> _id && SET = _txt; ID));
+        Notify("Ese SET ya existe en este ID"; NotificationType.Warning);
+
+        Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {SET: _txt});;
+        UpdateIf(colDetalleID; ID = _id; {SET: _txt});;
+        With(
+            {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _setAnt)};
+            If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {SetName: _txt; Modificado: Now()}))
+        );;
+        Notify("Set guardado en las dos bases"; NotificationType.Success; 500)
+    )
+)
+```
+
+### TextInput3_1 (Program) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _txt: Self.Text};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Program: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Program: _txt});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {Program: _txt; Modificado: Now()}))
+    );;
+    Notify("Program guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput4_1 (Trial Intent) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _txt: Self.Text};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Trial_Intent: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Trial_Intent: _txt});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {Trial_Intent: _txt; Modificado: Now()}))
+    );;
+    Notify("Trial Intent guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput5_1 (Operation type — columna de opción) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _txt: Self.Text};
+    With(
+        {_new: Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {'Operation type': {Value: _txt}})};
+        UpdateIf(colDetalleID; ID = _id; {'Operation type': _new.'Operation type'})
+    );;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {OperationType: _txt; Modificado: Now()}))
+    );;
+    Notify("Tipo de operacion guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput6_1 (Packets) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _num: Value(Self.Text)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Packets: _num});;
+    UpdateIf(colDetalleID; ID = _id; {Packets: _num});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {Packets: _num; Modificado: Now()}))
+    );;
+    Notify("Packets guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_1 (Net Weight) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _txt: Self.Text};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Net_Weight: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Net_Weight: _txt});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {Net_Weight: _txt; Modificado: Now()}))
+    );;
+    Notify("Net Weight guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_2 (Number Box) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _num: Value(Self.Text)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {NumBox: _num});;
+    UpdateIf(colDetalleID; ID = _id; {NumBox: _num});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {NumBox: _num; Modificado: Now()}))
+    );;
+    Notify("Number Box guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_3 (Gross Weight) — OnChange
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET; _txt: Self.Text};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Gross_Weight: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Gross_Weight: _txt});;
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {Gross_Weight: _txt; Modificado: Now()}))
+    );;
+    Notify("Gross Weight guardado"; NotificationType.Success; 500)
+)
+```
+
+### Icon27 (borrar fila) — OnSelect
+
+```
+=With(
+    {_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET};
+    With(
+        {_spa: LookUp(SOLICITUDESPA1; Request_ID = _req && SetName = _set)};
+        If(!IsBlank(_spa); Remove(SOLICITUDESPA1; _spa))
+    );;
+    Remove('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id));;
+    RemoveIf(colDetalleID; ID = _id);;
+    Select(btnBuildDash);;
+    Notify("Set eliminado"; NotificationType.Success; 1500)
+)
+```
+
+---
+
+## 3. Alta manual de SET
+
+### Icon26 (+ fila manual) — OnSelect
+
+```
+=If(
+    IsBlank(varFiltroID);
+    Notify("Primero selecciona un ID"; NotificationType.Warning);
+
+    Set(varCabID; LookUp('EXPORT-IMPORT'; Request_ID = varFiltroID));;
+    Set(varFilaNueva;
+        Patch('EXPORT-IMPORT'; Defaults('EXPORT-IMPORT');
+            {
+                Actividad: "Envio de semillas";
+                Request_ID: varFiltroID;
+                SET: "";
+                CROP: varCabID.CROP;
+                Program: Coalesce(varCabID.Program; "NA");
+                Trial_Intent: Coalesce(varCabID.Trial_Intent; "NA");
+                'Operation type': varCabID.'Operation type';
+                Packets: 0;
+                Net_Weight: "";
+                NumBox: 0;
+                Gross_Weight: "";
+                Field: Coalesce(varCabID.Field; "");
+                Season: Coalesce(varCabID.Season; "");
+                Area: Coalesce(varCabID.Area; "SSD");
+                PEA: varCabID.PEA;
+                SHIP_TO_LOCATION: varCabID.SHIP_TO_LOCATION;
+                SHIP_TO_COUNTRY: varCabID.SHIP_TO_COUNTRY;
+                TYPE_OF_SHIPMENT: varCabID.TYPE_OF_SHIPMENT;
+                REQUESTED_SHIP_DATE: varCabID.REQUESTED_SHIP_DATE;
+                CreatedDate: Coalesce(varCabID.CreatedDate; Now());
+                SHIPMENT_PROGRESS: varCabID.SHIPMENT_PROGRESS;
+                BOA: Coalesce(varCabID.BOA; gloUsuario);
+                BOAEmail: Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad: Coalesce(varCabID.Prioridad; "Estandar");
+                PACKING_LIST: varFiltroID & " - " & Coalesce(varCabID.Area; "SSD")
+            }
+        )
+    );;
+    Collect(colDetalleID; varFilaNueva);;
+    Set(varAddManualInline; true);;
+    Set(varModoEdicion; true);;
+    Set(varIdFilaNueva; varFilaNueva.ID);;
+    Notify("Fila agregada al ID " & varFiltroID & ". Captura Set, Packets, Net Kgs, No. de caja y Gross Kgs."; NotificationType.Success)
+)
+```
+
+### Button29 (✓ Agregar) — OnSelect
+
+Deja tu lógica tal cual y agrega estas dos líneas dentro de la rama `else`, justo antes del `Notify` final:
+
+```
+ClearCollect(colDetalleID; SortByColumns(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); "ID"; SortOrder.Ascending));;
+Set(varAddManualInline; false);;
+```
+
+---
+
+## 4. Totales del data summary
+
+### Label25_3 — Text
+
+```
+=CountRows(colDetalleID) & " sets"
+```
+
+### Label31_3 (Packets) — Text
+
+```
+=Sum(colDetalleID; Coalesce(Packets; 0))
+```
+
+### Label32_4 (Net Weight) — Text
+
+```
+=Sum(colDetalleID; Value(Coalesce(Net_Weight; "0")))
+```
+
+### Label31_4 (Number Box) — Text
+
+```
+=Sum(colDetalleID; Coalesce(NumBox; 0))
+```
+
+### Label31_5 (Gross) — Text
+
+```
+=Sum(colDetalleID; Value(Coalesce(Gross_Weight; "0")))
+```
+
+---
+
+## 5. Botones de estatus — actualizan TODO el ID en las 3 bases
+
+Sin condición de estatus previo: recorren todas las filas del `Request_ID`, así que un SET que quedó en *Solicitado* o *En proceso* se arrastra igual.
+
+### ButtonCanvas14_32 (In Progress) — OnSelect
+
+```
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varEstPack; "En Proceso");;
+Set(varFPack; Today());;
+
+ClearCollect(colPackExp; Filter('EXPORT-IMPORT'; Request_ID = varReqPack));;
+ClearCollect(colPackSol; Filter(SOLICITUDESPA1; Request_ID = varReqPack));;
+ClearCollect(colPackGlo; Filter('Global Shipping Requests'; Request_ID = varReqPack));;
+
+ForAll(
+    colPackExp As _e;
+    Patch('EXPORT-IMPORT'; _e; {SHIPMENT_PROGRESS: {Value: "En Proceso"}})
+);;
+
+ForAll(
+    colPackSol As _s;
+    Patch(
+        SOLICITUDESPA1;
+        _s;
+        {
+            Estatus: "En proceso";
+            FechaInicio: Coalesce(_s.FechaInicio; Now());
+            Modificado: Now()
+        }
+    )
+);;
+
+ForAll(
+    colPackGlo As _g;
+    Patch('Global Shipping Requests'; _g; {Status: {Value: "Shipment in Progress"}})
+);;
+
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+
+If(
+    varFiltroID = varReqPack;
+    ClearCollect(colDetalleID; SortByColumns(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); "ID"; SortOrder.Ascending))
+);;
+
+Select(btnBuildDash);;
+Select(btnCorreoPackingList);;
+
+Notify("⚙️ En Proceso · ID " & varReqPack & " · " & CountRows(colPackExp) & " set(s)"; NotificationType.Success)
+```
+
+### ButtonCanvas14_10 (Packing List Emitida) — OnSelect
+
+```
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varEstPack; "Packing List Emitida");;
+Set(varFPack; Today());;
+
+ClearCollect(colPLExp; Filter('EXPORT-IMPORT'; Request_ID = varReqPack));;
+ClearCollect(colPLSol; Filter(SOLICITUDESPA1; Request_ID = varReqPack));;
+ClearCollect(colPLGlo; Filter('Global Shipping Requests'; Request_ID = varReqPack));;
+
+ForAll(
+    colPLExp As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        _e;
+        {
+            'Pack/treat start': varFPack;
+            SHIPMENT_PROGRESS: {Value: varEstPack}
+        }
+    )
+);;
+
+ForAll(
+    colPLSol As _s;
+    Patch(
+        SOLICITUDESPA1;
+        _s;
+        {
+            Estatus: "Entregado";
+            FechaEntrega: varFPack;
+            FechaInicio: Coalesce(_s.FechaInicio; Now());
+            FechaFin: Coalesce(_s.FechaFin; Now());
+            Modificado: Now()
+        }
+    )
+);;
+
+ForAll(
+    colPLGlo As _g;
+    Patch('Global Shipping Requests'; _g; {Status: {Value: "Shipment in Progress"}})
+);;
+
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+
+If(
+    varFiltroID = varReqPack;
+    ClearCollect(colDetalleID; SortByColumns(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); "ID"; SortOrder.Ascending))
+);;
+
+Select(btnBuildDash);;
+Select(btnCorreoPackingList);;
+
+Notify("📄 Packing List Emitida · ID " & varReqPack & " · " & CountRows(colPLExp) & " set(s)"; NotificationType.Success)
+```
+
+### ButtonCanvas14_12 (Packing list empacada) — OnSelect
+
+```
+=Set(varReqPack; ThisItem.Request_ID);;
+Set(varEstPack; "Packing List Empacado");;
+Set(varFPack; Today());;
+
+ClearCollect(colPkExp; Filter('EXPORT-IMPORT'; Request_ID = varReqPack));;
+ClearCollect(colPkSol; Filter(SOLICITUDESPA1; Request_ID = varReqPack));;
+ClearCollect(colPkGlo; Filter('Global Shipping Requests'; Request_ID = varReqPack));;
+
+ForAll(
+    colPkExp As _e;
+    Patch(
+        'EXPORT-IMPORT';
+        _e;
+        {
+            'Pack/treat start': Coalesce(_e.'Pack/treat start'; varFPack);
+            'Pack/treat completed': varFPack;
+            SHIPMENT_PROGRESS: {Value: varEstPack}
+        }
+    )
+);;
+
+ForAll(
+    colPkSol As _s;
+    Patch(
+        SOLICITUDESPA1;
+        _s;
+        {
+            Estatus: "Finalizado";
+            FechaFin: Coalesce(_s.FechaFin; Now());
+            FechaEntrega: Coalesce(_s.FechaEntrega; Now());
+            Modificado: Now()
+        }
+    )
+);;
+
+ForAll(
+    colPkGlo As _g;
+    Patch('Global Shipping Requests'; _g; {Status: {Value: "Shipment in Progress"}})
+);;
+
+Refresh('EXPORT-IMPORT');;
+Refresh(SOLICITUDESPA1);;
+
+If(
+    varFiltroID = varReqPack;
+    ClearCollect(colDetalleID; SortByColumns(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); "ID"; SortOrder.Ascending))
+);;
+
+Select(btnBuildDash);;
+Select(btnCorreoPackingList);;
+
+Notify("📦 Packing List Empacado · ID " & varReqPack & " · " & CountRows(colPkExp) & " set(s)"; NotificationType.Success)
+```
+
+### DatePicker1_32 / DatePicker1_10 / DatePicker1_12 — OnChange
+
+Usa exactamente el mismo bloque del botón que le corresponde, cambiando únicamente `Set(varFPack; Today())` por `Set(varFPack; Self.SelectedDate)` y quitando la línea `Select(btnCorreoPackingList);;`.
+
+---
+
+## 6. DisplayMode — cada control mira su propia fecha
+
+Hoy todos apuntan a `'FPPO Mother plants sampling'`, por eso se bloquean en bloque.
+
+### ButtonCanvas14_6 (Mother Plants Lab) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Mother plants Lab report'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_6 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Mother plants Lab report'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_7 (ToBRFV) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Seed sample ToBRFV'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_7 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Seed sample ToBRFV'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_9 (Lab Report) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Lab Report'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_9 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Lab Report'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_32 (In Progress) — DisplayMode
+
+```
+=If(
+    IsBlank(ThisItem.'Pack/treat start') && ThisItem.SHIPMENT_PROGRESS.Value <> "En Proceso";
+    DisplayMode.Edit;
+    DisplayMode.Disabled
+)
+```
+
+### DatePicker1_32 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Pack/treat start'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_10 (Packing List Emitida) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Pack/treat start'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_10 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Pack/treat start'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_12 (Packing list empacada) — DisplayMode
+
+```
+=If(
+    !IsBlank(ThisItem.'Pack/treat start') && IsBlank(ThisItem.'Pack/treat completed');
+    DisplayMode.Edit;
+    DisplayMode.Disabled
+)
+```
+
+### DatePicker1_12 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Pack/treat completed'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_11 (IP Request) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'IP Request'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_11 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'IP Request'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_13 (IP Received) — DisplayMode
+
+```
+=If(!IsBlank(ThisItem.'IP Request') && IsBlank(ThisItem.'IP Received'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_13 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'IP Received'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_14 (GL Request) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'GL Request'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_14 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'GL Request'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_15 (GL Received) — DisplayMode
+
+```
+=If(!IsBlank(ThisItem.'GL Request') && IsBlank(ThisItem.'GL Received'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_15 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'GL Received'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_16 (Mark Shipped) — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Shipping Date'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_16 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Shipping Date'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_17 (Mark Customs) — DisplayMode
+
+```
+=If(!IsBlank(ThisItem.'Shipping Date') && IsBlank(ThisItem.'Arrival to customs'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_17 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Arrival to customs'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### ButtonCanvas14_18 (Mark Delivered) — DisplayMode
+
+```
+=If(!IsBlank(ThisItem.'Arrival to customs') && IsBlank(ThisItem.'Delivery Date'); DisplayMode.Edit; DisplayMode.Disabled)
+```
+
+### DatePicker1_18 — DisplayMode
+
+```
+=If(IsBlank(ThisItem.'Delivery Date'); DisplayMode.Edit; DisplayMode.View)
+```
+
+### DatePicker1_3 (FPPO Sampling) — DisplayMode
+
+`ButtonCanvas14_3` ya está correcto; solo agrega:
+
+```
+=If(IsBlank(ThisItem.'FPPO Mother plants sampling'); DisplayMode.Edit; DisplayMode.View)
+```
