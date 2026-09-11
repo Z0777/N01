@@ -1,0 +1,224 @@
+# Flujo: Eliminar filas sin SetName y SetNameKey (lotes $batch)
+
+## Antes de empezar
+
+1. Confirma el **nombre interno** de las columnas: Configuración de la lista → clic en la columna → la URL termina en `Field=NombreInterno`. Si es distinto (ej. `SetName0`, `field_1`), reemplázalo en las expresiones.
+2. Renombra cada acción **exactamente** como se indica (sin espacios) para que las expresiones funcionen.
+3. Reemplaza `TUTENANT`, `TUSITIO` y `NOMBRE LISTA` con tus valores.
+
+---
+
+## 1. Desencadenador
+
+**Desencadenar un flujo manualmente**
+
+---
+
+## 2. Inicializar variable → `varDesde`
+
+| Campo | Valor |
+|---|---|
+| Nombre | `varDesde` |
+| Tipo | Entero |
+| Valor | `1` |
+
+---
+
+## 3. Redactar → `Plantilla`
+
+**Entradas:**
+
+```
+--changeset_bti
+Content-Type: application/http
+Content-Transfer-Encoding: binary
+
+DELETE https://TUTENANT.sharepoint.com/sites/TUSITIO/_api/web/lists/getbytitle('NOMBRE LISTA')/items(|ID|) HTTP/1.1
+If-Match: *
+```
+
+> Para enviar a la papelera en lugar de borrar permanente, cambia la línea DELETE por:
+>
+> ```
+> POST https://TUTENANT.sharepoint.com/sites/TUSITIO/_api/web/lists/getbytitle('NOMBRE LISTA')/items(|ID|)/recycle() HTTP/1.1
+> ```
+
+---
+
+## 4. Obtener elementos → `ObtenerMaxID`
+
+| Campo | Valor |
+|---|---|
+| Dirección del sitio | Tu sitio |
+| Nombre de lista | Tu lista |
+| Ordenar por | `ID desc` |
+| Recuento superior | `1` |
+
+---
+
+## 5. Redactar → `MaxID`
+
+**Entradas (expresión):**
+
+```
+first(outputs('ObtenerMaxID')?['body/value'])?['ID']
+```
+
+---
+
+## 6. Hasta → `Bucle`
+
+**Condición (modo avanzado):**
+
+```
+@greater(variables('varDesde'), outputs('MaxID'))
+```
+
+**Cambiar límites:**
+
+| Campo | Valor |
+|---|---|
+| Recuento | `1000` |
+| Tiempo de espera | `PT12H` |
+
+---
+
+### 6.1 (Dentro de Bucle) Obtener elementos → `ObtenerBloque`
+
+| Campo | Valor |
+|---|---|
+| Dirección del sitio | Tu sitio |
+| Nombre de lista | Tu lista |
+| Recuento superior | `5000` |
+
+**Consulta de filtro** (inserta las partes `@{…}` como expresión):
+
+```
+ID ge @{variables('varDesde')} and ID lt @{add(variables('varDesde'), 5000)}
+```
+
+---
+
+### 6.2 (Dentro de Bucle) Filtrar matriz → `FiltrarVacios`
+
+**Desde (expresión):**
+
+```
+outputs('ObtenerBloque')?['body/value']
+```
+
+**Condición (modo avanzado):**
+
+```
+@and(empty(item()?['SetName']), empty(item()?['SetNameKey']))
+```
+
+> Si quieres borrar filas donde falte **cualquiera** de las dos columnas, cambia `and` por `or`.
+
+---
+
+### 6.3 (Dentro de Bucle) Aplicar a cada uno → `PorLote`
+
+**Seleccionar una salida de los pasos anteriores (expresión):**
+
+```
+chunk(body('FiltrarVacios'), 1000)
+```
+
+---
+
+#### 6.3.1 (Dentro de PorLote) Seleccionar → `ArmarDeletes`
+
+**Desde (expresión):**
+
+```
+items('PorLote')
+```
+
+**Asignar** (cambia a modo texto con el botón `T`, luego expresión):
+
+```
+replace(outputs('Plantilla'), '|ID|', string(item()?['ID']))
+```
+
+---
+
+#### 6.3.2 (Dentro de PorLote) Enviar una solicitud HTTP a SharePoint → `EnviarLote`
+
+| Campo | Valor |
+|---|---|
+| Dirección del sitio | Tu sitio |
+| Método | `POST` |
+| URI | `_api/$batch` |
+
+**Encabezados:**
+
+| Clave | Valor |
+|---|---|
+| `Content-Type` | `multipart/mixed; boundary=batch_bti` |
+
+**Cuerpo:**
+
+```
+--batch_bti
+Content-Type: multipart/mixed; boundary="changeset_bti"
+Content-Transfer-Encoding: binary
+
+@{join(body('ArmarDeletes'), decodeUriComponent('%0A%0A'))}
+
+--changeset_bti--
+
+--batch_bti--
+```
+
+---
+
+### 6.4 (Dentro de Bucle, FUERA de PorLote) Establecer variable
+
+| Campo | Valor |
+|---|---|
+| Nombre | `varDesde` |
+
+**Valor (expresión):**
+
+```
+add(variables('varDesde'), 5000)
+```
+
+---
+
+## Estructura final
+
+```
+Desencadenar un flujo manualmente
+├── varDesde
+├── Plantilla
+├── ObtenerMaxID
+├── MaxID
+└── Bucle (Hasta)
+    ├── ObtenerBloque
+    ├── FiltrarVacios
+    ├── PorLote (Aplicar a cada uno)
+    │   ├── ArmarDeletes
+    │   └── EnviarLote
+    └── Establecer variable varDesde
+```
+
+---
+
+## Prueba y verificación
+
+1. **Primera prueba:** pon el Recuento de `Bucle` en `1` y ejecuta.
+2. Revisa la salida de `EnviarLote`: cada fila borrada aparece como `HTTP/1.1 204`. El lote responde 200 aunque falle alguna fila, así que revisa el cuerpo.
+3. Si todo está bien, regresa el Recuento a `1000` y ejecuta completo.
+4. Si quedan filas, vuelve a ejecutar: es seguro porque solo toma las vacías.
+
+## Prevenir que se repita
+
+En el flujo de carga desde Excel, agrega un **Filtrar matriz** antes de crear elementos:
+
+```
+@not(empty(item()?['SetName']))
+```
+
+Así descartas las filas en blanco de la tabla de Excel.
