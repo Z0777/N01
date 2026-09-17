@@ -1,0 +1,533 @@
+# Carga del histórico (Excel → EXPORT-IMPORT) y pantalla de análisis
+
+Sintaxis Power Fx con punto y coma (`;` argumentos, `;;` encadenado, decimales con coma).
+
+---
+
+# PARTE 1 — Preparar el Excel
+
+El problema central: **un ID tiene varios SET y un SET se repite por cada caja**. Por eso el ID no sirve como llave y el SET tampoco. La llave tiene que ser *línea*, no registro.
+
+## 1.1 Convierte el rango en tabla
+
+Selecciona los datos → `Ctrl + T` → nombra la tabla **tblHistorico**. El conector de Excel de Power Automate solo lee tablas, no rangos.
+
+## 1.2 Agrega la columna llave `RowKey`
+
+Como último campo de la tabla, con esta fórmula (ajusta las letras a tus columnas de ID y SET):
+
+```
+=[@ID]&"|"&[@SET]&"|"&TEXT(COUNTIFS($A$2:A2;[@ID];$B$2:B2;[@SET]);"00")
+```
+
+El `COUNTIFS` acumulativo numera las repeticiones del mismo SET dentro del mismo ID: `GT-4101|TO-345|01`, `GT-4101|TO-345|02`, etc. Así dos filas del mismo set en cajas distintas conviven sin chocar, y si vuelves a cargar el archivo la misma fila cae siempre en la misma llave.
+
+Pega la columna como valores (`Ctrl+C` → pegado especial → valores) antes de sincronizar, para que la llave no se recalcule si alguien ordena el archivo.
+
+## 1.3 Fechas
+
+Formatea **todas** las columnas de fecha como texto `yyyy-mm-dd`. Si las dejas como fecha, el conector devuelve el número de serie de Excel y tendrás que convertirlo en el flujo con:
+
+```
+addDays('1899-12-30', int(items('Apply_to_each')?['Shipping Date']), 'yyyy-MM-dd')
+```
+
+## 1.4 Celdas vacías
+
+Déjalas vacías, sin guiones ni "N/A". El flujo usa el vacío para saber que ese dato **todavía no existe** y no debe sobrescribir lo que ya está en SharePoint.
+
+---
+
+# PARTE 2 — Columnas nuevas en la lista EXPORT-IMPORT
+
+| Columna | Tipo | Para qué |
+|---|---|---|
+| `RowKey` | Texto una línea, **indexada** | llave de sincronización |
+| `Dias_Lab` | Número | muestreo → reporte de laboratorio |
+| `Dias_Empaque` | Número | Pack/treat start → completed |
+| `Dias_IP` | Número | IP Request → IP Received |
+| `Dias_GL` | Número | GL Request → GL Received |
+| `Dias_Transito` | Número | Shipping Date → Arrival to customs |
+| `Dias_Aduana` | Número | Arrival to customs → Delivery Date |
+| `Dias_Solicitud` | Número | CreatedDate → Shipping Date |
+| `Dias_Ciclo` | Número | CreatedDate → Delivery Date |
+| `Desv_Fecha` | Número | REQUESTED_SHIP_DATE → Shipping Date (positivo = tarde) |
+| `EnTiempo` | Texto | "Si" / "No" |
+
+`Dias_Lab` es **una sola columna** para las cuatro fechas sanitarias: tomate y chile usan FPPO + Mother plants Lab report, el resto usa ToBRFV + Lab Report. La fórmula toma la primera que exista de cada par.
+
+Indexa además `Request_ID`, `CreatedDate` y `SET` (Configuración de la lista → Columnas indizadas). Sin eso, cualquier filtro por fecha en la app se te va a estrangular pasando de 5,000 elementos.
+
+---
+
+# PARTE 3 — Flujo de Power Automate (upsert, sin duplicar)
+
+La lógica en una línea: **leo lo que ya existe una sola vez, lo comparo en memoria y solo llamo a SharePoint cuando toca crear o actualizar.** Un "Obtener elementos" por cada fila del Excel te tumbaría el flujo por límites de API.
+
+## 3.1 Vista de sincronización
+
+En EXPORT-IMPORT crea una vista **vwSync** que muestre solo: `ID`, `RowKey`, `Packets`, `Net_Weight`, `Gross_Weight`, `NumBox`, `Packaging_Type`, `SHIP_TO_LOCATION`, `Program`, `Trial_Intent`, `PEA`, y las fechas que puedas actualizar después. Acelera el paso 3.3 muchísimo.
+
+## 3.2 Pasos
+
+**1. Desencadenador** — *Periodicidad*, 1 vez al día. (Para pruebas: *Desencadenar un flujo manualmente*.)
+
+**2. Inicializar variable** — Nombre `varExistentes`, Tipo **Array**.
+
+**3. Obtener elementos (SharePoint)**
+- Lista: `EXPORT-IMPORT`
+- Vista: `vwSync`
+- Consulta de filtro: `RowKey ne null`
+- Umbral superior: `5000`, y en **Configuración** activa *Paginación* con umbral 100000.
+
+**4. Seleccionar (Operaciones de datos)**
+- Desde: `body('Obtener_elementos')?['value']`
+- Mapa (modo texto):
+
+```json
+{
+  "RowKey": @{item()?['RowKey']},
+  "SPID": @{item()?['ID']},
+  "Packets": @{item()?['Packets']},
+  "Net_Weight": @{item()?['Net_Weight']},
+  "Gross_Weight": @{item()?['Gross_Weight']},
+  "NumBox": @{item()?['NumBox']},
+  "Packaging_Type": @{item()?['Packaging_Type']}
+}
+```
+
+**5. Establecer variable** — `varExistentes` = `body('Seleccionar')`
+
+**6. Enumerar filas presentes en una tabla (Excel Online Business)**
+- Archivo: tu Excel en SharePoint/OneDrive, Tabla: `tblHistorico`
+- En **Configuración**: *Paginación* activada, umbral 5000.
+
+**7. Aplicar a cada uno** — sobre `value` del paso 6. En Configuración, **Control de simultaneidad = activado, grado 1** (evita que dos iteraciones creen el mismo RowKey a la vez).
+
+Dentro del bucle:
+
+**7.1 Filtrar matriz**
+- Desde: `variables('varExistentes')`
+- Condición: `item()?['RowKey']` **es igual a** `items('Apply_to_each')?['RowKey']`
+
+**7.2 Condición**: `length(body('Filtrar_matriz'))` **es igual a** `0`
+
+**Si es SÍ → Crear elemento** en EXPORT-IMPORT. Mapea todos los campos del Excel. Para las fechas usa:
+
+```
+if(empty(items('Apply_to_each')?['Pack/treat start']), null, items('Apply_to_each')?['Pack/treat start'])
+```
+
+Campos que conviene fijar aquí y no traer del Excel: `Actividad` = `"Envio de semillas"`, `PACKING_LIST` = `concat(items('Apply_to_each')?['ID'], ' - ', items('Apply_to_each')?['AREA'])`.
+
+**Si es NO → Actualizar elemento**
+- Id: `first(body('Filtrar_matriz'))?['SPID']`
+- Cada campo actualizable con este patrón, que es la clave de "solo llena lo que falta y no borra lo que ya hay":
+
+```
+if(empty(items('Apply_to_each')?['PESO NETO']), first(body('Filtrar_matriz'))?['Net_Weight'], items('Apply_to_each')?['PESO NETO'])
+```
+
+Es decir: si la celda del Excel está vacía, se reescribe el valor que ya tenía SharePoint; si trae dato, gana el Excel. Repite el mismo `if(empty(...), <valor SP>, <valor Excel>)` en cada columna que quieras dejar auto-completable.
+
+**No mapees `SHIPMENT_PROGRESS` en la rama de actualización.** El estatus lo maneja la app; si lo traes del Excel vas a regresar envíos ya entregados a un estado viejo.
+
+## 3.3 Qué revisar la primera vez
+
+Corre el flujo con un Excel de 20 filas antes de soltar el histórico completo. Verifica que un segundo disparo con el mismo archivo **no cree nada** (todas las filas deben caer en la rama de actualización). Ese es el examen que dice si tu `RowKey` está bien construida.
+
+---
+
+# PARTE 4 — Pantalla de análisis en Power Apps
+
+Estructura de controles nueva (pantalla `scrAnalisis`):
+
+```
+scrAnalisis
+├── dtpAnaIni, dtpAnaFin, cmbAnaCultivo      (filtros)
+├── btnRecalcDias        (oculto, Visible = false)
+├── btnBuildAnalisis     (oculto, Visible = false)
+├── btnBuildBarras       (oculto, Visible = false)
+├── conKPIs              (etiquetas de KPI)
+├── cmbMetrica           (selector de etapa para la gráfica)
+├── galBarrasLoc         (gráfica de barras horizontal)
+└── galTablaCultivo      (tabla de resumen)
+```
+
+## 4.1 Carga y guardado de los días transcurridos
+
+### scrAnalisis — OnVisible
+
+```
+=Set(varAnaIni; Coalesce(dtpAnaIni.SelectedDate; DateAdd(Today(); -365; TimeUnit.Days)));;
+Set(varAnaFin; Coalesce(dtpAnaFin.SelectedDate; Today()));;
+Select(btnRecalcDias);;
+Select(btnBuildAnalisis);;
+Select(btnBuildBarras)
+```
+
+### btnRecalcDias — OnSelect
+
+Calcula lo que falte y **lo escribe en la lista**, no solo en memoria.
+
+```
+=ClearCollect(
+    colRawAna;
+    Filter(
+        'EXPORT-IMPORT';
+        !IsBlank(Request_ID) && CreatedDate >= varAnaIni && CreatedDate <= varAnaFin
+    )
+);;
+ClearCollect(
+    colDiasPend;
+    Filter(
+        colRawAna;
+        (IsBlank(Dias_Lab) && !IsBlank(Coalesce('Mother plants Lab report'; 'Lab Report'))) ||
+        (IsBlank(Dias_Empaque) && !IsBlank('Pack/treat completed')) ||
+        (IsBlank(Dias_IP) && !IsBlank('IP Received')) ||
+        (IsBlank(Dias_GL) && !IsBlank('GL Received')) ||
+        (IsBlank(Dias_Transito) && !IsBlank('Arrival to customs')) ||
+        (IsBlank(Dias_Aduana) && !IsBlank('Delivery Date')) ||
+        (IsBlank(Dias_Ciclo) && !IsBlank('Delivery Date')) ||
+        (IsBlank(Dias_Solicitud) && !IsBlank('Shipping Date')) ||
+        (IsBlank(Desv_Fecha) && !IsBlank('Shipping Date') && !IsBlank(REQUESTED_SHIP_DATE))
+    )
+);;
+ForAll(
+    colDiasPend As _r;
+    Patch(
+        'EXPORT-IMPORT';
+        LookUp('EXPORT-IMPORT'; ID = _r.ID);
+        {
+            Dias_Lab: If(
+                IsBlank(Coalesce(_r.'FPPO Mother plants sampling'; _r.'Seed sample ToBRFV')) ||
+                IsBlank(Coalesce(_r.'Mother plants Lab report'; _r.'Lab Report'));
+                Blank();
+                DateDiff(
+                    Coalesce(_r.'FPPO Mother plants sampling'; _r.'Seed sample ToBRFV');
+                    Coalesce(_r.'Mother plants Lab report'; _r.'Lab Report');
+                    TimeUnit.Days
+                )
+            );
+            Dias_Empaque: If(
+                IsBlank(_r.'Pack/treat start') || IsBlank(_r.'Pack/treat completed');
+                Blank();
+                DateDiff(_r.'Pack/treat start'; _r.'Pack/treat completed'; TimeUnit.Days)
+            );
+            Dias_IP: If(
+                IsBlank(_r.'IP Request') || IsBlank(_r.'IP Received');
+                Blank();
+                DateDiff(_r.'IP Request'; _r.'IP Received'; TimeUnit.Days)
+            );
+            Dias_GL: If(
+                IsBlank(_r.'GL Request') || IsBlank(_r.'GL Received');
+                Blank();
+                DateDiff(_r.'GL Request'; _r.'GL Received'; TimeUnit.Days)
+            );
+            Dias_Transito: If(
+                IsBlank(_r.'Shipping Date') || IsBlank(_r.'Arrival to customs');
+                Blank();
+                DateDiff(_r.'Shipping Date'; _r.'Arrival to customs'; TimeUnit.Days)
+            );
+            Dias_Aduana: If(
+                IsBlank(_r.'Arrival to customs') || IsBlank(_r.'Delivery Date');
+                Blank();
+                DateDiff(_r.'Arrival to customs'; _r.'Delivery Date'; TimeUnit.Days)
+            );
+            Dias_Solicitud: If(
+                IsBlank(_r.CreatedDate) || IsBlank(_r.'Shipping Date');
+                Blank();
+                DateDiff(_r.CreatedDate; _r.'Shipping Date'; TimeUnit.Days)
+            );
+            Dias_Ciclo: If(
+                IsBlank(_r.CreatedDate) || IsBlank(_r.'Delivery Date');
+                Blank();
+                DateDiff(_r.CreatedDate; _r.'Delivery Date'; TimeUnit.Days)
+            );
+            Desv_Fecha: If(
+                IsBlank(_r.REQUESTED_SHIP_DATE) || IsBlank(_r.'Shipping Date');
+                Blank();
+                DateDiff(_r.REQUESTED_SHIP_DATE; _r.'Shipping Date'; TimeUnit.Days)
+            );
+            EnTiempo: If(
+                IsBlank(_r.REQUESTED_SHIP_DATE) || IsBlank(_r.'Shipping Date');
+                Blank();
+                If(DateDiff(_r.REQUESTED_SHIP_DATE; _r.'Shipping Date'; TimeUnit.Days) <= 0; "Si"; "No")
+            )
+        }
+    )
+);;
+If(
+    CountRows(colDiasPend) > 0;
+    ClearCollect(
+        colRawAna;
+        Filter('EXPORT-IMPORT'; !IsBlank(Request_ID) && CreatedDate >= varAnaIni && CreatedDate <= varAnaFin)
+    );;
+    Notify(CountRows(colDiasPend) & " fila(s) actualizadas con dias transcurridos"; NotificationType.Success)
+)
+```
+
+> Sube el límite de filas de datos a 2000 en Configuración → General. Si el histórico rebasa eso en un rango, filtra por año en `dtpAnaIni`/`dtpAnaFin`; cada carga es un solo rango, no toda la lista.
+
+## 4.2 Agregados
+
+### btnBuildAnalisis — OnSelect
+
+```
+=Set(varTotEnvios; CountRows(Distinct(colRawAna; Request_ID)));;
+Set(varTotSets; CountRows(Distinct(colRawAna; SET)));;
+Set(varTotPackets; Sum(colRawAna; Coalesce(Packets; 0)));;
+Set(varTotNeto; Round(Sum(colRawAna; Value(Coalesce(Net_Weight; "0"))); 1));;
+Set(varTotBruto; Round(Sum(colRawAna; Value(Coalesce(Gross_Weight; "0"))); 1));;
+Set(varTotCajas; CountRows(Filter(colRawAna; Coalesce(NumBox; 0) > 0)));;
+Set(
+    varCicloProm;
+    With(
+        {_r: Filter(colRawAna; Dias_Ciclo > 0)};
+        If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Ciclo); 1))
+    )
+);;
+Set(
+    varOnTime;
+    With(
+        {_r: Filter(colRawAna; !IsBlank(EnTiempo))};
+        If(CountRows(_r) = 0; 0; Round(CountRows(Filter(_r; EnTiempo = "Si")) / CountRows(_r) * 100; 1))
+    )
+);;
+
+ClearCollect(
+    colAnaCultivo;
+    ForAll(
+        Distinct(Filter(colRawAna; !IsBlank(CROP.Value)); CROP.Value) As _c;
+        {
+            Cultivo: _c.Value;
+            Sets: CountRows(Distinct(Filter(colRawAna; CROP.Value = _c.Value); SET));
+            Envios: CountRows(Distinct(Filter(colRawAna; CROP.Value = _c.Value); Request_ID));
+            Packets: Sum(Filter(colRawAna; CROP.Value = _c.Value); Coalesce(Packets; 0));
+            Neto: Round(Sum(Filter(colRawAna; CROP.Value = _c.Value); Value(Coalesce(Net_Weight; "0"))); 1);
+            Bruto: Round(Sum(Filter(colRawAna; CROP.Value = _c.Value); Value(Coalesce(Gross_Weight; "0"))); 1);
+            Cajas: CountRows(Filter(colRawAna; CROP.Value = _c.Value && Coalesce(NumBox; 0) > 0));
+            DiasCiclo: With(
+                {_r: Filter(colRawAna; CROP.Value = _c.Value && Dias_Ciclo > 0)};
+                If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Ciclo); 1))
+            )
+        }
+    )
+);;
+
+ClearCollect(
+    colAnaLocacion;
+    ForAll(
+        Distinct(Filter(colRawAna; !IsBlank(SHIP_TO_LOCATION)); SHIP_TO_LOCATION) As _l;
+        {
+            Locacion: _l.Value;
+            Envios: CountRows(Distinct(Filter(colRawAna; SHIP_TO_LOCATION = _l.Value); Request_ID));
+            Packets: Sum(Filter(colRawAna; SHIP_TO_LOCATION = _l.Value); Coalesce(Packets; 0));
+            DiasLab: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_Lab > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Lab); 1)));
+            DiasEmpaque: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_Empaque > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Empaque); 1)));
+            DiasIP: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_IP > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_IP); 1)));
+            DiasGL: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_GL > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_GL); 1)));
+            DiasTransito: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_Transito > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Transito); 1)));
+            DiasAduana: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_Aduana > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Aduana); 1)));
+            DiasCiclo: With({_r: Filter(colRawAna; SHIP_TO_LOCATION = _l.Value && Dias_Ciclo > 0)}; If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Ciclo); 1)))
+        }
+    )
+);;
+
+ClearCollect(
+    colAnaPais;
+    ForAll(
+        Distinct(Filter(colRawAna; !IsBlank(SHIP_TO_COUNTRY.Value)); SHIP_TO_COUNTRY.Value) As _p;
+        {
+            Pais: _p.Value;
+            Envios: CountRows(Distinct(Filter(colRawAna; SHIP_TO_COUNTRY.Value = _p.Value); Request_ID));
+            Packets: Sum(Filter(colRawAna; SHIP_TO_COUNTRY.Value = _p.Value); Coalesce(Packets; 0));
+            DiasCiclo: With(
+                {_r: Filter(colRawAna; SHIP_TO_COUNTRY.Value = _p.Value && Dias_Ciclo > 0)};
+                If(CountRows(_r) = 0; 0; Round(Average(_r; Dias_Ciclo); 1))
+            )
+        }
+    )
+);;
+
+ClearCollect(
+    colAnaPEA;
+    ForAll(
+        Distinct(Filter(colRawAna; !IsBlank(PEA)); PEA) As _q;
+        {
+            PEA: _q.Value;
+            Packets: Sum(Filter(colRawAna; PEA = _q.Value); Coalesce(Packets; 0));
+            Sets: CountRows(Distinct(Filter(colRawAna; PEA = _q.Value); SET));
+            Envios: CountRows(Distinct(Filter(colRawAna; PEA = _q.Value); Request_ID))
+        }
+    )
+);;
+
+ClearCollect(
+    colAnaCaja;
+    ForAll(
+        Distinct(Filter(colRawAna; !IsBlank(Packaging_Type)); Packaging_Type) As _b;
+        {
+            Caja: _b.Value;
+            Usos: CountRows(Filter(colRawAna; Packaging_Type = _b.Value));
+            Packets: Sum(Filter(colRawAna; Packaging_Type = _b.Value); Coalesce(Packets; 0))
+        }
+    )
+);;
+Set(varCajaTop; First(SortByColumns(colAnaCaja; "Usos"; SortOrder.Descending)).Caja);;
+Set(varPeaTop; First(SortByColumns(colAnaPEA; "Packets"; SortOrder.Descending)).PEA);;
+Set(varLocTop; First(SortByColumns(colAnaLocacion; "Envios"; SortOrder.Descending)).Locacion)
+```
+
+## 4.3 Gráfica de barras dinámica
+
+### cmbMetrica — Items
+
+```
+=["Ciclo total"; "Laboratorio"; "Empaque"; "IP"; "GL"; "Transito"; "Aduana a entrega"]
+```
+
+### cmbMetrica — DefaultSelectedItems
+
+```
+=["Ciclo total"]
+```
+
+### cmbMetrica — OnChange
+
+```
+=Select(btnBuildBarras)
+```
+
+### btnBuildBarras — OnSelect
+
+```
+=ClearCollect(
+    colBarras;
+    ForAll(
+        colAnaLocacion As _l;
+        {
+            Etiqueta: _l.Locacion;
+            Detalle: _l.Envios;
+            Valor: Switch(
+                cmbMetrica.Selected.Value;
+                "Laboratorio"; _l.DiasLab;
+                "Empaque"; _l.DiasEmpaque;
+                "IP"; _l.DiasIP;
+                "GL"; _l.DiasGL;
+                "Transito"; _l.DiasTransito;
+                "Aduana a entrega"; _l.DiasAduana;
+                _l.DiasCiclo
+            )
+        }
+    )
+);;
+Set(varMaxBarra; Max(Max(colBarras; Valor); 1))
+```
+
+### galBarrasLoc — Items
+
+```
+=SortByColumns(colBarras; "Valor"; SortOrder.Descending)
+```
+
+Dentro de la plantilla de la galería, en un contenedor horizontal:
+
+**lblBarraEtiqueta — Text**
+```
+=ThisItem.Etiqueta
+```
+
+**recBarra (rectángulo) — Width**
+```
+=(Parent.TemplateWidth - 240) * (ThisItem.Valor / varMaxBarra)
+```
+
+**recBarra — Fill**
+```
+=RGBA(27; 75; 115; 1)
+```
+
+**lblBarraValor — Text**
+```
+=ThisItem.Valor & " d  ·  " & ThisItem.Detalle & " envios"
+```
+
+## 4.4 Tabla por cultivo
+
+### galTablaCultivo — Items
+
+```
+=SortByColumns(colAnaCultivo; "Packets"; SortOrder.Descending)
+```
+
+Etiquetas de la plantilla, cada una en su **Text**:
+
+```
+=ThisItem.Cultivo
+=ThisItem.Sets
+=ThisItem.Envios
+=ThisItem.Packets
+=ThisItem.Neto
+=ThisItem.Bruto
+=ThisItem.Cajas
+=ThisItem.DiasCiclo & " d"
+```
+
+Fila de totales (etiquetas fuera de la galería), en su **Text**:
+
+```
+=varTotSets
+=varTotEnvios
+=varTotPackets
+=varTotNeto
+=varTotBruto
+=varTotCajas
+=varCicloProm & " d"
+```
+
+## 4.5 KPIs de encabezado
+
+Cada uno en el **Text** de su etiqueta:
+
+```
+=varTotEnvios
+=varTotSets
+=varTotPackets
+=varTotNeto & " kg"
+=varTotBruto & " kg"
+=varTotCajas
+=varCicloProm & " dias"
+=varOnTime & " % a tiempo"
+=varLocTop
+=varPeaTop
+=varCajaTop
+```
+
+Color condicional para el KPI de cumplimiento — **lblOnTime.Color**
+
+```
+=If(varOnTime >= 85; RGBA(94; 138; 24; 1); RGBA(217; 146; 43; 1))
+```
+
+## 4.6 Filtros
+
+### dtpAnaIni — OnChange y dtpAnaFin — OnChange
+
+```
+=Set(varAnaIni; dtpAnaIni.SelectedDate);;
+Set(varAnaFin; dtpAnaFin.SelectedDate);;
+Select(btnRecalcDias);;
+Select(btnBuildAnalisis);;
+Select(btnBuildBarras)
+```
+
+---
+
+# Notas de diseño de los KPIs
+
+- **Sets únicos vs. filas**: un SET repetido en varias cajas se cuenta una sola vez (`Distinct`), pero paquetes, pesos y cajas se suman por fila. Esa es la diferencia que hace que los números cuadren con la packing list.
+- **Cajas** = número de filas con `NumBox` mayor que cero. Cada fila del histórico es una caja.
+- **Promedios que excluyen ceros**: cada promedio filtra `> 0` antes de calcular, para que los envíos aún en curso no bajen artificialmente el indicador.
+- **Cumplimiento**: `Desv_Fecha <= 0` significa que salió en o antes de la fecha requerida. Es el KPI que más rápido te va a señalar cuellos de botella por locación.
+- Métricas que valdría la pena agregar después: días promedio por `Prioridad` (Estándar vs. urgente), % de envíos que requieren FPPO frente a ToBRFV, y paquetes por caja como medida de eficiencia de empaque.
