@@ -1,0 +1,2236 @@
+# procesos01 · Mejoras SPA / Exportaciones / Importaciones / Análisis
+
+## 0. Cómo aplicar (léelo primero)
+
+**Dos formatos de código en este documento:**
+
+| Tipo de bloque | Dónde se pega | Sintaxis |
+|---|---|---|
+| `FÓRMULA` (control existente o botón lógico nuevo) | Barra de fórmulas de Studio | **Español**: separador `;`  · encadenar `;;` · decimal `,` |
+| `YAML` (controles visuales nuevos / contenedor rediseñado) | Clic derecho sobre el contenedor padre → **Pegar código** | Invariante (igual que tu export): `,` y `;` — Studio lo convierte solo |
+
+**Orden recomendado:**
+1. App.Formulas (sección 1) → 2. OnStart (sección 2) → 3. OnVisible (sección 3)
+4. Crear los 3 botones del motor de exportación (sección 7) **antes** de tocar los controles que los llaman.
+5. Resto de secciones.
+6. Análisis: **borra primero el contenedor `Kpis Exports`** y luego pega `conAnaExport` dentro de `Container73` (si no, Studio renombra `btnAnaCargar` → `btnAnaCargar_1` y el menú deja de funcionar).
+
+**Supuestos de tipo de columna** (según tu código actual):
+
+| Lista | Columna | Tipo asumido |
+|---|---|---|
+| EXPORT-IMPORT | Packets | Número |
+| EXPORT-IMPORT | Net_Weight, Gross_Weight | Texto |
+| EXPORT-IMPORT | NumBox | Número |
+| EXPORT-IMPORT | Packaging_Type, CROP, Treatment, SHIP_TO_COUNTRY, TYPE_OF_SHIPMENT, SHIPMENT_PROGRESS | Opción |
+| SOLICITUDESPA1 | Packets, Net_Weight | Texto |
+
+> En el análisis todo se lee con `Coalesce(Value(Text(campo)); 0)`, que funciona sea el campo texto o número. Donde se **escribe** sí importa el tipo; si alguno difiere, el error aparece subrayado en esa línea exacta.
+
+---
+
+## 1. App.Formulas — agregar al final
+
+```
+// ===== Normaliza cualquier nombre de cultivo: "Tomato Fresh", "tomato process", "Tomate" -> "Tomato"
+// Watermelon se evalúa ANTES que Melon porque "watermelon" contiene "melon".
+fxCultivo(c: Text): Text =
+    With({x: Lower(Trim(c))};
+        If(
+            IsBlank(x); "Otros";
+            "watermelon" in x Or "sandi" in x Or "sandí" in x; "Watermelon";
+            "melon" in x Or "melón" in x; "Melon";
+            "tomat" in x; "Tomato";
+            "pepper" in x Or "chile" in x Or "capsicum" in x; "Pepper";
+            "cucumber" in x Or "pepino" in x; "Cucumber";
+            "Otros"
+        )
+    );;
+
+fxHexCultivo(c: Text): Text =
+    Switch(c;
+        "Tomato"; "#B23A32";
+        "Pepper"; "#C97E17";
+        "Melon"; "#88BC30";
+        "Watermelon"; "#7E3A66";
+        "Cucumber"; "#17456B";
+        "#63756B"
+    );;
+
+listaTipoPaquete = ["Paquete 1"; "Paquete 2"; "Paquete 3"; "Paquete 4"; "Paquete 5"; "Paquete 6"];;
+```
+
+> Si Studio marca error en `fxCultivo(c: Text): Text`, activa **Configuración → Actualizaciones → Funciones definidas por el usuario**.
+
+> ⚠️ En tu App.Formulas actual hay comillas sin cerrar que pueden romper todas las fórmulas con nombre:
+> - `rutaPesoCorreos`: filas `Pepper`, `Melon`, `Watermelon`, `Cucumber` (`Copia: "...";"..."` y `Copia: "...;...}` sin cerrar).
+> - `gloMailPesoTo = "...;2015-081484@intecap.edu.gt;;` → falta la comilla final.
+> Deja cada correo múltiple como **un solo texto**: `Copia: "a@x.com;b@x.com"`.
+
+---
+
+## 2. App.OnStart — reemplazar los DOS bloques de `colSetsExpNuevos`
+
+Busca las dos apariciones de `ClearCollect(colSetsExpNuevos; ...);; Clear(colSetsExpNuevos);;` y reemplaza ambas por:
+
+```
+ClearCollect(colSetsExpNuevos;
+    {Linea: 0; SetID: 0; SetName: ""; Crop: ""; Program: ""; Generation: ""; MCT: ""; TrialIntent: ""; OperationType: ""; VCR: ""; Field: ""; Area: ""; Season: ""; Rank: ""; Greenhouse: ""; Plantas: 0; EsManual: false}
+);;
+Clear(colSetsExpNuevos);;
+Set(varGLModo; "");;
+Set(varCmpModo; "ID");;
+Set(varCmpDias; 180);;
+```
+
+---
+
+## 3. procesos01 · OnVisible — agregar al INICIO (antes de `UpdateContext`)
+
+```
+Set(varTab; "");;
+Set(varVistaActual; "");;
+Set(gloIDActivo; "");;
+Set(varGLModo; "");;
+Set(gloPipeFiltro; Coalesce(gloPipeFiltro; "Todas"));;
+```
+
+El resto de tu OnVisible queda igual.
+
+---
+
+## 4. Menú lateral — botón activo resaltado
+
+**Causa:** `Export`, `Export analysis` y `Plant health` comparaban `varTab` pero nunca lo cambiaban; `+ New request` tenía `Fill` fijo; y al ir a Export el último tab del tablero seguía marcado. Ahora cada botón se evalúa contra `varSeccionActiva` (+ `varTab` para las vistas del tablero).
+
+### Button11 (+ New request)
+**Fill**
+```
+If(varSeccionActiva = "Solicitud"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Solicitud"; FontWeight.Bold; FontWeight.Normal)
+```
+**OnSelect**
+```
+Set(varActividadSeleccionada; "");;
+Set(gloPrioridad; "");;
+Set(gloOvPais; "");;
+Set(gloIDActivo; "");;
+Set(gloEsSiembra; false);; Set(gloEsColecta; false);;
+Set(gloEsExpSemilla; false);; Set(gloEsExpTejido; false);; Set(gloEsExport; false);;
+Set(varTab; "");;
+Set(varVistaActual; "");;
+Set(varSeccionActiva; "Solicitud");;
+Clear(colSetsSel);; Clear(colSetsColecta);; Clear(colDestinoIDs);;
+Clear(colCarritoSiembras);; Clear(colCarritoColecta);; Clear(colCarritoExpSeed);; Clear(colCarritoExpTissue);;
+UpdateContext({locPasoActual: 1})
+```
+
+### btnTabKPIs (Recent)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "tablero"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "tablero"; FontWeight.Bold; FontWeight.Normal)
+```
+**OnSelect**
+```
+Set(varTab; "tablero");; Set(varVistaActual; "");; Set(varSeccionActiva; "Tablero");; Select(btnBuildDash)
+```
+
+### btnTabCarga (Gantt)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "carga"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "carga"; FontWeight.Bold; FontWeight.Normal)
+```
+**OnSelect**
+```
+Set(varTab; "carga");; Set(varVistaActual; "");; Set(varSeccionActiva; "Tablero");; Select(btnBuildDash)
+```
+
+### btnTabPipe (Pipeline)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "pipeline"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "pipeline"; FontWeight.Bold; FontWeight.Normal)
+```
+**OnSelect**
+```
+Set(varTab; "pipeline");; Set(varVistaActual; "");; Set(varSeccionActiva; "Tablero");; Select(btnBuildDash)
+```
+
+### btnTabCal (Calendar)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "cal"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "cal"; FontWeight.Bold; FontWeight.Normal)
+```
+**OnSelect**
+```
+Set(varTab; "cal");; Set(varVistaActual; "");; Set(varSeccionActiva; "Tablero");; Select(btnBuildDash)
+```
+
+### btnTabTiempos (KPIs)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "kpi"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "kpi"; FontWeight.Bold; FontWeight.Normal)
+```
+**Size** → `12` (estaba en 10, distinto a los demás)
+**OnSelect**
+```
+Set(varTab; "kpi");; Set(varVistaActual; "");; Set(varSeccionActiva; "Tablero");; Select(btnBuildDash)
+```
+
+### btnTabImport (Imports)
+**Fill**
+```
+If(varSeccionActiva = "Tablero" And varTab = "import"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "Tablero" And varTab = "import"; FontWeight.Bold; FontWeight.Normal)
+```
+**Size** → `12`
+**OnSelect**
+```
+Set(varTab; "import");;
+Set(varVistaActual; "");;
+Set(varSeccionActiva; "Tablero");;
+ClearCollect(colImport; 'Import Tracking Log');;
+Select(btnImpFiltrar)
+```
+
+### btnTablExport (Export)
+**Fill**
+```
+If(varSeccionActiva = "vExport"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "vExport"; FontWeight.Bold; FontWeight.Normal)
+```
+**Size** → `12`
+**OnSelect**
+```
+Set(varTab; "vExport");;
+Set(varVistaActual; "vExport");;
+Set(varSeccionActiva; "vExport")
+```
+
+### btnTablExport_2 (Export analysis)
+**Fill**
+```
+If(varSeccionActiva = "ExportAnalyst"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "ExportAnalyst"; FontWeight.Bold; FontWeight.Normal)
+```
+**Size** → `12`
+**OnSelect**
+```
+Set(varTab; "ExportAnalyst");;
+Set(varVistaActual; "ExportAnalyst");;
+Set(varSeccionActiva; "ExportAnalyst");;
+Select(btnAnaCargar)
+```
+
+### btnTablExport_1 (Plant health)
+**Fill**
+```
+If(varSeccionActiva = "SanidadVegetal"; clrBrand; RGBA(255; 255; 255; 0,06))
+```
+**FontWeight**
+```
+If(varSeccionActiva = "SanidadVegetal"; FontWeight.Bold; FontWeight.Normal)
+```
+**Size** → `12`
+**OnSelect**
+```
+Set(varTab; "SanidadVegetal");;
+Set(varVistaActual; "SanidadVegetal");;
+Set(varSeccionActiva; "SanidadVegetal")
+```
+
+---
+
+## 5. Importaciones (vImport) — filtros reales + KPIs por cultivo
+
+**Causa:** las tarjetas contaban `colImport` completo (sin filtros); la galería filtraba Status contra `'# of samples'`; el filtro de cultivo usaba `in Concat(...)` ("Melon" también encontraba "Watermelon"); y los combos escribían `colKpi` a partir de `colTrz` (datos de SPA, no de importaciones). Ahora todo se calcula una vez en `colImpFilt` y todas las vistas leen de ahí.
+
+### 5.1 Botón nuevo `btnImpFiltrar` (Classic/Button dentro de `vImport`)
+**Visible** → `false`
+**OnSelect**
+```
+ClearCollect(colImpFilt;
+    Filter(colImport As _i;
+        With(
+            {
+                _area: Coalesce(cmbImpArea.Selected.Value; "Todas");
+                _st: Coalesce(cmbImpStatus.Selected.Value; "Todos");
+                _cr: Coalesce(cmbImpCrop.Selected.Value; "Todos");
+                _fecha: Coalesce(_i.'Shipping Date'; _i.'Arrival date'; _i.'Received Date Salama')
+            };
+            (_area = "Todas" Or Substitute(Upper(_i.Area.Value); "&"; "") = Substitute(Upper(_area); "&"; "")) And
+            (_st = "Todos" Or _i.'Status (Status0)'.Value = _st) And
+            (_cr = "Todos" Or CountRows(Filter(_i.'Crop/Use' As _c; fxCultivo(_c.Value) = _cr)) > 0) And
+            (IsBlank(dpImpDesde.SelectedDate) Or (!IsBlank(_fecha) And _fecha >= dpImpDesde.SelectedDate)) And
+            (IsBlank(dpImpHasta.SelectedDate) Or (!IsBlank(_fecha) And _fecha < DateAdd(dpImpHasta.SelectedDate; 1; TimeUnit.Days))) And
+            (
+                IsBlank(txtImpBuscar.Text) Or
+                StartsWith(Text(_i.'Tracking #'); txtImpBuscar.Text) Or
+                StartsWith(_i.'Ship from'.Value; txtImpBuscar.Text) Or
+                StartsWith(_i.'Breeder Project/Contact'; txtImpBuscar.Text) Or
+                StartsWith(_i.Area.Value; txtImpBuscar.Text) Or
+                StartsWith(_i.'Status (Status0)'.Value; txtImpBuscar.Text) Or
+                Lower(txtImpBuscar.Text) in Lower(Concat(_i.'Crop/Use'; Value; ","))
+            )
+        )
+    )
+);;
+ClearCollect(colImpCrop;
+    ForAll(["Tomato"; "Pepper"; "Melon"; "Watermelon"; "Cucumber"] As _k;
+        With({_g: Filter(colImpFilt As _i; CountRows(Filter(_i.'Crop/Use' As _c; fxCultivo(_c.Value) = _k.Value)) > 0)};
+            {
+                CROP: _k.Value;
+                HEX: fxHexCultivo(_k.Value);
+                ENVIOS: CountRows(_g);
+                VARIEDADES: Sum(_g; Coalesce(Value(Text('# Varieties')); 0));
+                REALES: Sum(_g; Coalesce(Value(Text('#Real Varieties')); 0));
+                RECIBIDOS: CountRows(Filter(_g; 'Status (Status0)'.Value = "Received"));
+                INVENTARIO: CountRows(Filter(_g; 'Status (Status0)'.Value = "Inventory"));
+                RD: CountRows(Filter(_g; Substitute(Upper(Area.Value); "&"; "") = "RD"));
+                CNP: CountRows(Filter(_g; Upper(Area.Value) = "CNP"))
+            }
+        )
+    )
+)
+```
+
+### 5.2 Filtros
+| Control | Propiedad | Fórmula |
+|---|---|---|
+| txtImpBuscar | DelayOutput | `true` |
+| txtImpBuscar | OnChange | `Select(btnImpFiltrar)` |
+| cmbImpArea | OnChange | `Select(btnImpFiltrar)` |
+| cmbImpStatus | Items | `["Todos"; "Received"; "Sticker printing"; "Heavy"; "Inventory"; "Located"; "Pending"; "Completed"]` |
+| cmbImpStatus | OnChange | `Select(btnImpFiltrar)` |
+| cmbImpCrop | OnChange | `Select(btnImpFiltrar)` |
+| dpImpDesde | Format | `"dd/mm/yyyy"` |
+| dpImpDesde | Placeholder | `"Desde"` |
+| dpImpDesde | OnChange | `Select(btnImpFiltrar)` |
+| dpImpHasta | Format | `"dd/mm/yyyy"` |
+| dpImpHasta | Placeholder | `"Hasta"` |
+| dpImpHasta | OnChange | `Select(btnImpFiltrar)` |
+
+**icImpLimpiar · OnSelect**
+```
+Reset(txtImpBuscar);; Reset(cmbImpArea);; Reset(cmbImpStatus);; Reset(cmbImpCrop);; Reset(dpImpDesde);; Reset(dpImpHasta);;
+Select(btnImpFiltrar)
+```
+
+### 5.3 Tarjetas KPI (ahora respetan todos los filtros)
+| Control | Propiedad | Fórmula |
+|---|---|---|
+| lblKL1_8 | Text | `"Recibidos"` |
+| lblKV1_8 | Text | `CountRows(Filter(colImpFilt; 'Status (Status0)'.Value = "Received"))` |
+| lblKD1_8 | Text | `"de " & CountRows(colImpFilt) & " importaciones"` |
+| lblKL1_9 | Text | `"R&D"` |
+| lblKV1_9 | Text | `CountRows(Filter(colImpFilt; Substitute(Upper(Area.Value); "&"; "") = "RD"))` |
+| lblKD1_9 | Text | `Sum(Filter(colImpFilt; Substitute(Upper(Area.Value); "&"; "") = "RD"); Coalesce(Value(Text('# Varieties')); 0)) & " variedades"` |
+| lblKL1_10 | Text | `"CNP"` |
+| lblKV1_10 | Text | `CountRows(Filter(colImpFilt; Upper(Area.Value) = "CNP"))` |
+| lblKD1_10 | Text | `Sum(Filter(colImpFilt; Upper(Area.Value) = "CNP"); Coalesce(Value(Text('# Varieties')); 0)) & " variedades"` |
+| lblKL1_11 | Text | `"Variedades"` |
+| lblKV1_11 | Text | `Sum(colImpFilt; Coalesce(Value(Text('# Varieties')); 0))` |
+| lblKD1_11 | Text | `Sum(colImpFilt; Coalesce(Value(Text('#Real Varieties')); 0)) & " reales"` |
+| glKpiTabla | Items | `Sort(colImpFilt; 'Shipping Date'; SortOrder.Descending)` |
+| lblImpFoot | Text | `CountRows(colImpFilt) & " de " & CountRows(colImport) & " importaciones con los filtros actuales"` |
+
+**btnImpGuardar · OnSelect** (agrega el refresco del filtro)
+```
+Patch('Import Tracking Log'; LookUp('Import Tracking Log'; ID = varRegImport.ID);
+    {
+        '#Real Varieties': Value(tiRealVar.Text);
+        'Received Date Salama': dpDrReq_1.SelectedDate
+    }
+);;
+ClearCollect(colImport; 'Import Tracking Log');;
+Set(varRegImport; LookUp(colImport; ID = varRegImport.ID));;
+Select(btnImpFiltrar);;
+Notify("Importación actualizada"; NotificationType.Success)
+```
+
+### 5.4 KPIs por cultivo — YAML (pegar dentro de `vImport`, luego moverlo debajo de `conAreaStrip_1`)
+```yaml
+- galImpCrop:
+    Control: Gallery@2.15.0
+    Variant: BrowseLayout_Horizontal_TwoTextOneImageVariant_ver5.0
+    Properties:
+      FillPortions: =0
+      Height: =130
+      Items: =colImpCrop
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      ShowScrollbar: =false
+      TemplatePadding: =6
+      TemplateSize: =210
+      Width: =Parent.Width - 48
+    Children:
+      - htmlImpCropCard:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            Height: =Parent.TemplateHeight
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            Width: =Parent.TemplateWidth
+            HtmlText: |-
+              ="<div style='font-family:Segoe UI;box-sizing:border-box;height:112px;background:#fff;border:1px solid #e3eaf1;border-top:4px solid " & ThisItem.HEX & ";border-radius:10px;padding:8px 12px'>" &
+              "<div style='display:flex;justify-content:space-between'><b style='font-size:13px;color:#16273a'>" & ThisItem.CROP & "</b><span style='font-size:10px;color:#93a4b4'>R&D " & ThisItem.RD & " · CNP " & ThisItem.CNP & "</span></div>" &
+              "<div style='font-size:24px;font-weight:700;color:" & ThisItem.HEX & ";line-height:1.25'>" & ThisItem.ENVIOS & "<span style='font-size:11px;color:#93a4b4;font-weight:400'> importaciones</span></div>" &
+              "<div style='font-size:11px;color:#5a6b7b'>" & ThisItem.VARIEDADES & " variedades · " & ThisItem.REALES & " reales</div>" &
+              "<div style='font-size:11px;color:#5a6b7b'>" & ThisItem.RECIBIDOS & " recibidos · " & ThisItem.INVENTARIO & " en inventario</div></div>"
+```
+
+---
+
+## 6. New request → Exportación de semilla: asignar el ID (el ID salía vacío)
+
+**Causa:** la tarjeta guardaba `ID: Text(ThisItem.Request_ID_Old)`; en solicitudes nuevas de la Global Shipping App ese campo viene vacío, así que el chip mostraba "ID " y `gloIDActivo` quedaba en blanco (botón *Asignar ID* deshabilitado). Además la galería filtraba con `Combobox3` (el combo de *Request Type* de colecta, dentro de otra galería) en lugar de `cmbShipProgreso`/`Tipe`.
+
+> Importante: el valor que se asigna debe ser el mismo que tu flujo escribe en `EXPORT-IMPORT.Request_ID`. Se usa `Request_ID_Old` y, si está vacío, el `ID` de SharePoint.
+
+### shipingapps · Items
+```
+With({_n: IfError(Value(txtBuscadors.Text); -1)};
+    Sort(
+        Filter(
+            'Global Shipping Requests';
+            SHIP_FROM_COUNTRY.Value = "Guatemala";
+            IsBlank(cmbShipProgreso.Selected.Value) Or cmbShipProgreso.Selected.Value = "All" Or SHIPMENT_PROGRESS.Value = cmbShipProgreso.Selected.Value;
+            IsBlank(Tipe.Selected.Value) Or Tipe.Selected.Value = "All" Or TYPE_OF_SHIPMENT.Value = Tipe.Selected.Value;
+            IsBlank(Desde.SelectedDate) Or REQUESTED_SHIP_DATE >= Desde.SelectedDate;
+            IsBlank(Hasta.SelectedDate) Or REQUESTED_SHIP_DATE <= Hasta.SelectedDate;
+            IsBlank(txtBuscadors.Text) Or
+                ID = _n Or
+                StartsWith(Request_ID_Old; txtBuscadors.Text) Or
+                StartsWith(SHIP_TO_LOCATION; txtBuscadors.Text) Or
+                CROP.Value = txtBuscadors.Text Or
+                SHIP_TO_COUNTRY.Value = txtBuscadors.Text
+        );
+        REQUESTED_SHIP_DATE;
+        SortOrder.Descending
+    )
+)
+```
+
+### cmbShipProgreso
+**Items** → `["All"; "New Request"; "In Progress"]`
+**InputTextPlaceholder** → `"Shipment progress"`
+
+### Label46_8 · Text
+```
+"ID: " & Coalesce(ThisItem.Request_ID_Old; Text(ThisItem.ID))
+```
+
+### Button12_2 · OnSelect
+```
+With({_idTxt: Coalesce(Text(ThisItem.Request_ID_Old); Text(ThisItem.ID))};
+    If(
+        CountRows(Filter(colDestinoIDs; IDNum = ThisItem.ID)) > 0;
+        RemoveIf(colDestinoIDs; IDNum = ThisItem.ID);;
+        If(gloIDActivo = _idTxt; Set(gloIDActivo; ""));
+        Collect(colDestinoIDs;
+            {
+                ID: _idTxt;
+                IDNum: ThisItem.ID;
+                ShipToLocation: ThisItem.SHIP_TO_LOCATION;
+                ReqShipDate: ThisItem.REQUESTED_SHIP_DATE;
+                CreatedDate: ThisItem.'Created Date';
+                PEA: ThisItem.'Created By'.DisplayName;
+                Color: Switch(CountRows(colDestinoIDs); 0; "#d35442"; 1; "#2f9e5f"; 2; "#2e9fd6"; 3; "#d39a2a"; "#8a5cd0")
+            }
+        );;
+        If(IsBlank(gloIDActivo); Set(gloIDActivo; _idTxt);; Set(gloColorActivo; LookUp(colDestinoIDs; ID = _idTxt; Color)))
+    )
+)
+```
+
+### Icon19 (limpiar filtros) · OnSelect
+```
+Reset(cmbShipProgreso);; Reset(Tipe);; Reset(Hasta);; Reset(Desde);; Reset(txtBuscadors)
+```
+
+### Button14_6 (Next del paso 3) · OnSelect
+Si solo hay un ID seleccionado, se asigna solo a todos los SETs.
+```
+If(CountRows(colDestinoIDs) = 1;
+    Set(gloIDActivo; First(colDestinoIDs).ID);;
+    Set(gloColorActivo; First(colDestinoIDs).Color);;
+    UpdateIf(colCarritoExpSeed; IsBlank(AsignID); {AsignID: First(colDestinoIDs).ID})
+);;
+UpdateContext({locPasoActual: 4})
+```
+
+---
+
+## 7. Motor de exportación (3 botones ocultos NUEVOS)
+
+Colócalos en `Container57` (junto a `btnBuildDash`), Classic/Button, **Visible = false**, **Width/Height = 1**.
+
+Reglas que implementan:
+- **EXPORT-IMPORT:** un SET puede repetirse en el mismo ID (una fila por caja / peso).
+- La fila "vacía" que crea el flujo de la Global Shipping App (sin SET) **se rellena** con el primer SET; los siguientes se crean copiando TODA la cabecera: país, locación, tipo, fecha requerida, fecha de creación, PEA, SHIPMENT_PROGRESS y fechas de etapa (Pack/treat start, Packing List, IP, GL, Shipping, Customs, Delivery, tracking). Si agregas SETs cuando el ID ya está "En proceso", heredan ese estatus.
+- **SOLICITUDESPA1:** cada SET aparece **una sola vez por Request_ID** (no duplica el calendario). Rellena el item vacío del flujo, crea los que falten, actualiza sumas de packets/peso, estatus y fechas, y elimina duplicados existentes (conserva el más antiguo, que es el que suele tener adjuntos).
+- Completa Program / Trial Intent / Generation / MCT / PEA / VCR / Field / Season / Area desde DATASUMMARY1.
+
+> Recordatorio de tu patrón: `Select()` se ejecuta al terminar la fórmula que lo llama; por eso las acciones posteriores (limpiar carrito, abrir popup) viven dentro de estos botones controladas por `varGLModo`.
+
+### 7.1 `btnGuardarLineasExp` · OnSelect
+Entrada: `colGLLineas` (ya preparada por quien lo llama) y `varGLModo` = `"guardar"` | `"popup"` | `"icono"`.
+```
+// ===== 1) Filas existentes de los IDs involucrados =====
+Clear(colGLExist);;
+ForAll(Distinct(colGLLineas; AsignID) As _i;
+    Collect(colGLExist; Filter('EXPORT-IMPORT'; Request_ID = _i.Value))
+);;
+
+// ===== 2) Por ID: fila vacía del flujo (a rellenar), fila de referencia y primera línea nueva =====
+ClearCollect(colGLCab;
+    ForAll(Distinct(colGLLineas; AsignID) As _i;
+        {
+            ReqID: _i.Value;
+            CabID: Coalesce(First(Sort(Filter(colGLExist; Request_ID = _i.Value And IsBlank(SET)); ID; SortOrder.Ascending)).ID; 0);
+            RefID: Coalesce(First(Sort(Filter(colGLExist; Request_ID = _i.Value); ID; SortOrder.Ascending)).ID; 0);
+            Primera: Min(Filter(colGLLineas; AsignID = _i.Value); Linea)
+        }
+    )
+);;
+
+// ===== 3) Guardar cada línea (el mismo SET puede ir varias veces) =====
+ForAll(colGLLineas As L;
+    With(
+        {
+            _c: LookUp(colGLCab; ReqID = L.AsignID);
+            _dsL: LookUp(DATASUMMARY1; SetName = L.SetName);
+            _dst: LookUp(colDestinoIDs; ID = L.AsignID)
+        };
+        With(
+            {
+                _ref: LookUp(colGLExist; ID = _c.RefID);
+                _set:
+                    {
+                        Actividad: "Envio de semillas";
+                        SET: L.SetName;
+                        CROP: {Value: Coalesce(L.Crop; _dsL.Crop.Value)};
+                        Program: Coalesce(L.Program; _dsL.Program.Value; "NA");
+                        Trial_Intent: Coalesce(L.TrialIntent; _dsL.TrialIntent.Value; "NA");
+                        OperationType: Coalesce(L.OperationType; _dsL.OperationType.Value; "NA");
+                        VCR: Coalesce(L.VCR; _dsL.VCR; "");
+                        Field: Coalesce(L.Field; _dsL.Field; "");
+                        Season: Coalesce(L.Season; Text(_dsL.Season); "");
+                        Area: Coalesce(L.Area; _dsL.Area.Value; "SSD");
+                        Rank: Coalesce(L.Rank; _dsL.Rank; "");
+                        Greenhouse: Coalesce(L.Greenhouse; _dsL.Greenhouse; "");
+                        'Transplanted plants': If(L.Plantas > 0; L.Plantas; _dsL.PlantsTransplanted);
+                        Packets: Coalesce(IfError(Value(L.Packets); 0); 0);
+                        Net_Weight: L.PesoNeto;
+                        Treatment: If(IsBlank(L.Treatment); Blank(); {Value: L.Treatment});
+                        PACKING_LIST: L.AsignID & " - " & Coalesce(L.Area; _dsL.Area.Value; "SSD")
+                    }
+            };
+            If(
+                _c.CabID > 0 And L.Linea = _c.Primera;
+                // Rellena la fila vacía creada por el flujo
+                Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _c.CabID); _set;
+                    {
+                        Prioridad: Coalesce(gloPrioridad; _ref.Prioridad; "Estandar");
+                        BOA: Coalesce(_ref.BOA; gloUsuario);
+                        BOAEmail: Coalesce(_ref.BOAEmail; varUsuarioEmail; User().Email)
+                    }
+                );
+                // Nueva fila: copia toda la información del envío
+                Patch('EXPORT-IMPORT'; Defaults('EXPORT-IMPORT'); _set;
+                    {
+                        Request_ID: L.AsignID;
+                        SHIP_TO_LOCATION: Coalesce(_ref.SHIP_TO_LOCATION; _dst.ShipToLocation);
+                        SHIP_TO_COUNTRY: _ref.SHIP_TO_COUNTRY;
+                        TYPE_OF_SHIPMENT: _ref.TYPE_OF_SHIPMENT;
+                        SHIPMENT_PROGRESS: _ref.SHIPMENT_PROGRESS;
+                        REQUESTED_SHIP_DATE: Coalesce(_ref.REQUESTED_SHIP_DATE; _dst.ReqShipDate);
+                        CreatedDate: Coalesce(_ref.CreatedDate; _dst.CreatedDate; Now());
+                        PEA: Coalesce(_ref.PEA; _dst.PEA; _dsL.PEA);
+                        'Pack/treat start': _ref.'Pack/treat start';
+                        'Pack/treat completed': _ref.'Pack/treat completed';
+                        'Packing List Emitida': _ref.'Packing List Emitida';
+                        'IP Request': _ref.'IP Request';
+                        'IP Received': _ref.'IP Received';
+                        'GL Request': _ref.'GL Request';
+                        'GL Received': _ref.'GL Received';
+                        'Shipping Date': _ref.'Shipping Date';
+                        'Arrival to customs': _ref.'Arrival to customs';
+                        'Delivery Date': _ref.'Delivery Date';
+                        TRACKING_NUMBER: _ref.TRACKING_NUMBER;
+                        Prioridad: Coalesce(gloPrioridad; _ref.Prioridad; "Estandar");
+                        BOA: Coalesce(_ref.BOA; gloUsuario);
+                        BOAEmail: Coalesce(_ref.BOAEmail; varUsuarioEmail; User().Email)
+                    }
+                )
+            )
+        )
+    )
+);;
+Refresh('EXPORT-IMPORT');;
+
+// ===== 4) IDs a sincronizar con SOLICITUDESPA1 =====
+If(varGLModo <> "guardar"; ClearCollect(colSyncIDs; Distinct(colGLLineas; AsignID)));;
+
+// ===== 5) Acciones posteriores según quién llamó =====
+If(varGLModo = "icono";
+    Set(varRegExport; First(Sort(Filter('EXPORT-IMPORT'; Request_ID = varIcoReq And SET = varIcoSet); ID; SortOrder.Descending)));;
+    Patch(colCarritoExpSeed; varIcoRow; {Guardado: true; IdGuardado: varRegExport.ID})
+);;
+If(varGLModo = "popup";
+    Notify("✅ " & CountRows(colGLLineas) & " línea(s) agregadas al ID " & First(colGLLineas).AsignID; NotificationType.Success);;
+    Clear(colSetsExpNuevos);;
+    Set(varPopupAddSets; false)
+);;
+If(varGLModo = "guardar";
+    Notify("Envío de semilla guardado correctamente"; NotificationType.Success);;
+    Clear(colSetsSel);; Clear(colSetsColecta);; Clear(colDestinoIDs);;
+    Clear(colCarritoSiembras);; Clear(colCarritoColecta);; Clear(colCarritoExpSeed);; Clear(colCarritoExpTissue);;
+    Set(varActividadSeleccionada; "");; Set(gloPrioridad; "");; Set(gloOvPais; "");; Set(gloIDActivo; "");;
+    Set(gloEsSiembra; false);; Set(gloEsColecta; false);; Set(gloEsExpSemilla; false);; Set(gloEsExpTejido; false);; Set(gloEsExport; false);;
+    UpdateContext({locPasoActual: 1})
+);;
+Select(btnSyncSPA)
+```
+
+### 7.2 `btnSyncSPA` · OnSelect
+Entrada: `colSyncIDs` (tabla de `{Value: Request_ID}`).
+```
+// ===== 1) Datos actuales de los IDs =====
+Clear(colSyncExp);;
+Clear(colSyncSpa);;
+ForAll(Filter(colSyncIDs; !IsBlank(Value)) As _i;
+    Collect(colSyncExp; Filter('EXPORT-IMPORT'; Request_ID = _i.Value));;
+    Collect(colSyncSpa; Filter(SOLICITUDESPA1; Request_ID = _i.Value))
+);;
+
+// ===== 2) Pares únicos Request_ID + SET (un SET cuenta una sola vez por ID) =====
+ClearCollect(colSyncPares;
+    ForAll(
+        GroupBy(Filter(colSyncExp; !IsBlank(SET)); Request_ID; SET; _g) As G;
+        {
+            ReqID: G.Request_ID;
+            SetN: G.SET;
+            Packets: Sum(G._g; Coalesce(Value(Text(Packets)); 0));
+            Neto: Sum(G._g; Coalesce(Value(Text(Net_Weight)); 0));
+            E: First(Sort(G._g; ID; SortOrder.Ascending))
+        }
+    )
+);;
+
+// ===== 3) Estatus / fechas que ya tenga el ID en SOLICITUDESPA1 =====
+ClearCollect(colSyncRef;
+    ForAll(Filter(colSyncIDs; !IsBlank(Value)) As _i;
+        With({_r: First(Sort(Filter(colSyncSpa; Request_ID = _i.Value); ID; SortOrder.Ascending))};
+            {
+                ReqID: _i.Value;
+                Estatus: _r.Estatus;
+                FIni: _r.FechaInicio;
+                FFin: _r.FechaFin;
+                FEnt: _r.FechaEntrega;
+                FSol: _r.FechaSolicitud;
+                Prio: _r.Prioridad;
+                BOA: _r.BOA;
+                BOAEmail: _r.BOAEmail
+            }
+        )
+    )
+);;
+
+// ===== 4) SETs que todavía no existen en SOLICITUDESPA1 =====
+ClearCollect(colSyncFaltan;
+    Filter(colSyncPares As _p; IsBlank(LookUp(colSyncSpa; Request_ID = _p.ReqID And SetName = _p.SetN; ID)))
+);;
+ClearCollect(colSyncUsados; {ReqID: ""; SetN: ""});;
+Clear(colSyncUsados);;
+
+// ===== 5) Rellenar el item vacío que creó el flujo (uno por ID) =====
+ForAll(
+    GroupBy(Filter(colSyncSpa; IsBlank(SetName)); Request_ID; _v) As V;
+    With(
+        {
+            P: First(Filter(colSyncFaltan; ReqID = V.Request_ID));
+            _idVacio: First(Sort(V._v; ID; SortOrder.Ascending)).ID
+        };
+        If(!IsBlank(P.SetN);
+            With({_e: P.E; _d: LookUp(DATASUMMARY1; SetName = P.SetN); _r: LookUp(colSyncRef; ReqID = P.ReqID)};
+                Patch(SOLICITUDESPA1; LookUp(SOLICITUDESPA1; ID = _idVacio);
+                    {
+                        Actividad: "Envio de semillas";
+                        Request_ID: P.ReqID;
+                        SetName: P.SetN;
+                        Crop: Coalesce(_d.Crop.Value; _e.CROP.Value; "");
+                        Program: Coalesce(_d.Program.Value; _e.Program; "NA");
+                        Generation: Coalesce(_d.Generation.Value; "NA");
+                        MCT: Coalesce(_d.MCT.Value; "NA");
+                        Trial_Intent: Coalesce(_d.TrialIntent.Value; _e.Trial_Intent; "NA");
+                        OperationType: Coalesce(_d.OperationType.Value; "NA");
+                        VCR: Coalesce(_d.VCR; _e.VCR; "");
+                        Field: Coalesce(_d.Field; _e.Field; "");
+                        Area: Coalesce(_d.Area.Value; _e.Area; "SSD");
+                        Season: Coalesce(Text(_d.Season); _e.Season; "");
+                        PEA: Coalesce(_e.PEA; _d.PEA; "");
+                        SHIP_TO_LOCATION: _e.SHIP_TO_LOCATION;
+                        'Requested Date': Coalesce(_e.REQUESTED_SHIP_DATE; gloFechaEntregaEst);
+                        FechaSolicitud: Coalesce(_r.FSol; _e.CreatedDate; Now());
+                        Estatus: If(
+                            !IsBlank(_e.'Packing List Emitida'); "Entregado";
+                            !IsBlank(_e.'Pack/treat completed'); "Finalizado";
+                            !IsBlank(_e.'Pack/treat start'); "En proceso";
+                            Coalesce(_r.Estatus; "Solicitado")
+                        );
+                        FechaInicio: Coalesce(_e.'Pack/treat start'; _r.FIni);
+                        FechaFin: Coalesce(_e.'Pack/treat completed'; _r.FFin);
+                        FechaEntrega: Coalesce(_e.'Packing List Emitida'; _r.FEnt);
+                        Packets: Text(P.Packets);
+                        Net_Weight: Text(P.Neto);
+                        Prioridad: Coalesce(_r.Prio; _e.Prioridad; "Estandar");
+                        BOA: Coalesce(_r.BOA; _e.BOA; gloUsuario);
+                        BOAEmail: Coalesce(_r.BOAEmail; _e.BOAEmail; varUsuarioEmail; User().Email);
+                        PACKING_LIST: P.ReqID & " - " & Coalesce(_d.Area.Value; _e.Area; "SSD");
+                        Modificado: Now()
+                    }
+                )
+            );;
+            Collect(colSyncUsados; {ReqID: P.ReqID; SetN: P.SetN})
+        )
+    )
+);;
+
+// ===== 6) Crear los SETs que siguen faltando =====
+ForAll(
+    Filter(colSyncFaltan As _x; IsBlank(LookUp(colSyncUsados; ReqID = _x.ReqID And SetN = _x.SetN; SetN))) As P;
+    With({_e: P.E; _d: LookUp(DATASUMMARY1; SetName = P.SetN); _r: LookUp(colSyncRef; ReqID = P.ReqID)};
+        Patch(SOLICITUDESPA1; Defaults(SOLICITUDESPA1);
+            {
+                Actividad: "Envio de semillas";
+                Request_ID: P.ReqID;
+                SetName: P.SetN;
+                Crop: Coalesce(_d.Crop.Value; _e.CROP.Value; "");
+                Program: Coalesce(_d.Program.Value; _e.Program; "NA");
+                Generation: Coalesce(_d.Generation.Value; "NA");
+                MCT: Coalesce(_d.MCT.Value; "NA");
+                Trial_Intent: Coalesce(_d.TrialIntent.Value; _e.Trial_Intent; "NA");
+                OperationType: Coalesce(_d.OperationType.Value; "NA");
+                VCR: Coalesce(_d.VCR; _e.VCR; "");
+                Field: Coalesce(_d.Field; _e.Field; "");
+                Area: Coalesce(_d.Area.Value; _e.Area; "SSD");
+                Season: Coalesce(Text(_d.Season); _e.Season; "");
+                PEA: Coalesce(_e.PEA; _d.PEA; "");
+                SHIP_TO_LOCATION: _e.SHIP_TO_LOCATION;
+                'Requested Date': Coalesce(_e.REQUESTED_SHIP_DATE; gloFechaEntregaEst);
+                FechaSolicitud: Coalesce(_r.FSol; _e.CreatedDate; Now());
+                Estatus: If(
+                    !IsBlank(_e.'Packing List Emitida'); "Entregado";
+                    !IsBlank(_e.'Pack/treat completed'); "Finalizado";
+                    !IsBlank(_e.'Pack/treat start'); "En proceso";
+                    Coalesce(_r.Estatus; "Solicitado")
+                );
+                FechaInicio: Coalesce(_e.'Pack/treat start'; _r.FIni);
+                FechaFin: Coalesce(_e.'Pack/treat completed'; _r.FFin);
+                FechaEntrega: Coalesce(_e.'Packing List Emitida'; _r.FEnt);
+                Packets: Text(P.Packets);
+                Net_Weight: Text(P.Neto);
+                Prioridad: Coalesce(_r.Prio; _e.Prioridad; "Estandar");
+                BOA: Coalesce(_r.BOA; _e.BOA; gloUsuario);
+                BOAEmail: Coalesce(_r.BOAEmail; _e.BOAEmail; varUsuarioEmail; User().Email);
+                PACKING_LIST: P.ReqID & " - " & Coalesce(_d.Area.Value; _e.Area; "SSD");
+                Modificado: Now()
+            }
+        )
+    )
+);;
+
+// ===== 7) Actualizar los que ya existían (sumas, envío, estatus, datos faltantes) =====
+ForAll(
+    Filter(colSyncPares As _x; !IsBlank(LookUp(colSyncSpa; Request_ID = _x.ReqID And SetName = _x.SetN; ID))) As P;
+    With(
+        {
+            _spa: First(Sort(Filter(colSyncSpa; Request_ID = P.ReqID And SetName = P.SetN); ID; SortOrder.Ascending));
+            _e: P.E;
+            _d: LookUp(DATASUMMARY1; SetName = P.SetN)
+        };
+        Patch(SOLICITUDESPA1; LookUp(SOLICITUDESPA1; ID = _spa.ID);
+            {
+                Crop: If(IsBlank(_spa.Crop); Coalesce(_d.Crop.Value; _e.CROP.Value; ""); _spa.Crop);
+                Program: If(IsBlank(_spa.Program) Or _spa.Program = "NA"; Coalesce(_d.Program.Value; _e.Program; "NA"); _spa.Program);
+                Generation: If(IsBlank(_spa.Generation) Or _spa.Generation = "NA"; Coalesce(_d.Generation.Value; "NA"); _spa.Generation);
+                MCT: If(IsBlank(_spa.MCT) Or _spa.MCT = "NA"; Coalesce(_d.MCT.Value; "NA"); _spa.MCT);
+                Trial_Intent: If(IsBlank(_spa.Trial_Intent) Or _spa.Trial_Intent = "NA"; Coalesce(_d.TrialIntent.Value; _e.Trial_Intent; "NA"); _spa.Trial_Intent);
+                OperationType: If(IsBlank(_spa.OperationType) Or _spa.OperationType = "NA"; Coalesce(_d.OperationType.Value; "NA"); _spa.OperationType);
+                VCR: If(IsBlank(_spa.VCR); Coalesce(_d.VCR; _e.VCR; ""); _spa.VCR);
+                Field: If(IsBlank(_spa.Field); Coalesce(_d.Field; _e.Field; ""); _spa.Field);
+                PEA: If(IsBlank(_spa.PEA); Coalesce(_e.PEA; _d.PEA; ""); _spa.PEA);
+                SHIP_TO_LOCATION: Coalesce(_e.SHIP_TO_LOCATION; _spa.SHIP_TO_LOCATION);
+                'Requested Date': Coalesce(_e.REQUESTED_SHIP_DATE; _spa.'Requested Date');
+                Packets: Text(P.Packets);
+                Net_Weight: Text(P.Neto);
+                Estatus: If(
+                    !IsBlank(_e.'Packing List Emitida'); "Entregado";
+                    !IsBlank(_e.'Pack/treat completed') And _spa.Estatus <> "Entregado"; "Finalizado";
+                    !IsBlank(_e.'Pack/treat start') And (IsBlank(_spa.Estatus) Or _spa.Estatus = "Solicitado" Or _spa.Estatus = "Recibido"); "En proceso";
+                    Coalesce(_spa.Estatus; "Solicitado")
+                );
+                FechaInicio: Coalesce(_spa.FechaInicio; _e.'Pack/treat start');
+                FechaFin: Coalesce(_spa.FechaFin; _e.'Pack/treat completed');
+                FechaEntrega: Coalesce(_spa.FechaEntrega; _e.'Packing List Emitida');
+                PACKING_LIST: Coalesce(_spa.PACKING_LIST; P.ReqID & " - " & Coalesce(_d.Area.Value; _e.Area; "SSD"));
+                Modificado: Now()
+            }
+        )
+    )
+);;
+
+// ===== 8) Eliminar duplicados de un mismo SET en el mismo ID (conserva el más antiguo) =====
+ForAll(
+    Filter(
+        GroupBy(Filter(colSyncSpa; !IsBlank(SetName) And Actividad = "Envio de semillas"); Request_ID; SetName; _g) As _x;
+        CountRows(_x._g) > 1
+    ) As D;
+    ForAll(
+        Filter(D._g; ID <> First(Sort(D._g; ID; SortOrder.Ascending)).ID) As _b;
+        Remove(SOLICITUDESPA1; LookUp(SOLICITUDESPA1; ID = _b.ID))
+    )
+);;
+
+// ===== 9) Refrescar vistas =====
+Refresh(SOLICITUDESPA1);;
+If(!IsBlank(varFiltroID) And varFiltroID in colSyncIDs.Value;
+    ClearCollect(colDetalleID; SortByColumns(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); "ID"; SortOrder.Ascending))
+);;
+If(varGLModo = "icono";
+    Set(varRegSPA; LookUp(SOLICITUDESPA1; Request_ID = varIcoReq And SetName = varIcoSet));;
+    Patch(colCarritoExpSeed; LookUp(colCarritoExpSeed; IdGuardado = varRegExport.ID); {IdGuardadoSPA: Coalesce(varRegSPA.ID; 0)});;
+    Set(varPopupAdjExport; true)
+);;
+Set(varGLModo; "");;
+Select(btnBuildDash)
+```
+
+### 7.3 `btnCompletarDS` · OnSelect — completa datos faltantes desde DATASUMMARY1
+Modo `varCmpModo = "ID"` → solo el ID de `First(colSyncIDs)` (y luego sincroniza SPA).
+Modo `"TODO"` → registros de los últimos `varCmpDias` días.
+Se considera faltante: vacío o `"NA"`.
+```
+Clear(colCmpLog);;
+If(varCmpModo = "ID";
+    ClearCollect(colCmpExp; Filter('EXPORT-IMPORT'; Request_ID = First(colSyncIDs).Value));;
+    ClearCollect(colCmpSpa; Filter(SOLICITUDESPA1; Request_ID = First(colSyncIDs).Value));
+    ClearCollect(colCmpExp; Filter('EXPORT-IMPORT'; CreatedDate >= DateAdd(Today(); -varCmpDias; TimeUnit.Days)));;
+    ClearCollect(colCmpSpa; Filter(SOLICITUDESPA1; FechaSolicitud >= DateAdd(Today(); -varCmpDias; TimeUnit.Days)))
+);;
+
+// ----- EXPORT-IMPORT -----
+ForAll(
+    Filter(colCmpExp As _x;
+        !IsBlank(_x.SET) And (
+            IsBlank(_x.Program) Or _x.Program = "NA" Or
+            IsBlank(_x.Trial_Intent) Or _x.Trial_Intent = "NA" Or
+            IsBlank(_x.PEA) Or IsBlank(_x.VCR) Or IsBlank(_x.CROP.Value) Or IsBlank(_x.Area)
+        )
+    ) As _e;
+    With({_d: LookUp(DATASUMMARY1; SetName = _e.SET)};
+        If(!IsBlank(_d.ID);
+            Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _e.ID);
+                {
+                    Program: If(IsBlank(_e.Program) Or _e.Program = "NA"; Coalesce(_d.Program.Value; _e.Program); _e.Program);
+                    Trial_Intent: If(IsBlank(_e.Trial_Intent) Or _e.Trial_Intent = "NA"; Coalesce(_d.TrialIntent.Value; _e.Trial_Intent); _e.Trial_Intent);
+                    PEA: If(IsBlank(_e.PEA); Coalesce(_d.PEA; _e.PEA); _e.PEA);
+                    VCR: If(IsBlank(_e.VCR); _d.VCR; _e.VCR);
+                    Field: If(IsBlank(_e.Field); _d.Field; _e.Field);
+                    Season: If(IsBlank(_e.Season); Text(_d.Season); _e.Season);
+                    Area: If(IsBlank(_e.Area); _d.Area.Value; _e.Area);
+                    Rank: If(IsBlank(_e.Rank); _d.Rank; _e.Rank);
+                    Greenhouse: If(IsBlank(_e.Greenhouse); _d.Greenhouse; _e.Greenhouse);
+                    CROP: {Value: Coalesce(_e.CROP.Value; _d.Crop.Value)}
+                }
+            );;
+            Collect(colCmpLog; {Lista: "EXPORT-IMPORT"; ID: _e.ID; SET: _e.SET})
+        )
+    )
+);;
+
+// ----- SOLICITUDESPA1 -----
+ForAll(
+    Filter(colCmpSpa As _x;
+        !IsBlank(_x.SetName) And (
+            IsBlank(_x.Program) Or _x.Program = "NA" Or
+            IsBlank(_x.Trial_Intent) Or _x.Trial_Intent = "NA" Or
+            IsBlank(_x.Generation) Or _x.Generation = "NA" Or
+            IsBlank(_x.PEA) Or IsBlank(_x.Crop)
+        )
+    ) As _s;
+    With({_d: LookUp(DATASUMMARY1; SetName = _s.SetName)};
+        If(!IsBlank(_d.ID);
+            Patch(SOLICITUDESPA1; LookUp(SOLICITUDESPA1; ID = _s.ID);
+                {
+                    Crop: If(IsBlank(_s.Crop); _d.Crop.Value; _s.Crop);
+                    Program: If(IsBlank(_s.Program) Or _s.Program = "NA"; Coalesce(_d.Program.Value; _s.Program); _s.Program);
+                    Trial_Intent: If(IsBlank(_s.Trial_Intent) Or _s.Trial_Intent = "NA"; Coalesce(_d.TrialIntent.Value; _s.Trial_Intent); _s.Trial_Intent);
+                    Generation: If(IsBlank(_s.Generation) Or _s.Generation = "NA"; Coalesce(_d.Generation.Value; _s.Generation); _s.Generation);
+                    MCT: If(IsBlank(_s.MCT) Or _s.MCT = "NA"; Coalesce(_d.MCT.Value; _s.MCT); _s.MCT);
+                    OperationType: If(IsBlank(_s.OperationType) Or _s.OperationType = "NA"; Coalesce(_d.OperationType.Value; _s.OperationType); _s.OperationType);
+                    PEA: If(IsBlank(_s.PEA); Coalesce(_d.PEA; _s.PEA); _s.PEA);
+                    VCR: If(IsBlank(_s.VCR); _d.VCR; _s.VCR);
+                    Field: If(IsBlank(_s.Field); _d.Field; _s.Field);
+                    Season: If(IsBlank(_s.Season); Text(_d.Season); _s.Season);
+                    Area: If(IsBlank(_s.Area); _d.Area.Value; _s.Area);
+                    Modificado: Now()
+                }
+            );;
+            Collect(colCmpLog; {Lista: "SOLICITUDESPA1"; ID: _s.ID; SET: _s.SetName})
+        )
+    )
+);;
+If(CountRows(colCmpLog) > 0;
+    Notify("Completados desde DATASUMMARY1: " & CountRows(Filter(colCmpLog; Lista = "EXPORT-IMPORT")) & " en EXPORT-IMPORT · " & CountRows(Filter(colCmpLog; Lista = "SOLICITUDESPA1")) & " en SOLICITUDESPA1"; NotificationType.Success)
+);;
+If(varCmpModo = "ID"; Select(btnSyncSPA))
+```
+> En modo `"TODO"` cada `ClearCollect` trae como máximo el límite de filas de delegación (Configuración → 2000). Con `varCmpDias = 180` normalmente alcanza.
+
+### 7.4 Acceso al completado global (visible solo para administradores)
+Nuevo **ModernIcon** `icoCompletarDS` dentro de `Container26_1` (barra de filtros de Export):
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `"ArrowSync"` |
+| Visible | `varAdmin` |
+| Tooltip | `"Completar Program / Trial Intent / Generation / PEA desde DATASUMMARY1"` |
+| OnSelect | `Set(varCmpModo; "TODO");; Set(varCmpDias; 180);; Select(btnCompletarDS)` |
+
+---
+
+## 8. New request → guardar exportación de semilla (sin duplicar)
+
+**Causa:** `Button14_7` e `Icon9` creaban SIEMPRE una fila nueva en EXPORT-IMPORT y otra en SOLICITUDESPA1, aunque el flujo ya había creado la cabecera del ID → IDs con fila vacía + fila duplicada y calendario duplicado.
+
+### Button14_7 (Save) · OnSelect
+```
+// 1) Líneas guardadas antes con el icono de adjuntos: actualiza lo capturado después
+ForAll(Filter(colCarritoExpSeed; Guardado And IdGuardado > 0) As C;
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = C.IdGuardado);
+        {
+            Packets: Coalesce(IfError(Value(C.Packets); 0); 0);
+            Net_Weight: C.PesoNeto;
+            Treatment: If(IsBlank(C.Treatment); Blank(); {Value: C.Treatment})
+        }
+    )
+);;
+// 2) Líneas nuevas con número de línea único
+ClearCollect(colGLTmp; Filter(colCarritoExpSeed; Not(Guardado)));;
+ClearCollect(colGLLineas;
+    ForAll(Sequence(CountRows(colGLTmp)) As N;
+        With({C: Index(colGLTmp; N.Value)};
+            {
+                Linea: N.Value; AsignID: C.AsignID; SetID: C.SetID; SetName: C.SetName; Crop: C.Crop;
+                Program: C.Program; Generation: C.Generation; MCT: C.MCT; TrialIntent: C.TrialIntent;
+                OperationType: C.OperationType; VCR: C.VCR; Field: C.Field; Area: C.Area; Season: C.Season;
+                Rank: ""; Greenhouse: ""; Plantas: 0;
+                Packets: C.Packets; PesoNeto: C.PesoNeto; Treatment: C.Treatment; Comentario: C.Comentario
+            }
+        )
+    )
+);;
+ClearCollect(colSyncIDs; Distinct(colCarritoExpSeed; AsignID));;
+Set(varGLModo; "guardar");;
+Select(btnGuardarLineasExp)
+```
+
+### Icon9 (adjuntos por línea)
+**DisplayMode**
+```
+If(IsBlank(ThisItem.AsignID) Or IsBlank(ThisItem.Packets); DisplayMode.Disabled; DisplayMode.Edit)
+```
+**OnSelect**
+```
+If(
+    ThisItem.Guardado;
+    Set(varRegExport; LookUp('EXPORT-IMPORT'; ID = ThisItem.IdGuardado));;
+    Set(varRegSPA; LookUp(SOLICITUDESPA1; Request_ID = ThisItem.AsignID And SetName = ThisItem.SetName));;
+    Set(varPopupAdjExport; true);
+
+    Set(varIcoRow; ThisItem);;
+    Set(varIcoReq; ThisItem.AsignID);;
+    Set(varIcoSet; ThisItem.SetName);;
+    ClearCollect(colGLLineas;
+        {
+            Linea: 1; AsignID: ThisItem.AsignID; SetID: ThisItem.SetID; SetName: ThisItem.SetName; Crop: ThisItem.Crop;
+            Program: ThisItem.Program; Generation: ThisItem.Generation; MCT: ThisItem.MCT; TrialIntent: ThisItem.TrialIntent;
+            OperationType: ThisItem.OperationType; VCR: ThisItem.VCR; Field: ThisItem.Field; Area: ThisItem.Area; Season: ThisItem.Season;
+            Rank: ""; Greenhouse: ""; Plantas: 0;
+            Packets: ThisItem.Packets; PesoNeto: ThisItem.PesoNeto; Treatment: ThisItem.Treatment; Comentario: ThisItem.Comentario
+        }
+    );;
+    Set(varGLModo; "icono");;
+    Select(btnGuardarLineasExp)
+)
+```
+
+### Nuevo icono `icoDupLinea` (ModernIcon dentro de `Container65_8`, antes de `Button18`)
+Duplica la línea para mandar el mismo SET en otra caja.
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `"Copy"` |
+| Tooltip | `"Duplicar SET (otra caja)"` |
+| OnSelect | `Collect(colCarritoExpSeed; Patch(ThisItem; {Guardado: false; IdGuardado: 0; IdGuardadoSPA: 0; Packets: ""; PesoNeto: ""; Caja: ""; Comentario: ""}))` |
+
+---
+
+## 9. Export (vExport) — detalle del ID
+
+### Label32_11 · Text
+```
+"Packet Type"
+```
+
+### TextInput2_1 (SET) · OnChange — permite repetir el SET en el mismo ID
+```
+With({_id: ThisItem.ID; _req: ThisItem.Request_ID; _setAnt: ThisItem.SET; _txt: Trim(Self.Text)};
+    If(
+        IsBlank(_txt);
+        Notify("El nombre del SET no puede quedar vacío"; NotificationType.Warning);
+
+        With({_d: LookUp(DATASUMMARY1; SetName = _txt)};
+            With({_new: Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id);
+                    {
+                        SET: _txt;
+                        CROP: {Value: Coalesce(_d.Crop.Value; ThisItem.CROP.Value)};
+                        Program: If(IsBlank(_d.ID); ThisItem.Program; Coalesce(_d.Program.Value; ThisItem.Program));
+                        Trial_Intent: If(IsBlank(_d.ID); ThisItem.Trial_Intent; Coalesce(_d.TrialIntent.Value; ThisItem.Trial_Intent));
+                        VCR: If(IsBlank(_d.ID); ThisItem.VCR; Coalesce(_d.VCR; ThisItem.VCR));
+                        Field: If(IsBlank(_d.ID); ThisItem.Field; Coalesce(_d.Field; ThisItem.Field));
+                        Season: If(IsBlank(_d.ID); ThisItem.Season; Coalesce(Text(_d.Season); ThisItem.Season));
+                        Area: If(IsBlank(_d.ID); ThisItem.Area; Coalesce(_d.Area.Value; ThisItem.Area));
+                        Rank: If(IsBlank(_d.ID); ThisItem.Rank; Coalesce(_d.Rank; ThisItem.Rank));
+                        Greenhouse: If(IsBlank(_d.ID); ThisItem.Greenhouse; Coalesce(_d.Greenhouse; ThisItem.Greenhouse))
+                    }
+                )};
+                Patch(colDetalleID; LookUp(colDetalleID; ID = _id); _new)
+            )
+        );;
+        // Renombra el item de SOLICITUDESPA1 solo si ya ninguna fila usa el nombre anterior
+        If(
+            !IsBlank(_setAnt) And CountRows(Filter(colDetalleID; SET = _setAnt)) = 0 And
+            IsBlank(LookUp(SOLICITUDESPA1; Request_ID = _req And SetName = _txt; ID));
+            With({_spa: LookUp(SOLICITUDESPA1; Request_ID = _req And SetName = _setAnt)};
+                If(!IsBlank(_spa); Patch(SOLICITUDESPA1; _spa; {SetName: _txt; Modificado: Now()}))
+            )
+        );;
+        ClearCollect(colSyncIDs; {Value: _req});;
+        Set(varGLModo; "");;
+        Select(btnSyncSPA);;
+        Notify("SET guardado"; NotificationType.Success; 600)
+    )
+)
+```
+
+### TextInput6_1 (Packets) · OnChange
+La suma por SET en SOLICITUDESPA1 la hace `btnSyncSPA` (al guardar o cerrar el detalle).
+```
+With({_id: ThisItem.ID; _num: Coalesce(IfError(Value(Self.Text); 0); 0)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Packets: _num});;
+    UpdateIf(colDetalleID; ID = _id; {Packets: _num});;
+    Notify("Packets guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_1 (Net Weight) · OnChange
+```
+With({_id: ThisItem.ID; _txt: Trim(Self.Text)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Net_Weight: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Net_Weight: _txt});;
+    Notify("Net Weight guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_2 (Number Box) · OnChange
+```
+With({_id: ThisItem.ID; _num: Coalesce(IfError(Value(Self.Text); 0); 0)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {NumBox: _num});;
+    UpdateIf(colDetalleID; ID = _id; {NumBox: _num});;
+    Notify("Número de caja guardado"; NotificationType.Success; 500)
+)
+```
+
+### TextInput7_3 (Gross) · OnChange
+```
+With({_id: ThisItem.ID; _txt: Trim(Self.Text)};
+    Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Gross_Weight: _txt});;
+    UpdateIf(colDetalleID; ID = _id; {Gross_Weight: _txt});;
+    Notify("Gross Weight guardado"; NotificationType.Success; 500)
+)
+```
+
+### drpEmpaqueSPA (tipo de paquete) — ahora sí guarda
+**Items**
+```
+Ungroup(
+    Table(
+        {_op: ForAll(listaTipoPaquete As P; {Value: P.Value})};
+        {_op: ForAll(EMPAQUE As E; {Value: E.NOMBRE})}
+    );
+    _op
+)
+```
+**ItemDisplayText** → `ThisItem.Value`
+**SelectMultiple** → `false`
+**DisplayMode** → `DisplayMode.Edit`
+**DefaultSelectedItems**
+```
+If(IsBlank(ThisItem.Packaging_Type.Value); Blank(); [{Value: ThisItem.Packaging_Type.Value}])
+```
+**OnChange**
+```
+With({_id: ThisItem.ID; _val: Self.Selected.Value};
+    If(!IsBlank(_val);
+        With({_new: Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {Packaging_Type: {Value: _val}})};
+            UpdateIf(colDetalleID; ID = _id; {Packaging_Type: _new.Packaging_Type})
+        );;
+        Notify("Tipo de paquete guardado: " & _val; NotificationType.Success; 800)
+    )
+)
+```
+> SharePoint: en la columna **Packaging_Type** agrega las opciones "Paquete 1" … "Paquete 6" (o activa *Permitir valores de relleno*). Si la opción no existe, SharePoint rechaza el valor y no se guarda.
+
+### Icon26 (+ fila manual) · OnSelect
+Copia toda la cabecera del ID (incluye estatus y fechas de etapa ya registradas).
+```
+If(
+    IsBlank(varFiltroID);
+    Notify("Primero selecciona un ID"; NotificationType.Warning);
+
+    Set(varCabID; First(Sort(Filter('EXPORT-IMPORT'; Request_ID = varFiltroID); ID; SortOrder.Ascending)));;
+    Set(varFilaNueva;
+        Patch('EXPORT-IMPORT'; Defaults('EXPORT-IMPORT');
+            {
+                Actividad: "Envio de semillas";
+                Request_ID: varFiltroID;
+                SET: "";
+                CROP: varCabID.CROP;
+                Program: "NA";
+                Trial_Intent: "NA";
+                Packets: 0;
+                Net_Weight: "";
+                NumBox: 0;
+                Gross_Weight: "";
+                Area: Coalesce(varCabID.Area; "SSD");
+                PEA: varCabID.PEA;
+                SHIP_TO_LOCATION: varCabID.SHIP_TO_LOCATION;
+                SHIP_TO_COUNTRY: varCabID.SHIP_TO_COUNTRY;
+                TYPE_OF_SHIPMENT: varCabID.TYPE_OF_SHIPMENT;
+                REQUESTED_SHIP_DATE: varCabID.REQUESTED_SHIP_DATE;
+                CreatedDate: Coalesce(varCabID.CreatedDate; Now());
+                SHIPMENT_PROGRESS: varCabID.SHIPMENT_PROGRESS;
+                'Pack/treat start': varCabID.'Pack/treat start';
+                'Pack/treat completed': varCabID.'Pack/treat completed';
+                'Packing List Emitida': varCabID.'Packing List Emitida';
+                'IP Request': varCabID.'IP Request';
+                'IP Received': varCabID.'IP Received';
+                'GL Request': varCabID.'GL Request';
+                'GL Received': varCabID.'GL Received';
+                'Shipping Date': varCabID.'Shipping Date';
+                'Arrival to customs': varCabID.'Arrival to customs';
+                'Delivery Date': varCabID.'Delivery Date';
+                TRACKING_NUMBER: varCabID.TRACKING_NUMBER;
+                BOA: Coalesce(varCabID.BOA; gloUsuario);
+                BOAEmail: Coalesce(varCabID.BOAEmail; varUsuarioEmail; User().Email);
+                Prioridad: Coalesce(varCabID.Prioridad; "Estandar");
+                PACKING_LIST: varFiltroID & " - " & Coalesce(varCabID.Area; "SSD")
+            }
+        )
+    );;
+    Collect(colDetalleID; varFilaNueva);;
+    Set(varAddManualInline; true);;
+    Set(varModoEdicion; true);;
+    Set(varIdFilaNueva; varFilaNueva.ID);;
+    Notify("Fila agregada al ID " & varFiltroID & ". Escribe el SET (puede repetirse), packets, peso, caja y tipo de paquete."; NotificationType.Success)
+)
+```
+
+### Icon27 (eliminar línea) · OnSelect
+```
+With({_id: ThisItem.ID; _req: ThisItem.Request_ID; _set: ThisItem.SET};
+    If(
+        CountRows(colDetalleID) <= 1;
+        // Última fila del ID: se vacía (no se borra) para no perder la cabecera del flujo
+        With({_new: Patch('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id); {SET: ""; Packets: 0; Net_Weight: ""; NumBox: 0; Gross_Weight: ""})};
+            Patch(colDetalleID; LookUp(colDetalleID; ID = _id); _new)
+        );
+        Remove('EXPORT-IMPORT'; LookUp('EXPORT-IMPORT'; ID = _id));;
+        RemoveIf(colDetalleID; ID = _id)
+    );;
+    // En SPA solo se elimina si ya ninguna fila del ID usa ese SET
+    If(!IsBlank(_set) And CountRows(Filter(colDetalleID; SET = _set)) = 0;
+        With({_spa: LookUp(SOLICITUDESPA1; Request_ID = _req And SetName = _set)};
+            If(!IsBlank(_spa); Remove(SOLICITUDESPA1; _spa))
+        )
+    );;
+    ClearCollect(colSyncIDs; {Value: _req});;
+    Set(varGLModo; "");;
+    Select(btnSyncSPA);;
+    Notify("Línea eliminada"; NotificationType.Success; 1500)
+)
+```
+
+### Button29_2 (✓ Agregar → Guardar y sincronizar)
+**Text** → `"✓ Guardar y sincronizar"`
+**OnSelect**
+```
+If(
+    CountRows(Filter(colDetalleID; IsBlank(SET))) > 0;
+    Notify("Hay " & CountRows(Filter(colDetalleID; IsBlank(SET))) & " fila(s) sin nombre de SET. Complétalas antes de guardar."; NotificationType.Warning);
+
+    Set(varAddManualInline; false);;
+    Set(varModoEdicion; false);;
+    Set(varIdFilaNueva; Blank());;
+    ClearCollect(colSyncIDs; {Value: varFiltroID});;
+    Set(varGLModo; "");;
+    Set(varCmpModo; "ID");;
+    Select(btnCompletarDS)
+)
+```
+
+### Icon4_1 (cerrar detalle) · OnSelect — sincroniza al cerrar
+```
+If(!IsBlank(varFiltroID);
+    ClearCollect(colSyncIDs; {Value: varFiltroID});;
+    Set(varGLModo; "");;
+    Select(btnSyncSPA)
+);;
+UpdateContext({varMostrarTable: false})
+```
+
+---
+
+## 10. Popup "Agregar SETs" (conPopupAddSetsExport) — el mismo SET varias veces
+
+Cada toque en una tarjeta **agrega una línea** (una caja). Abajo se ve el carrito con las líneas y se pueden quitar.
+
+### btnSelSetExp · OnSelect
+```
+Collect(colSetsExpNuevos;
+    {
+        Linea: Coalesce(Max(colSetsExpNuevos; Linea); 0) + 1;
+        SetID: ThisItem.ID;
+        SetName: ThisItem.SetName;
+        Crop: ThisItem.Crop.Value;
+        Program: ThisItem.Program.Value;
+        Generation: ThisItem.Generation.Value;
+        MCT: ThisItem.MCT.Value;
+        TrialIntent: ThisItem.TrialIntent.Value;
+        OperationType: ThisItem.OperationType.Value;
+        VCR: ThisItem.VCR;
+        Field: ThisItem.Field;
+        Area: ThisItem.Area.Value;
+        Season: Text(ThisItem.Season);
+        Rank: ThisItem.Rank;
+        Greenhouse: ThisItem.Greenhouse;
+        Plantas: Coalesce(ThisItem.PlantsTransplanted; 0);
+        EsManual: false
+    }
+);;
+Notify(ThisItem.SetName & " · " & CountRows(Filter(colSetsExpNuevos; SetID = ThisItem.ID)) & " línea(s)"; NotificationType.Information; 1000)
+```
+
+### btnGuardarSetsExport · OnSelect
+```
+ClearCollect(colGLLineas;
+    ForAll(Sequence(CountRows(colSetsExpNuevos)) As N;
+        With({S: Index(colSetsExpNuevos; N.Value)};
+            {
+                Linea: N.Value; AsignID: varReqExportSel.Request_ID; SetID: S.SetID; SetName: S.SetName; Crop: S.Crop;
+                Program: S.Program; Generation: S.Generation; MCT: S.MCT; TrialIntent: S.TrialIntent;
+                OperationType: S.OperationType; VCR: S.VCR; Field: S.Field; Area: S.Area; Season: S.Season;
+                Rank: S.Rank; Greenhouse: S.Greenhouse; Plantas: S.Plantas;
+                Packets: ""; PesoNeto: ""; Treatment: ""; Comentario: ""
+            }
+        )
+    )
+);;
+Set(varGLModo; "popup");;
+Select(btnGuardarLineasExp)
+```
+**Text**
+```
+"Agregar " & CountRows(colSetsExpNuevos) & " línea(s)"
+```
+
+> Se quitaron de este guardado los campos `Status: "REALIZADO"`, `'Mother plants Lab report': Today()`, `'Report type': "Mother plants"` y `ResponsableReporte`, que marcaban como "reporte de laboratorio" cualquier SET agregado a exportación y lo hacían aparecer en Plant health. Si ese comportamiento sí era intencional para Sanidad, dímelo y lo separo en su propio popup.
+
+### YAML — contador en la tarjeta (pegar dentro de `Container125`)
+```yaml
+- lblCntSetExp:
+    Control: Label@2.5.1
+    Properties:
+      Align: =Align.Center
+      AlignInContainer: =AlignInContainer.Stretch
+      Color: =RGBA(47, 158, 95, 1)
+      FontWeight: =FontWeight.Bold
+      Height: =20
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      Size: =10
+      Text: |-
+        =With({n: CountRows(Filter(colSetsExpNuevos, SetID = ThisItem.ID))}, If(n > 0, "✔ " & n & " línea(s)", ""))
+```
+
+### YAML — carrito + alta manual (pegar dentro de `Container124`, y moverlos encima de `btnGuardarSetsExport`)
+```yaml
+- lblCarritoSetsExp:
+    Control: Label@2.5.1
+    Properties:
+      Align: =Align.Center
+      AlignInContainer: =AlignInContainer.Stretch
+      Color: =RGBA(12, 56, 76, 1)
+      FontWeight: =FontWeight.Semibold
+      Height: =26
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      Size: =11
+      Text: ="Líneas por agregar: " & CountRows(colSetsExpNuevos) & "  ·  " & CountRows(Distinct(colSetsExpNuevos, SetName)) & " SET(s) distintos"
+- galSetsExpCarrito:
+    Control: Gallery@2.15.0
+    Variant: BrowseLayout_Vertical_OneTextVariant_ver5.0
+    Properties:
+      FillPortions: =0
+      Height: =110
+      Items: =Sort(colSetsExpNuevos, SetName, SortOrder.Ascending)
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      TemplatePadding: =2
+      TemplateSize: =30
+      Width: =680
+      WrapCount: =3
+    Children:
+      - lblCarritoLinea:
+          Control: Label@2.5.1
+          Properties:
+            Fill: =RGBA(232, 245, 236, 1)
+            Height: =Parent.TemplateHeight
+            PaddingLeft: =8
+            Size: =10
+            Text: =ThisItem.SetName & "  ·  línea " & ThisItem.Linea & If(ThisItem.EsManual, "  (manual)", "")
+            Width: =Parent.TemplateWidth - 30
+      - icoQuitarLinea:
+          Control: ModernIcon@1.1.1
+          Properties:
+            Height: =Parent.TemplateHeight
+            Icon: ="Dismiss"
+            IconColor: =RGBA(215, 58, 60, 1)
+            OnSelect: =Remove(colSetsExpNuevos, ThisItem)
+            Width: =28
+            X: =Parent.TemplateWidth - 30
+- conSetManualExp:
+    Control: GroupContainer@1.5.0
+    Variant: AutoLayout
+    Properties:
+      Fill: =RGBA(251, 241, 220, 1)
+      FillPortions: =0
+      Height: =48
+      LayoutAlignItems: =LayoutAlignItems.Center
+      LayoutDirection: =LayoutDirection.Horizontal
+      LayoutGap: =8
+      LayoutJustifyContent: =LayoutJustifyContent.Center
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      PaddingBottom: =6
+      PaddingLeft: =8
+      PaddingRight: =8
+      PaddingTop: =6
+      Width: =680
+    Children:
+      - txtSetManualExp:
+          Control: Classic/TextInput@2.3.2
+          Properties:
+            Default: =""
+            FillPortions: =2
+            Height: =32
+            HintText: ="SET manual (si no aparece arriba)"
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingLeft: =6
+            Size: =11
+      - cmbCropManualExp:
+          Control: ModernCombobox@1.1.1
+          Properties:
+            FillPortions: =1
+            InputTextPlaceholder: ="Crop"
+            ItemDisplayText: =ThisItem.Value
+            Items: =["Tomato", "Pepper", "Melon", "Watermelon", "Cucumber"]
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            SelectMultiple: =false
+      - btnAddManualExp:
+          Control: Classic/Button@2.2.0
+          Properties:
+            Color: =RGBA(255, 255, 255, 1)
+            DisplayMode: =If(IsBlank(Trim(txtSetManualExp.Text)), DisplayMode.Disabled, DisplayMode.Edit)
+            Fill: =RGBA(232, 169, 60, 1)
+            Height: =32
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            OnSelect: |-
+              =With(
+                  {_n: Trim(txtSetManualExp.Text), _d: LookUp(DATASUMMARY1, SetName = Trim(txtSetManualExp.Text))},
+                  If(
+                      IsBlank(_d.ID) && IsBlank(cmbCropManualExp.Selected.Value),
+                      Notify("Ese SET no está en DATASUMMARY1: selecciona el Crop.", NotificationType.Warning),
+                      Collect(colSetsExpNuevos,
+                          {
+                              Linea: Coalesce(Max(colSetsExpNuevos, Linea), 0) + 1,
+                              SetID: Coalesce(_d.ID, -1 * (CountRows(colSetsExpNuevos) + 1)),
+                              SetName: _n,
+                              Crop: Coalesce(_d.Crop.Value, cmbCropManualExp.Selected.Value),
+                              Program: Coalesce(_d.Program.Value, varReqExportSel.Program, "NA"),
+                              Generation: Coalesce(_d.Generation.Value, "NA"),
+                              MCT: Coalesce(_d.MCT.Value, "NA"),
+                              TrialIntent: Coalesce(_d.TrialIntent.Value, varReqExportSel.Trial_Intent, "NA"),
+                              OperationType: Coalesce(_d.OperationType.Value, "NA"),
+                              VCR: Coalesce(_d.VCR, ""),
+                              Field: Coalesce(_d.Field, ""),
+                              Area: Coalesce(_d.Area.Value, varReqExportSel.Area, "SSD"),
+                              Season: Coalesce(Text(_d.Season), ""),
+                              Rank: Coalesce(_d.Rank, ""),
+                              Greenhouse: Coalesce(_d.Greenhouse, ""),
+                              Plantas: Coalesce(_d.PlantsTransplanted, 0),
+                              EsManual: IsBlank(_d.ID)
+                          }
+                      );
+                      Reset(txtSetManualExp);
+                      Reset(cmbCropManualExp);
+                      Notify(_n & " agregado", NotificationType.Information, 1000)
+                  )
+              )
+            Size: =11
+            Text: ="+ Agregar manual"
+```
+
+---
+
+## 11. Análisis de exportaciones — rediseño completo (YAML)
+
+**Qué corrige:**
+- **"Operación no válida: división entre cero"**: las barras dividían entre `varAnaTotEtapas`, `varAnaMaxEtapa`, `varAnaMaxLocDias`, etc., que están en blanco hasta que termina el cálculo. Ahora cada división usa `Max(1; …)` en la misma fórmula, así el aviso rojo ya no aparece.
+- **Filtro de fechas**: `!IsBlank(Request_ID)` dentro del `Filter` a SharePoint no es delegable, así que el filtro se hacía solo sobre las primeras filas. Ahora el rango se consulta solo por fecha (delegable) y el vacío se quita después. Nueva base **Pack/treat start** (por defecto) + CreatedDate / Shipping / Delivery.
+- **Prioridad fechas → días**: primero calcula con las fechas; solo si faltan usa los días guardados (antes era al revés).
+- **Nueva etapa**: *Lead solicitado* = CreatedDate → REQUESTED_SHIP_DATE (KPI, tabla de etapas y métrica por locación).
+- **SETs**: únicos por ID (`Request_ID|SET`); el mismo SET en varias cajas del mismo ID cuenta una vez.
+- **Cajas**: número de caja distinto por ID (`Request_ID|NumBox`), no filas.
+- **Packets / peso neto / bruto**: suma.
+- **Cultivos agrupados**: "Tomato Fresh", "Tomato Process", "Tomate"… → **Tomato** (igual para los demás). Toca una tarjeta de cultivo para filtrar todo el tablero.
+- **Locaciones, países, PEA y tipo de caja**: muestran **todos**, no solo los primeros 8.
+- **Guardar días**: ya no hay botón visible; se guarda solo, en segundo plano, y únicamente en las filas cuyos días cambiaron.
+- Tiempos promedio calculados **por envío (ID)**, no por línea (un ID con 10 cajas ya no pesa 10 veces).
+
+**Pasos:** 1) Elimina el contenedor `Kpis Exports`. 2) Clic derecho sobre `Container73` → **Pegar código**. 3) Si queda antes de `vTablero`, muévelo al final (no afecta, cada vista tiene su `Visible`).
+
+```yaml
+- conAnaExport:
+    Control: GroupContainer@1.5.0
+    Variant: AutoLayout
+    Properties:
+      Fill: =RGBA(244, 247, 250, 1)
+      FillPortions: =1
+      Height: =Parent.Height
+      LayoutAlignItems: =LayoutAlignItems.Stretch
+      LayoutDirection: =LayoutDirection.Vertical
+      LayoutGap: =14
+      LayoutMinHeight: =16
+      LayoutMinWidth: =16
+      LayoutOverflowY: =LayoutOverflow.Scroll
+      PaddingBottom: =24
+      PaddingLeft: =20
+      PaddingRight: =20
+      PaddingTop: =16
+      Visible: =varSeccionActiva = "ExportAnalyst"
+    Children:
+      - htmlAnaTitulo:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingTop: =0
+            HtmlText: |-
+              ="<div style='font-family:Segoe UI;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px'>" &
+              "<div><div style='font-size:11px;letter-spacing:1.2px;color:#88BC30;font-weight:700'>SEED PROCESSING AREA · EXPORT ANALYST</div>" &
+              "<div style='font-size:22px;font-weight:700;color:#0C384C'>Análisis de exportaciones</div></div>" &
+              "<div style='font-size:12px;color:#5a6b7b;text-align:right'>Fecha base: <b>" & Coalesce(varAnaBase, "Pack/treat start") & "</b><br>" &
+              If(IsBlank(varAnaDesde), "", Text(varAnaDesde, "dd/mm/yyyy") & " – " & Text(DateAdd(varAnaHasta, -1, TimeUnit.Days), "dd/mm/yyyy")) &
+              "  ·  " & CountRows(colAnaFilt) & " líneas · " & CountRows(colAnaEnvios) & " envíos</div></div>"
+      - conAnaFiltros:
+          Control: GroupContainer@1.5.0
+          Variant: AutoLayout
+          Properties:
+            Fill: =RGBA(255, 255, 255, 1)
+            FillPortions: =0
+            Height: =56
+            LayoutAlignItems: =LayoutAlignItems.Center
+            LayoutDirection: =LayoutDirection.Horizontal
+            LayoutGap: =8
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =8
+            PaddingLeft: =10
+            PaddingRight: =10
+            PaddingTop: =8
+            RadiusBottomLeft: =10
+            RadiusBottomRight: =10
+            RadiusTopLeft: =10
+            RadiusTopRight: =10
+          Children:
+            - DatePicker2:
+                Control: ModernDatePicker@1.0.1
+                Properties:
+                  DefaultDate: =DateAdd(Today(), -365, TimeUnit.Days)
+                  Format: ="dd/mm/yyyy"
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaCargar)
+                  Placeholder: ="Desde"
+                  Width: =135
+            - DatePicker4:
+                Control: ModernDatePicker@1.0.1
+                Properties:
+                  DefaultDate: =Today()
+                  Format: ="dd/mm/yyyy"
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaCargar)
+                  Placeholder: ="Hasta"
+                  Width: =135
+            - cmbAnaFechaBase:
+                Control: ModernCombobox@1.1.1
+                Properties:
+                  DefaultSelectedItems: =["Pack/treat start"]
+                  FillPortions: =1
+                  InputTextPlaceholder: ="Fecha base"
+                  ItemDisplayText: =ThisItem.Value
+                  Items: =["Pack/treat start", "CreatedDate", "Shipping Date", "Delivery Date"]
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaCargar)
+                  SelectMultiple: =false
+            - cmbAnaTipo:
+                Control: ModernCombobox@1.1.1
+                Properties:
+                  DefaultSelectedItems: =["Todos"]
+                  FillPortions: =1
+                  InputTextPlaceholder: ="Tipo"
+                  ItemDisplayText: =ThisItem.Value
+                  Items: =["Todos", "Seed", "Tissue"]
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaFiltrar)
+                  SelectMultiple: =false
+            - cmbAnaCountry:
+                Control: ModernCombobox@1.1.1
+                Properties:
+                  DefaultSelectedItems: =["Todos"]
+                  FillPortions: =1
+                  InputTextPlaceholder: ="País"
+                  ItemDisplayText: =ThisItem.Value
+                  Items: |-
+                    =Ungroup(
+                        Table(
+                            {Op: Table({Value: "Todos"})},
+                            {Op: Sort(Distinct(colAna, SHIP_TO_COUNTRY), Value, SortOrder.Ascending)}
+                        ),
+                        Op
+                    )
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaFiltrar)
+                  SelectMultiple: =false
+            - txtAnaBuscar:
+                Control: Classic/TextInput@2.3.2
+                Properties:
+                  Default: =""
+                  DelayOutput: =true
+                  FillPortions: =2
+                  Height: =34
+                  HintText: ="Request ID, SET, PEA, locación, programa, cultivo"
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnChange: =Select(btnAnaFiltrar)
+                  PaddingLeft: =8
+                  Size: =11
+            - icoAnaLimpiar:
+                Control: ModernIcon@1.1.1
+                Properties:
+                  Icon: ="Dismiss"
+                  IconColor: =RGBA(215, 58, 60, 1)
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  OnSelect: |-
+                    =Clear(colAnaCropSel);
+                    Reset(txtAnaBuscar);
+                    Reset(cmbAnaTipo);
+                    Reset(cmbAnaCountry);
+                    Reset(cmbAnaFechaBase);
+                    Reset(DatePicker2);
+                    Reset(DatePicker4);
+                    Select(btnAnaCargar)
+                  Tooltip: ="Limpiar filtros"
+      - htmlAnaKpis:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            HtmlText: |-
+              ="<div style='font-family:Segoe UI;display:flex;flex-wrap:wrap;gap:10px'>" &
+              Concat(
+                  Table(
+                      {t: "Envíos (IDs)", v: Text(Coalesce(varAnaEnvios, 0), "#,##0"), s: Text(Coalesce(varAnaEntregados, 0)) & " entregados", c: "#0C384C"},
+                      {t: "SETs enviados", v: Text(Coalesce(varAnaSets, 0), "#,##0"), s: "únicos por ID", c: "#88BC30"},
+                      {t: "Packets", v: Text(Coalesce(varAnaPackets, 0), "#,##0"), s: "suma de líneas", c: "#2e9fd6"},
+                      {t: "Peso neto", v: Text(Coalesce(varAnaNeto, 0), "#,##0.0") & " kg", s: "bruto " & Text(Coalesce(varAnaBruto, 0), "#,##0.0") & " kg", c: "#7E3A66"},
+                      {t: "Cajas", v: Text(Coalesce(varAnaCajas, 0), "#,##0"), s: "No. de caja distinto por ID", c: "#C97E17"},
+                      {t: "Lead solicitado", v: Text(Coalesce(varAnaLeadReq, 0), "0.0") & " d", s: "Created → Requested ship", c: "#17456B"},
+                      {t: "Solicitud → envío", v: Text(Coalesce(varAnaSolEnv, 0), "0.0") & " d", s: "Created → Shipping", c: "#63756B"},
+                      {t: "Ciclo total", v: Text(Coalesce(varAnaCiclo, 0), "0.0") & " d", s: "Created → Delivery", c: "#10241C"},
+                      {t: "Envíos a tiempo", v: Text(Coalesce(varAnaOnTime, 0), "0.0") & "%", s: Text(Coalesce(varAnaConFecha, 0)) & " con fecha de envío", c: If(Coalesce(varAnaOnTime, 0) >= 85, "#2f9e5f", "#d35442")}
+                  ) As K,
+                  "<div style='flex:1 1 150px;min-width:140px;background:#fff;border:1px solid #e3eaf1;border-left:4px solid " & K.c & ";border-radius:10px;padding:10px 12px'>" &
+                  "<div style='font-size:10px;color:#5a6b7b;text-transform:uppercase;letter-spacing:.5px'>" & K.t & "</div>" &
+                  "<div style='font-size:24px;font-weight:700;color:#16273a;margin:2px 0'>" & K.v & "</div>" &
+                  "<div style='font-size:11px;color:#93a4b4'>" & K.s & "</div></div>"
+              ) & "</div>"
+      - lblAnaSecCultivo:
+          Control: Label@2.5.1
+          Properties:
+            Color: =RGBA(12, 56, 76, 1)
+            FontWeight: =FontWeight.Bold
+            Height: =24
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            Size: =12
+            Text: ="Por cultivo  ·  toca una tarjeta para filtrar" & If(IsEmpty(colAnaCropSel), "", "  (filtro: " & Concat(colAnaCropSel, CROP, ", ") & ")")
+      - galAnaCrop:
+          Control: Gallery@2.15.0
+          Variant: BrowseLayout_Horizontal_TwoTextOneImageVariant_ver5.0
+          Properties:
+            FillPortions: =0
+            Height: =170
+            Items: =Filter(colAnaCrop, CROP <> "Otros" || ENVIOS > 0)
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            ShowScrollbar: =false
+            TemplatePadding: =6
+            TemplateSize: =220
+          Children:
+            - htmlAnaCropCard:
+                Control: HtmlViewer@2.1.0
+                Properties:
+                  Height: =Parent.TemplateHeight
+                  PaddingBottom: =0
+                  PaddingLeft: =0
+                  PaddingRight: =0
+                  PaddingTop: =0
+                  Width: =Parent.TemplateWidth
+                  HtmlText: |-
+                    ="<div style='font-family:Segoe UI;box-sizing:border-box;height:150px;background:" & If(ThisItem.SEL, "#F3F9E9", "#fff") &
+                    ";border:1px solid " & If(ThisItem.SEL, ThisItem.COLOR, "#e3eaf1") & ";border-top:5px solid " & ThisItem.COLOR & ";border-radius:12px;padding:10px 12px'>" &
+                    "<div style='display:flex;justify-content:space-between;align-items:center'><b style='font-size:14px;color:#16273a'>" & ThisItem.CROP & "</b>" &
+                    "<span style='font-size:10px;color:#93a4b4'>" & ThisItem.ENVIOS & " envíos</span></div>" &
+                    "<div style='font-size:28px;font-weight:700;color:" & ThisItem.COLOR & ";line-height:1.2'>" & ThisItem.SETS_UNICOS & "<span style='font-size:11px;color:#5a6b7b;font-weight:400'> SETs</span></div>" &
+                    "<div style='font-size:11px;color:#5a6b7b'>" & Text(ThisItem.PACKETS, "#,##0") & " packets · " & ThisItem.CAJAS & " cajas</div>" &
+                    "<div style='font-size:11px;color:#5a6b7b'>" & Text(ThisItem.NET_WEIGHT, "#,##0.0") & " kg neto · " & Text(ThisItem.DIAS_CICLO, "0.0") & " d ciclo</div>" &
+                    "<div style='font-size:9px;color:#93a4b4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px'>" & ThisItem.NOMBRES & "</div></div>"
+            - btnAnaCropSel:
+                Control: Classic/Button@2.2.0
+                Properties:
+                  BorderColor: =RGBA(0, 0, 0, 0)
+                  Color: =RGBA(0, 0, 0, 0)
+                  Fill: =RGBA(0, 0, 0, 0)
+                  Height: =Parent.TemplateHeight
+                  HoverBorderColor: =RGBA(0, 0, 0, 0)
+                  HoverColor: =RGBA(0, 0, 0, 0)
+                  HoverFill: =RGBA(0, 0, 0, 0.03)
+                  OnSelect: |-
+                    =If(
+                        !IsBlank(LookUp(colAnaCropSel, CROP = ThisItem.CROP, CROP)),
+                        RemoveIf(colAnaCropSel, CROP = ThisItem.CROP),
+                        Collect(colAnaCropSel, {CROP: ThisItem.CROP})
+                    );
+                    Select(btnAnaFiltrar)
+                  PressedBorderColor: =RGBA(0, 0, 0, 0)
+                  PressedColor: =RGBA(0, 0, 0, 0)
+                  PressedFill: =RGBA(0, 0, 0, 0)
+                  Text: =""
+                  Width: =Parent.TemplateWidth
+      - htmlAnaCropTabla:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            HtmlText: |-
+              ="<div style='font-family:Segoe UI;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+              "<div style='font-size:14px;font-weight:700;color:#0C384C;margin-bottom:8px'>Resumen por cultivo</div>" &
+              "<table style='width:100%;border-collapse:collapse;font-size:12px'><tr style='background:#f4f8fc;color:#5a6b7b'>" &
+              Concat(
+                  Table({h: "Cultivo"}, {h: "SETs"}, {h: "Envíos"}, {h: "Packets"}, {h: "Neto kg"}, {h: "Bruto kg"}, {h: "Cajas"}, {h: "Ciclo"}) As _h,
+                  "<th style='text-align:" & If(_h.h = "Cultivo", "left", "right") & ";padding:7px 8px;font-weight:600'>" & _h.h & "</th>"
+              ) & "</tr>" &
+              Concat(
+                  Sort(Filter(colAnaCrop, ENVIOS > 0 && (IsEmpty(colAnaCropSel) || SEL)), PACKETS, SortOrder.Descending) As _c,
+                  "<tr style='border-bottom:1px solid #eef2f6'><td style='padding:7px 8px'>" &
+                  "<span style='display:inline-block;width:9px;height:9px;border-radius:2px;background:" & _c.COLOR & ";margin-right:6px'></span><b>" & _c.CROP & "</b>" &
+                  "<div style='font-size:10px;color:#93a4b4'>" & _c.NOMBRES & "</div></td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.SETS_UNICOS, "#,##0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.ENVIOS, "#,##0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.PACKETS, "#,##0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.NET_WEIGHT, "#,##0.0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.GROSS_WEIGHT, "#,##0.0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.CAJAS, "#,##0") & "</td>" &
+                  "<td style='text-align:right;padding:7px 8px'>" & Text(_c.DIAS_CICLO, "0.0") & " d</td></tr>"
+              ) &
+              "<tr style='background:#F0F5EE;font-weight:700'><td style='padding:7px 8px'>Total</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaSets, 0), "#,##0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaEnvios, 0), "#,##0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaPackets, 0), "#,##0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaNeto, 0), "#,##0.0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaBruto, 0), "#,##0.0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaCajas, 0), "#,##0") & "</td>" &
+              "<td style='text-align:right;padding:7px 8px'>" & Text(Coalesce(varAnaCiclo, 0), "0.0") & " d</td></tr></table></div>"
+      - htmlAnaEtapas:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            HtmlText: |-
+              =With(
+                  {_tot: Max(1, Sum(colAnaEtapas, DIAS)), _mx: Max(1, Max(colAnaEtapas, DIAS)), _mr: Max(1, Coalesce(varAnaLeadReq, 0), Coalesce(varAnaSolEnv, 0))},
+                  "<div style='font-family:Segoe UI;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:14px 16px'>" &
+                  "<div style='display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px'>" &
+                  "<div><div style='font-size:14px;font-weight:700;color:#0C384C'>Ciclo del envío · dónde se va el tiempo</div>" &
+                  "<div style='font-size:11px;color:#93a4b4'>Promedio por envío (ID). Se calcula con las fechas; si faltan, con los días guardados.</div></div>" &
+                  "<div style='font-size:26px;font-weight:700;color:#10241C'>" & Text(Coalesce(varAnaCiclo, 0), "0.0") & " d <span style='font-size:11px;color:#5a6b7b;font-weight:400'>solicitud → entrega</span></div></div>" &
+                  "<div style='display:flex;height:26px;border-radius:6px;overflow:hidden;margin:12px 0 10px;background:#eef2f6'>" &
+                  Concat(
+                      Sort(colAnaEtapas, ORDEN, SortOrder.Ascending) As _e,
+                      If(_e.DIAS > 0, "<div style='background:" & _e.COLOR & ";width:" & Text(_e.DIAS / _tot * 100, "[$-en-US]0.##") & "%'></div>", "")
+                  ) & "</div>" &
+                  Concat(
+                      Sort(colAnaEtapas, ORDEN, SortOrder.Ascending) As _e,
+                      "<div style='display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0'>" &
+                      "<div style='width:160px;color:#27322B'><span style='display:inline-block;width:9px;height:9px;border-radius:2px;background:" & _e.COLOR & ";margin-right:6px'></span>" & _e.ETAPA & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:14px;overflow:hidden'><div style='height:14px;border-radius:4px;background:" & _e.COLOR & ";width:" & Text(_e.DIAS / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:130px;text-align:right;color:#16273a'><b>" & Text(_e.DIAS, "0.0") & " d</b><span style='color:#93a4b4'> · " & _e.N & " env.</span></div></div>"
+                  ) &
+                  "<div style='border-top:1px dashed #cfdae5;margin-top:10px;padding-top:8px;font-size:11px;color:#5a6b7b'>Plazo solicitado vs real</div>" &
+                  Concat(
+                      Table(
+                          {n: "Lead solicitado (Created → Requested ship)", d: Coalesce(varAnaLeadReq, 0), c: "#17456B"},
+                          {n: "Real (Created → Shipping)", d: Coalesce(varAnaSolEnv, 0), c: If(Coalesce(varAnaSolEnv, 0) > Coalesce(varAnaLeadReq, 0), "#d35442", "#2f9e5f")}
+                      ) As _r,
+                      "<div style='display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0'>" &
+                      "<div style='width:260px;color:#27322B'>" & _r.n & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:12px;overflow:hidden'><div style='height:12px;border-radius:4px;background:" & _r.c & ";width:" & Text(_r.d / _mr * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:80px;text-align:right'><b>" & Text(_r.d, "0.0") & " d</b></div></div>"
+                  ) & "</div>"
+              )
+      - conAnaMetrica:
+          Control: GroupContainer@1.5.0
+          Variant: AutoLayout
+          Properties:
+            FillPortions: =0
+            Height: =44
+            LayoutAlignItems: =LayoutAlignItems.Center
+            LayoutDirection: =LayoutDirection.Horizontal
+            LayoutGap: =10
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+          Children:
+            - lblAnaMetrica:
+                Control: Label@2.5.1
+                Properties:
+                  Color: =RGBA(12, 56, 76, 1)
+                  FillPortions: =1
+                  FontWeight: =FontWeight.Bold
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  Size: =12
+                  Text: ="Días promedio por locación"
+            - cmbAnaMetrica:
+                Control: ModernCombobox@1.1.1
+                Properties:
+                  DefaultSelectedItems: =["Ciclo total"]
+                  ItemDisplayText: =ThisItem.Value
+                  Items: =["Ciclo total", "Lead solicitado", "Solicitud a envio", "Laboratorio", "Empaque", "IP", "GL", "Transito", "Aduana a entrega"]
+                  LayoutMinHeight: =16
+                  LayoutMinWidth: =16
+                  SelectMultiple: =false
+                  Width: =240
+      - htmlAnaLocDias:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            HtmlText: |-
+              =With(
+                  {_m: Coalesce(cmbAnaMetrica.Selected.Value, "Ciclo total")},
+                  With(
+                      {
+                          _rows: ForAll(
+                              Distinct(colAnaEnvios, SHIP_TO_LOCATION) As _l,
+                              With(
+                                  {_v: ForAll(Filter(colAnaEnvios, SHIP_TO_LOCATION = _l.Value) As _e,
+                                      {D: Switch(_m,
+                                          "Lead solicitado", _e.DIAS_REQUERIDO,
+                                          "Solicitud a envio", _e.DIAS_SOLICITUD_ENVIO,
+                                          "Laboratorio", _e.DIAS_LAB,
+                                          "Empaque", _e.DIAS_EMPAQUE,
+                                          "IP", _e.DIAS_IP,
+                                          "GL", _e.DIAS_GL,
+                                          "Transito", _e.DIAS_TRANSITO,
+                                          "Aduana a entrega", _e.DIAS_ADUANA,
+                                          _e.DIAS_CICLO)})},
+                                  With({_ok: Filter(_v, D >= 0)},
+                                      {L: _l.Value, N: CountRows(_ok), V: If(IsEmpty(_ok), 0, Round(Average(_ok, D), 1))})
+                              )
+                          ),
+                          _col: Switch(_m, "Laboratorio", "#17456B", "Empaque", "#88BC30", "IP", "#C97E17", "GL", "#7E3A66", "Transito", "#B23A32", "Aduana a entrega", "#63756B", "Lead solicitado", "#2e9fd6", "#10241C")
+                      },
+                      With({_mx: Max(1, Max(_rows, V))},
+                          "<div style='font-family:Segoe UI;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+                          "<div style='font-size:11px;color:#93a4b4;margin-bottom:6px'>Métrica: <b style='color:#16273a'>" & _m & "</b> · barra = días promedio · n = envíos con dato</div>" &
+                          Concat(
+                              Sort(_rows, V, SortOrder.Descending) As _r,
+                              "<div style='display:flex;align-items:center;gap:10px;font-size:12px;padding:3px 0'>" &
+                              "<div style='width:180px;color:#27322B;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & _r.L & "</div>" &
+                              "<div style='flex:1;background:#eef2f6;border-radius:4px;height:14px;overflow:hidden'><div style='height:14px;border-radius:4px;background:" & _col & ";width:" & Text(_r.V / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                              "<div style='width:110px;text-align:right;color:#16273a'><b>" & Text(_r.V, "0.0") & " d</b><span style='color:#93a4b4'> · n " & _r.N & "</span></div></div>"
+                          ) &
+                          If(IsEmpty(_rows), "<div style='font-size:12px;color:#93a4b4'>Sin datos para los filtros actuales</div>", "") & "</div>"
+                      )
+                  )
+              )
+            OnSelect: =false
+      - htmlAnaRanking:
+          Control: HtmlViewer@2.1.0
+          Properties:
+            AutoHeight: =true
+            FillPortions: =0
+            LayoutMinHeight: =16
+            LayoutMinWidth: =16
+            PaddingBottom: =0
+            PaddingLeft: =0
+            PaddingRight: =0
+            PaddingTop: =0
+            HtmlText: |-
+              ="<div style='font-family:Segoe UI;display:flex;flex-wrap:wrap;gap:14px'>" &
+
+              "<div style='flex:1 1 360px;min-width:320px;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+              "<div style='display:flex;justify-content:space-between'><b style='font-size:13px;color:#0C384C'>Envíos por locación</b><span style='font-size:11px;color:#93a4b4'>" & CountRows(colAnaLoc) & " locaciones</span></div>" &
+              "<div style='font-size:10px;color:#93a4b4;margin:2px 0 8px'>envíos · packets · SETs · ciclo prom.</div>" &
+              With({_mx: Max(1, Max(colAnaLoc, ENVIOS))},
+                  Concat(Sort(colAnaLoc, ENVIOS, SortOrder.Descending) As _r,
+                      "<div style='display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0'>" &
+                      "<div style='width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & _r.NOMBRE & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:12px;overflow:hidden'><div style='height:12px;border-radius:4px;background:#88BC30;width:" & Text(_r.ENVIOS / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:170px;text-align:right;color:#16273a'><b>" & _r.ENVIOS & "</b><span style='color:#93a4b4'> · " & Text(_r.PACKETS, "#,##0") & " pk · " & _r.SETS & " SET · " & Text(_r.CICLO, "0.0") & " d</span></div></div>")
+              ) & "</div>" &
+
+              "<div style='flex:1 1 360px;min-width:320px;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+              "<div style='display:flex;justify-content:space-between'><b style='font-size:13px;color:#0C384C'>Packets por PEA</b><span style='font-size:11px;color:#93a4b4'>" & CountRows(colAnaPEA) & " PEA</span></div>" &
+              "<div style='font-size:10px;color:#93a4b4;margin:2px 0 8px'>barra = packets · entregados · envíos · SETs</div>" &
+              With({_mx: Max(1, Max(colAnaPEA, PACKETS))},
+                  Concat(Sort(colAnaPEA, PACKETS, SortOrder.Descending) As _r,
+                      "<div style='display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0'>" &
+                      "<div style='width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & _r.NOMBRE & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:12px;overflow:hidden'><div style='height:12px;border-radius:4px;background:#C97E17;width:" & Text(_r.PACKETS / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:190px;text-align:right;color:#16273a'><b>" & Text(_r.PACKETS, "#,##0") & "</b><span style='color:#93a4b4'> · " & Text(_r.ENTREGADOS, "#,##0") & " entr. · " & _r.ENVIOS & " env · " & _r.SETS & " SET</span></div></div>")
+              ) & "</div>" &
+
+              "<div style='flex:1 1 360px;min-width:320px;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+              "<div style='display:flex;justify-content:space-between'><b style='font-size:13px;color:#0C384C'>Envíos por país</b><span style='font-size:11px;color:#93a4b4'>" & CountRows(colAnaPais) & " países</span></div>" &
+              "<div style='font-size:10px;color:#93a4b4;margin:2px 0 8px'>envíos · packets · ciclo prom.</div>" &
+              With({_mx: Max(1, Max(colAnaPais, ENVIOS))},
+                  Concat(Sort(colAnaPais, ENVIOS, SortOrder.Descending) As _r,
+                      "<div style='display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0'>" &
+                      "<div style='width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & _r.NOMBRE & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:12px;overflow:hidden'><div style='height:12px;border-radius:4px;background:#17456B;width:" & Text(_r.ENVIOS / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:150px;text-align:right;color:#16273a'><b>" & _r.ENVIOS & "</b><span style='color:#93a4b4'> · " & Text(_r.PACKETS, "#,##0") & " pk · " & Text(_r.CICLO, "0.0") & " d</span></div></div>")
+              ) & "</div>" &
+
+              "<div style='flex:1 1 360px;min-width:320px;background:#fff;border:1px solid #e3eaf1;border-radius:12px;padding:12px 14px'>" &
+              "<div style='display:flex;justify-content:space-between'><b style='font-size:13px;color:#0C384C'>Tipo de caja / paquete</b><span style='font-size:11px;color:#93a4b4'>" & CountRows(colAnaPack) & " tipos</span></div>" &
+              "<div style='font-size:10px;color:#93a4b4;margin:2px 0 8px'>barra = cajas · líneas · packets</div>" &
+              With({_mx: Max(1, Max(colAnaPack, CAJAS))},
+                  Concat(Sort(colAnaPack, CAJAS, SortOrder.Descending) As _r,
+                      "<div style='display:flex;align-items:center;gap:8px;font-size:11px;padding:3px 0'>" &
+                      "<div style='width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & _r.NOMBRE & "</div>" &
+                      "<div style='flex:1;background:#eef2f6;border-radius:4px;height:12px;overflow:hidden'><div style='height:12px;border-radius:4px;background:#7E3A66;width:" & Text(_r.CAJAS / _mx * 100, "[$-en-US]0.##") & "%'></div></div>" &
+                      "<div style='width:160px;text-align:right;color:#16273a'><b>" & _r.CAJAS & "</b><span style='color:#93a4b4'> cajas · " & _r.LINEAS & " lín · " & Text(_r.PACKETS, "#,##0") & " pk</span></div></div>")
+              ) & "</div>" &
+
+              "</div>"
+      - btnAnaCargar:
+          Control: Classic/Button@2.2.0
+          Properties:
+            Visible: =false
+            OnSelect: |-
+              =Set(varAnaDesde, Coalesce(DatePicker2.SelectedDate, DateAdd(Today(), -365, TimeUnit.Days)));
+              Set(varAnaHasta, DateAdd(Coalesce(DatePicker4.SelectedDate, Today()), 1, TimeUnit.Days));
+              Set(varAnaBase, Coalesce(cmbAnaFechaBase.Selected.Value, "Pack/treat start"));
+              Switch(
+                  varAnaBase,
+                  "Pack/treat start", ClearCollect(colAnaBase, Filter('EXPORT-IMPORT', 'Pack/treat start' >= varAnaDesde && 'Pack/treat start' < varAnaHasta)),
+                  "Shipping Date", ClearCollect(colAnaBase, Filter('EXPORT-IMPORT', 'Shipping Date' >= varAnaDesde && 'Shipping Date' < varAnaHasta)),
+                  "Delivery Date", ClearCollect(colAnaBase, Filter('EXPORT-IMPORT', 'Delivery Date' >= varAnaDesde && 'Delivery Date' < varAnaHasta)),
+                  ClearCollect(colAnaBase, Filter('EXPORT-IMPORT', CreatedDate >= varAnaDesde && CreatedDate < varAnaHasta))
+              );
+              RemoveIf(colAnaBase, IsBlank(Request_ID));
+              Select(btnAnaNormalizar)
+      - btnAnaNormalizar:
+          Control: Classic/Button@2.2.0
+          Properties:
+            Visible: =false
+            OnSelect: |-
+              =ClearCollect(
+                  colAna,
+                  ForAll(
+                      colAnaBase As _r,
+                      With(
+                          {
+                              cLab: With({_i: Coalesce(_r.'FPPO Mother plants sampling', _r.'Seed sample ToBRFV'), _f: Coalesce(_r.'Mother plants Lab report', _r.'Lab Report')}, If(IsBlank(_i) || IsBlank(_f), Blank(), DateDiff(_i, _f, TimeUnit.Days))),
+                              cEmp: If(IsBlank(_r.'Pack/treat start') || IsBlank(_r.'Pack/treat completed'), Blank(), DateDiff(_r.'Pack/treat start', _r.'Pack/treat completed', TimeUnit.Days)),
+                              cIP: If(IsBlank(_r.'IP Request') || IsBlank(_r.'IP Received'), Blank(), DateDiff(_r.'IP Request', _r.'IP Received', TimeUnit.Days)),
+                              cGL: If(IsBlank(_r.'GL Request') || IsBlank(_r.'GL Received'), Blank(), DateDiff(_r.'GL Request', _r.'GL Received', TimeUnit.Days)),
+                              cTra: If(IsBlank(_r.'Shipping Date') || IsBlank(_r.'Arrival to customs'), Blank(), DateDiff(_r.'Shipping Date', _r.'Arrival to customs', TimeUnit.Days)),
+                              cAdu: If(IsBlank(_r.'Arrival to customs') || IsBlank(_r.'Delivery Date'), Blank(), DateDiff(_r.'Arrival to customs', _r.'Delivery Date', TimeUnit.Days)),
+                              cSolEnv: If(IsBlank(_r.CreatedDate) || IsBlank(_r.'Shipping Date'), Blank(), DateDiff(_r.CreatedDate, _r.'Shipping Date', TimeUnit.Days)),
+                              cCiclo: If(IsBlank(_r.CreatedDate) || IsBlank(_r.'Delivery Date'), Blank(), DateDiff(_r.CreatedDate, _r.'Delivery Date', TimeUnit.Days)),
+                              cReq: If(IsBlank(_r.CreatedDate) || IsBlank(_r.REQUESTED_SHIP_DATE), Blank(), DateDiff(_r.CreatedDate, _r.REQUESTED_SHIP_DATE, TimeUnit.Days)),
+                              cDesv: If(IsBlank(_r.REQUESTED_SHIP_DATE) || IsBlank(_r.'Shipping Date'), Blank(), DateDiff(_r.REQUESTED_SHIP_DATE, _r.'Shipping Date', TimeUnit.Days)),
+                              sLab: Value(Text(_r.'Testing time')),
+                              sEmp: Value(Text(_r.'Pack/treat Time')),
+                              sIP: Value(Text(_r.'IP Time')),
+                              sGL: Value(Text(_r.'GL Time (days)')),
+                              sTra: Value(Text(_r.Transit)),
+                              sAdu: Value(Text(_r.'Clearance time')),
+                              sSolEnv: Value(Text(_r.'Total time ID creation ship date')),
+                              sCiclo: Value(Text(_r.'ID req-Delivery')),
+                              sReq: Value(Text(_r.'Requested Lead Time')),
+                              sDesv: Value(Text(_r.'Ship Deviation'))
+                          },
+                          {
+                              ID: _r.ID,
+                              Request_ID: _r.Request_ID,
+                              SET: Coalesce(Trim(_r.SET), "—"),
+                              CROP_ORIG: Coalesce(_r.CROP.Value, "Sin CROP"),
+                              CROP: fxCultivo(_r.CROP.Value),
+                              SHIP_TO_COUNTRY: Coalesce(_r.SHIP_TO_COUNTRY.Value, "Sin país"),
+                              SHIP_TO_LOCATION: Coalesce(_r.SHIP_TO_LOCATION, "Sin locación"),
+                              TYPE_OF_SHIPMENT: Coalesce(_r.TYPE_OF_SHIPMENT.Value, "Sin tipo"),
+                              SHIPMENT_PROGRESS: Coalesce(_r.SHIPMENT_PROGRESS.Value, "Sin estatus"),
+                              Packaging_Type: Coalesce(_r.Packaging_Type.Value, "Sin tipo de caja"),
+                              PEA: Coalesce(_r.PEA, "Sin PEA"),
+                              Program: Coalesce(_r.Program, "NA"),
+                              Packets: Coalesce(Value(Text(_r.Packets)), 0),
+                              Net_Weight: Coalesce(Value(Text(_r.Net_Weight)), 0),
+                              Gross_Weight: Coalesce(Value(Text(_r.Gross_Weight)), 0),
+                              NumBox: Coalesce(Value(Text(_r.NumBox)), 0),
+                              ENTREGADO: !IsBlank(_r.'Delivery Date'),
+                              DIAS_LAB: Coalesce(cLab, sLab, -1),
+                              DIAS_EMPAQUE: Coalesce(cEmp, sEmp, -1),
+                              DIAS_IP: Coalesce(cIP, sIP, -1),
+                              DIAS_GL: Coalesce(cGL, sGL, -1),
+                              DIAS_TRANSITO: Coalesce(cTra, sTra, -1),
+                              DIAS_ADUANA: Coalesce(cAdu, sAdu, -1),
+                              DIAS_SOLICITUD_ENVIO: Coalesce(cSolEnv, sSolEnv, -1),
+                              DIAS_CICLO: Coalesce(cCiclo, sCiclo, -1),
+                              DIAS_REQUERIDO: Coalesce(cReq, sReq, -1),
+                              DESVIACION: Coalesce(cDesv, sDesv, -999),
+                              GUARDAR:
+                                  (!IsBlank(cLab) && cLab <> Coalesce(sLab, -99999)) ||
+                                  (!IsBlank(cEmp) && cEmp <> Coalesce(sEmp, -99999)) ||
+                                  (!IsBlank(cIP) && cIP <> Coalesce(sIP, -99999)) ||
+                                  (!IsBlank(cGL) && cGL <> Coalesce(sGL, -99999)) ||
+                                  (!IsBlank(cTra) && cTra <> Coalesce(sTra, -99999)) ||
+                                  (!IsBlank(cAdu) && cAdu <> Coalesce(sAdu, -99999)) ||
+                                  (!IsBlank(cSolEnv) && cSolEnv <> Coalesce(sSolEnv, -99999)) ||
+                                  (!IsBlank(cCiclo) && cCiclo <> Coalesce(sCiclo, -99999)) ||
+                                  (!IsBlank(cReq) && cReq <> Coalesce(sReq, -99999)) ||
+                                  (!IsBlank(cDesv) && cDesv <> Coalesce(sDesv, -99999))
+                          }
+                      )
+                  )
+              );
+              If(CountRows(Filter(colAna, GUARDAR)) > 0, Select(btnAnaGuardarDias));
+              Select(btnAnaFiltrar)
+      - btnAnaGuardarDias:
+          Control: Classic/Button@2.2.0
+          Properties:
+            Visible: =false
+            OnSelect: |-
+              =ForAll(
+                  Filter(colAna, GUARDAR) As _a,
+                  Patch('EXPORT-IMPORT', LookUp('EXPORT-IMPORT', ID = _a.ID),
+                      {
+                          'Testing time': If(_a.DIAS_LAB < 0, Blank(), _a.DIAS_LAB),
+                          'Pack/treat Time': If(_a.DIAS_EMPAQUE < 0, Blank(), _a.DIAS_EMPAQUE),
+                          'IP Time': If(_a.DIAS_IP < 0, Blank(), _a.DIAS_IP),
+                          'GL Time (days)': If(_a.DIAS_GL < 0, Blank(), _a.DIAS_GL),
+                          Transit: If(_a.DIAS_TRANSITO < 0, Blank(), _a.DIAS_TRANSITO),
+                          'Clearance time': If(_a.DIAS_ADUANA < 0, Blank(), _a.DIAS_ADUANA),
+                          'Total time ID creation ship date': If(_a.DIAS_SOLICITUD_ENVIO < 0, Blank(), _a.DIAS_SOLICITUD_ENVIO),
+                          'ID req-Delivery': If(_a.DIAS_CICLO < 0, Blank(), _a.DIAS_CICLO),
+                          'Requested Lead Time': If(_a.DIAS_REQUERIDO < 0, Blank(), _a.DIAS_REQUERIDO),
+                          'Ship Deviation': If(_a.DESVIACION = -999, Blank(), _a.DESVIACION),
+                          'On Time': If(_a.DESVIACION = -999, Blank(), If(_a.DESVIACION <= 0, "Si", "No"))
+                      }
+                  )
+              );
+              UpdateIf(colAna, GUARDAR, {GUARDAR: false})
+      - btnAnaFiltrar:
+          Control: Classic/Button@2.2.0
+          Properties:
+            Visible: =false
+            OnSelect: |-
+              =ClearCollect(
+                  colAnaFilt0,
+                  Filter(colAna As _f,
+                      (IsBlank(cmbAnaTipo.Selected.Value) || cmbAnaTipo.Selected.Value = "Todos" || _f.TYPE_OF_SHIPMENT = cmbAnaTipo.Selected.Value) &&
+                      (IsBlank(cmbAnaCountry.Selected.Value) || cmbAnaCountry.Selected.Value = "Todos" || _f.SHIP_TO_COUNTRY = cmbAnaCountry.Selected.Value) &&
+                      (
+                          IsBlank(txtAnaBuscar.Text) ||
+                          StartsWith(_f.Request_ID, txtAnaBuscar.Text) ||
+                          StartsWith(_f.SET, txtAnaBuscar.Text) ||
+                          StartsWith(_f.PEA, txtAnaBuscar.Text) ||
+                          StartsWith(_f.SHIP_TO_LOCATION, txtAnaBuscar.Text) ||
+                          StartsWith(_f.Program, txtAnaBuscar.Text) ||
+                          StartsWith(_f.CROP_ORIG, txtAnaBuscar.Text)
+                      )
+                  )
+              );
+
+              ClearCollect(
+                  colAnaCrop,
+                  ForAll(
+                      ["Tomato", "Pepper", "Melon", "Watermelon", "Cucumber", "Otros"] As _c,
+                      With({_g: Filter(colAnaFilt0, CROP = _c.Value)},
+                          {
+                              CROP: _c.Value,
+                              COLOR: fxHexCultivo(_c.Value),
+                              SEL: !IsBlank(LookUp(colAnaCropSel, CROP = _c.Value, CROP)),
+                              ENVIOS: CountRows(Distinct(_g, Request_ID)),
+                              SETS_UNICOS: CountRows(Distinct(_g, Request_ID & "|" & SET)),
+                              PACKETS: Sum(_g, Packets),
+                              NET_WEIGHT: Round(Sum(_g, Net_Weight), 2),
+                              GROSS_WEIGHT: Round(Sum(_g, Gross_Weight), 2),
+                              CAJAS: CountRows(Distinct(Filter(_g, NumBox > 0), Request_ID & "|" & Text(NumBox))),
+                              DIAS_CICLO: With(
+                                  {_t: ForAll(Distinct(Filter(_g, DIAS_CICLO >= 0), Request_ID) As _q, {D: Max(Filter(_g, Request_ID = _q.Value), DIAS_CICLO)})},
+                                  If(IsEmpty(_t), 0, Round(Average(_t, D), 1))
+                              ),
+                              NOMBRES: Concat(Distinct(_g, CROP_ORIG), Value, ", ")
+                          }
+                      )
+                  )
+              );
+
+              ClearCollect(colAnaFilt, Filter(colAnaFilt0 As _f, IsEmpty(colAnaCropSel) || !IsBlank(LookUp(colAnaCropSel, CROP = _f.CROP, CROP))));
+
+              ClearCollect(
+                  colAnaEnvios,
+                  ForAll(
+                      Distinct(colAnaFilt, Request_ID) As _q,
+                      With({_g: Filter(colAnaFilt, Request_ID = _q.Value)},
+                          With({_h: First(_g)},
+                              {
+                                  Request_ID: _q.Value,
+                                  CROP: _h.CROP,
+                                  PEA: _h.PEA,
+                                  SHIP_TO_LOCATION: _h.SHIP_TO_LOCATION,
+                                  SHIP_TO_COUNTRY: _h.SHIP_TO_COUNTRY,
+                                  ENTREGADO: CountRows(Filter(_g, ENTREGADO)) > 0,
+                                  SETS: CountRows(Distinct(_g, SET)),
+                                  PACKETS: Sum(_g, Packets),
+                                  NETO: Sum(_g, Net_Weight),
+                                  CAJAS: CountRows(Distinct(Filter(_g, NumBox > 0), NumBox)),
+                                  DIAS_LAB: Max(_g, DIAS_LAB),
+                                  DIAS_EMPAQUE: Max(_g, DIAS_EMPAQUE),
+                                  DIAS_IP: Max(_g, DIAS_IP),
+                                  DIAS_GL: Max(_g, DIAS_GL),
+                                  DIAS_TRANSITO: Max(_g, DIAS_TRANSITO),
+                                  DIAS_ADUANA: Max(_g, DIAS_ADUANA),
+                                  DIAS_SOLICITUD_ENVIO: Max(_g, DIAS_SOLICITUD_ENVIO),
+                                  DIAS_CICLO: Max(_g, DIAS_CICLO),
+                                  DIAS_REQUERIDO: Max(_g, DIAS_REQUERIDO),
+                                  DESVIACION: Max(_g, DESVIACION)
+                              }
+                          )
+                      )
+                  )
+              );
+
+              Set(varAnaEnvios, CountRows(colAnaEnvios));
+              Set(varAnaSets, Sum(colAnaEnvios, SETS));
+              Set(varAnaPackets, Sum(colAnaEnvios, PACKETS));
+              Set(varAnaNeto, Round(Sum(colAnaFilt, Net_Weight), 2));
+              Set(varAnaBruto, Round(Sum(colAnaFilt, Gross_Weight), 2));
+              Set(varAnaCajas, Sum(colAnaEnvios, CAJAS));
+              Set(varAnaLineas, CountRows(colAnaFilt));
+              Set(varAnaEntregados, CountRows(Filter(colAnaEnvios, ENTREGADO)));
+              Set(varAnaCiclo, With({_d: Filter(colAnaEnvios, DIAS_CICLO >= 0)}, If(IsEmpty(_d), 0, Round(Average(_d, DIAS_CICLO), 1))));
+              Set(varAnaLeadReq, With({_d: Filter(colAnaEnvios, DIAS_REQUERIDO >= 0)}, If(IsEmpty(_d), 0, Round(Average(_d, DIAS_REQUERIDO), 1))));
+              Set(varAnaSolEnv, With({_d: Filter(colAnaEnvios, DIAS_SOLICITUD_ENVIO >= 0)}, If(IsEmpty(_d), 0, Round(Average(_d, DIAS_SOLICITUD_ENVIO), 1))));
+              Set(varAnaConFecha, CountRows(Filter(colAnaEnvios, DESVIACION > -999)));
+              Set(varAnaOnTime, With({_d: Filter(colAnaEnvios, DESVIACION > -999)}, If(IsEmpty(_d), 0, Round(CountRows(Filter(_d, DESVIACION <= 0)) / CountRows(_d) * 100, 1))));
+
+              ClearCollect(
+                  colAnaEtapas,
+                  ForAll(
+                      Table(
+                          {ORDEN: 1, ETAPA: "Laboratorio", COLOR: "#17456B", K: "LAB"},
+                          {ORDEN: 2, ETAPA: "Empaque / tratamiento", COLOR: "#88BC30", K: "EMP"},
+                          {ORDEN: 3, ETAPA: "Import permit (IP)", COLOR: "#C97E17", K: "IP"},
+                          {ORDEN: 4, ETAPA: "Green light (GL)", COLOR: "#7E3A66", K: "GL"},
+                          {ORDEN: 5, ETAPA: "Tránsito", COLOR: "#B23A32", K: "TRA"},
+                          {ORDEN: 6, ETAPA: "Aduana → entrega", COLOR: "#63756B", K: "ADU"}
+                      ) As _s,
+                      With(
+                          {_v: Filter(ForAll(colAnaEnvios As _e, {D: Switch(_s.K, "LAB", _e.DIAS_LAB, "EMP", _e.DIAS_EMPAQUE, "IP", _e.DIAS_IP, "GL", _e.DIAS_GL, "TRA", _e.DIAS_TRANSITO, "ADU", _e.DIAS_ADUANA, -1)}), D >= 0)},
+                          {ORDEN: _s.ORDEN, ETAPA: _s.ETAPA, COLOR: _s.COLOR, N: CountRows(_v), DIAS: If(IsEmpty(_v), 0, Round(Average(_v, D), 1))}
+                      )
+                  )
+              );
+
+              ClearCollect(
+                  colAnaLoc,
+                  ForAll(Distinct(colAnaEnvios, SHIP_TO_LOCATION) As _l,
+                      With({_g: Filter(colAnaEnvios, SHIP_TO_LOCATION = _l.Value)},
+                          {
+                              NOMBRE: _l.Value,
+                              ENVIOS: CountRows(_g),
+                              SETS: Sum(_g, SETS),
+                              PACKETS: Sum(_g, PACKETS),
+                              CICLO: With({_d: Filter(_g, DIAS_CICLO >= 0)}, If(IsEmpty(_d), 0, Round(Average(_d, DIAS_CICLO), 1)))
+                          }
+                      )
+                  )
+              );
+
+              ClearCollect(
+                  colAnaPais,
+                  ForAll(Distinct(colAnaEnvios, SHIP_TO_COUNTRY) As _p,
+                      With({_g: Filter(colAnaEnvios, SHIP_TO_COUNTRY = _p.Value)},
+                          {
+                              NOMBRE: _p.Value,
+                              ENVIOS: CountRows(_g),
+                              PACKETS: Sum(_g, PACKETS),
+                              CICLO: With({_d: Filter(_g, DIAS_CICLO >= 0)}, If(IsEmpty(_d), 0, Round(Average(_d, DIAS_CICLO), 1)))
+                          }
+                      )
+                  )
+              );
+
+              ClearCollect(
+                  colAnaPEA,
+                  ForAll(Distinct(colAnaEnvios, PEA) As _q,
+                      With({_g: Filter(colAnaEnvios, PEA = _q.Value)},
+                          {
+                              NOMBRE: _q.Value,
+                              ENVIOS: CountRows(_g),
+                              SETS: Sum(_g, SETS),
+                              PACKETS: Sum(_g, PACKETS),
+                              ENTREGADOS: Sum(Filter(_g, ENTREGADO), PACKETS)
+                          }
+                      )
+                  )
+              );
+
+              ClearCollect(
+                  colAnaPack,
+                  ForAll(Distinct(colAnaFilt, Packaging_Type) As _b,
+                      With({_g: Filter(colAnaFilt, Packaging_Type = _b.Value)},
+                          {
+                              NOMBRE: _b.Value,
+                              LINEAS: CountRows(_g),
+                              CAJAS: CountRows(Distinct(Filter(_g, NumBox > 0), Request_ID & "|" & Text(NumBox))),
+                              PACKETS: Sum(_g, Packets)
+                          }
+                      )
+                  )
+              )
+```
+
+> `cmbAnaMetrica` no necesita `OnChange`: `htmlAnaLocDias` recalcula solo al cambiar la métrica.
+
+---
+
+## 12. Pruebas recomendadas (en este orden)
+
+1. **Menú:** navega por los 9 botones; solo el activo queda azul y en negrita.
+2. **Imports:** elige R&D → cambian tarjetas, tarjetas por cultivo y lista. Luego Melon (no debe traer Watermelon) y un rango de fechas.
+3. **New request → Envío de semillas:** selecciona un ID recién creado en Global Shipping (sin Request_ID_Old) → el chip muestra el número; *Asignar ID* se habilita. Guarda 2 SETs → en EXPORT-IMPORT la fila vacía del flujo se rellena con el 1er SET y el 2º se crea con país, locación, fechas y estatus de la cabecera; en SOLICITUDESPA1 el item vacío se rellena y el 2º SET se crea una sola vez.
+4. **Export → Show details → icono de agregar:** toca el mismo SET 2 veces → "Agregar 2 línea(s)" → en EXPORT-IMPORT 2 filas; en SOLICITUDESPA1 1 item con la suma de packets.
+5. Cambia **Packet Type** en una fila, cierra y vuelve a abrir el detalle → debe conservarse.
+6. Haz clic en **En Proceso** del ID y luego agrega otro SET → la fila nueva hereda "In Progress" y la fecha; en SPA queda "En proceso".
+7. **Export analysis:** sin aviso rojo; cambia Desde/Hasta con base *Pack/treat start*; toca la tarjeta Tomato → todo el tablero filtra solo tomate (incluye "Tomato Fresh"/"Process").
+8. Como administrador, ejecuta **icoCompletarDS** una vez para rellenar Program / Trial Intent / Generation / PEA históricos.
+
+**Si algo marca error de tipo**, casi siempre es una de las columnas de la tabla de la sección 0 con un tipo distinto en tu lista: dime cuál y te ajusto esa línea.
