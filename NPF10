@@ -1,0 +1,560 @@
+# procesos01 · Pasos 10, 11 y 12 — control por control (sin YAML)
+
+Todo en **sintaxis española**: separador `;` · encadenar `;;` · decimales con `,`.
+Los formatos numéricos van con `[$-en-US]` para que el punto/coma de miles no se confunda con el separador (igual que ya usas en `btnBuildCarga`).
+
+**Cómo leer cada bloque:**
+
+- **Control** = nombre exacto que debes escribir en el panel de árbol (F2 sobre el control para renombrar).
+- **Tipo** = qué insertar desde la cinta **Insertar**.
+- **Ubicación** = dentro de qué contenedor va y en qué posición.
+- Debajo, la tabla **Propiedad → Fórmula** (todas las que hay que cambiar; las que no aparecen se dejan como vienen).
+
+---
+
+# PASO 10 · Popup "Agregar SETs" — mismo SET varias veces
+
+Contenedor existente: `conPopupAddSetsExport` → `Container124`.
+Cada toque en una tarjeta **agrega una línea** (una caja). Abajo se ve el carrito y se pueden quitar líneas.
+
+## 10.1 Controles existentes que cambian
+
+### Control: `btnSelSetExp` (ya existe, dentro de `galSetsAddExp`)
+
+| Propiedad | Fórmula |
+|---|---|
+| OnSelect | ver abajo |
+
+```
+Collect(colSetsExpNuevos;
+    {
+        Linea: Coalesce(Max(colSetsExpNuevos; Linea); 0) + 1;
+        SetID: ThisItem.ID;
+        SetName: ThisItem.SetName;
+        Crop: ThisItem.Crop.Value;
+        Program: ThisItem.Program.Value;
+        Generation: ThisItem.Generation.Value;
+        MCT: ThisItem.MCT.Value;
+        TrialIntent: ThisItem.TrialIntent.Value;
+        OperationType: ThisItem.OperationType.Value;
+        VCR: ThisItem.VCR;
+        Field: ThisItem.Field;
+        Area: ThisItem.Area.Value;
+        Season: Text(ThisItem.Season);
+        Rank: ThisItem.Rank;
+        Greenhouse: ThisItem.Greenhouse;
+        Plantas: Coalesce(ThisItem.PlantsTransplanted; 0);
+        EsManual: false
+    }
+);;
+Notify(ThisItem.SetName & " · " & CountRows(Filter(colSetsExpNuevos; SetID = ThisItem.ID)) & " línea(s)"; NotificationType.Information; 1000)
+```
+
+### Control: `btnGuardarSetsExport` (ya existe, dentro de `Container124`)
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `"Agregar " & CountRows(colSetsExpNuevos) & " línea(s)"` |
+| DisplayMode | `If(CountRows(colSetsExpNuevos) = 0 Or IsBlank(varReqExportSel.Request_ID); DisplayMode.Disabled; DisplayMode.Edit)` |
+| OnSelect | ver abajo |
+
+```
+ClearCollect(colGLLineas;
+    ForAll(Sequence(CountRows(colSetsExpNuevos)) As N;
+        With({S: Index(colSetsExpNuevos; N.Value)};
+            {
+                Linea: N.Value;
+                AsignID: varReqExportSel.Request_ID;
+                SetID: S.SetID;
+                SetName: S.SetName;
+                Crop: S.Crop;
+                Program: S.Program;
+                Generation: S.Generation;
+                MCT: S.MCT;
+                TrialIntent: S.TrialIntent;
+                OperationType: S.OperationType;
+                VCR: S.VCR;
+                Field: S.Field;
+                Area: S.Area;
+                Season: S.Season;
+                Rank: S.Rank;
+                Greenhouse: S.Greenhouse;
+                Plantas: S.Plantas;
+                Packets: "";
+                PesoNeto: "";
+                Treatment: "";
+                Comentario: ""
+            }
+        )
+    )
+);;
+Set(varGLModo; "popup");;
+Select(btnGuardarLineasExp)
+```
+
+> Este guardado ya **no** escribe `Status: "REALIZADO"`, `'Mother plants Lab report'`, `'Report type'` ni `ResponsableReporte`. Esos campos marcaban como reporte de laboratorio cualquier SET agregado a exportación y lo hacían aparecer en Plant health.
+
+---
+
+## 10.2 Control nuevo: contador en la tarjeta
+
+**Control:** `lblCntSetExp`
+**Tipo:** Insertar → Texto → **Etiqueta de texto**
+**Ubicación:** dentro de `Container125` (la tarjeta de la galería `galSetsAddExp`), como último hijo, debajo de `TextInput16`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `With({n: CountRows(Filter(colSetsExpNuevos; SetID = ThisItem.ID))}; If(n > 0; "✔ " & n & " línea(s)"; ""))` |
+| Align | `Align.Center` |
+| AlignInContainer | `AlignInContainer.Stretch` |
+| Color | `RGBA(47; 158; 95; 1)` |
+| FontWeight | `FontWeight.Bold` |
+| Size | `10` |
+| Height | `20` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+---
+
+## 10.3 Control nuevo: título del carrito
+
+**Control:** `lblCarritoSetsExp`
+**Tipo:** Insertar → Texto → **Etiqueta de texto**
+**Ubicación:** dentro de `Container124`, **encima de** `btnGuardarSetsExport` (arrástralo en el árbol para que quede después de `galSetsAddExp`).
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `"Líneas por agregar: " & CountRows(colSetsExpNuevos) & "  ·  " & CountRows(Distinct(colSetsExpNuevos; SetName)) & " SET(s) distintos"` |
+| Align | `Align.Center` |
+| AlignInContainer | `AlignInContainer.Stretch` |
+| Color | `RGBA(12; 56; 76; 1)` |
+| FontWeight | `FontWeight.Semibold` |
+| Size | `11` |
+| Height | `26` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+---
+
+## 10.4 Control nuevo: galería del carrito
+
+**Control:** `galSetsExpCarrito`
+**Tipo:** Insertar → **Galería vertical en blanco**
+**Ubicación:** dentro de `Container124`, justo debajo de `lblCarritoSetsExp`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `Sort(colSetsExpNuevos; SetName; SortOrder.Ascending)` |
+| WrapCount | `3` |
+| TemplateSize | `30` |
+| TemplatePadding | `2` |
+| Height | `110` |
+| FillPortions | `0` |
+| Width | `680` |
+| ShowScrollbar | `true` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Hijo 1 — **Control:** `lblCarritoLinea` · Tipo: **Etiqueta de texto** (dentro de la plantilla de `galSetsExpCarrito`)
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `ThisItem.SetName & "  ·  línea " & ThisItem.Linea & If(ThisItem.EsManual; "  (manual)"; "")` |
+| Fill | `RGBA(232; 245; 236; 1)` |
+| Size | `10` |
+| PaddingLeft | `8` |
+| Height | `Parent.TemplateHeight` |
+| Width | `Parent.TemplateWidth - 30` |
+| X | `0` |
+| Y | `0` |
+
+### Hijo 2 — **Control:** `icoQuitarLinea` · Tipo: Insertar → Iconos → **Icono moderno** (dentro de la misma plantilla)
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `"Dismiss"` |
+| IconColor | `RGBA(215; 58; 60; 1)` |
+| OnSelect | `Remove(colSetsExpNuevos; ThisItem)` |
+| Height | `Parent.TemplateHeight` |
+| Width | `28` |
+| X | `Parent.TemplateWidth - 30` |
+| Y | `0` |
+
+---
+
+## 10.5 Control nuevo: alta manual (contenedor)
+
+**Control:** `conSetManualExp`
+**Tipo:** Insertar → Diseño → **Contenedor de diseño horizontal**
+**Ubicación:** dentro de `Container124`, entre `galSetsExpCarrito` y `btnGuardarSetsExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Fill | `RGBA(251; 241; 220; 1)` |
+| Height | `48` |
+| FillPortions | `0` |
+| Width | `680` |
+| LayoutAlignItems | `LayoutAlignItems.Center` |
+| LayoutJustifyContent | `LayoutJustifyContent.Center` |
+| LayoutGap | `8` |
+| PaddingTop | `6` |
+| PaddingBottom | `6` |
+| PaddingLeft | `8` |
+| PaddingRight | `8` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Hijo 1 — **Control:** `txtSetManualExp` · Tipo: Insertar → Entrada → **Entrada de texto (clásica)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Default | `""` |
+| HintText | `"SET manual (si no aparece arriba)"` |
+| FillPortions | `2` |
+| Height | `32` |
+| PaddingLeft | `6` |
+| Size | `11` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Hijo 2 — **Control:** `cmbCropManualExp` · Tipo: Insertar → Entrada → **Cuadro combinado (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `["Tomato"; "Pepper"; "Melon"; "Watermelon"; "Cucumber"]` |
+| ItemDisplayText | `ThisItem.Value` |
+| InputTextPlaceholder | `"Crop"` |
+| SelectMultiple | `false` |
+| FillPortions | `1` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Hijo 3 — **Control:** `btnAddManualExp` · Tipo: Insertar → **Botón (clásico)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `"+ Agregar manual"` |
+| Fill | `RGBA(232; 169; 60; 1)` |
+| Color | `RGBA(255; 255; 255; 1)` |
+| Size | `11` |
+| Height | `32` |
+| DisplayMode | `If(IsBlank(Trim(txtSetManualExp.Text)); DisplayMode.Disabled; DisplayMode.Edit)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+| OnSelect | ver abajo |
+
+```
+With(
+    {_n: Trim(txtSetManualExp.Text); _d: LookUp(DATASUMMARY1; SetName = Trim(txtSetManualExp.Text))};
+    If(
+        IsBlank(_d.ID) And IsBlank(cmbCropManualExp.Selected.Value);
+        Notify("Ese SET no está en DATASUMMARY1: selecciona el Crop."; NotificationType.Warning);
+
+        Collect(colSetsExpNuevos;
+            {
+                Linea: Coalesce(Max(colSetsExpNuevos; Linea); 0) + 1;
+                SetID: Coalesce(_d.ID; -1 * (CountRows(colSetsExpNuevos) + 1));
+                SetName: _n;
+                Crop: Coalesce(_d.Crop.Value; cmbCropManualExp.Selected.Value);
+                Program: Coalesce(_d.Program.Value; varReqExportSel.Program; "NA");
+                Generation: Coalesce(_d.Generation.Value; "NA");
+                MCT: Coalesce(_d.MCT.Value; "NA");
+                TrialIntent: Coalesce(_d.TrialIntent.Value; varReqExportSel.Trial_Intent; "NA");
+                OperationType: Coalesce(_d.OperationType.Value; "NA");
+                VCR: Coalesce(_d.VCR; "");
+                Field: Coalesce(_d.Field; "");
+                Area: Coalesce(_d.Area.Value; varReqExportSel.Area; "SSD");
+                Season: Coalesce(Text(_d.Season); "");
+                Rank: Coalesce(_d.Rank; "");
+                Greenhouse: Coalesce(_d.Greenhouse; "");
+                Plantas: Coalesce(_d.PlantsTransplanted; 0);
+                EsManual: IsBlank(_d.ID)
+            }
+        );;
+        Reset(txtSetManualExp);;
+        Reset(cmbCropManualExp);;
+        Notify(_n & " agregado"; NotificationType.Information; 1000)
+    )
+)
+```
+
+---
+
+# PASO 11 · Análisis de exportaciones (rediseño)
+
+## 11.0 Antes de empezar
+
+1. En el árbol, **elimina el contenedor `Kpis Exports` completo**. Con él se van `btnAnaCargar`, `btnAnaNormalizar`, `btnAnaFiltrar`, `btnAnaGraficas` y `btnAnaGuardarDias`. Es a propósito: los volvemos a crear con los nombres correctos. Si no lo borras primero, Studio renombrará los nuevos a `btnAnaCargar_1` y el botón del menú dejará de funcionar.
+2. Trabaja en este orden: primero el contenedor, luego **los 4 botones ocultos (11.7 a 11.10)**, y al final los visuales. Así las fórmulas no quedan en rojo mientras construyes.
+
+### Control: `conAnaExport`
+**Tipo:** Insertar → Diseño → **Contenedor de diseño vertical**
+**Ubicación:** hijo directo de `Container73` (al mismo nivel que `vTablero`, `vCarga`, `vExport`…), como último hijo.
+
+| Propiedad | Fórmula |
+|---|---|
+| Visible | `varSeccionActiva = "ExportAnalyst"` |
+| Fill | `RGBA(244; 247; 250; 1)` |
+| Height | `Parent.Height` |
+| FillPortions | `1` |
+| LayoutDirection | `LayoutDirection.Vertical` |
+| LayoutAlignItems | `LayoutAlignItems.Stretch` |
+| LayoutGap | `14` |
+| LayoutOverflowY | `LayoutOverflow.Scroll` |
+| PaddingTop | `16` |
+| PaddingBottom | `24` |
+| PaddingLeft | `20` |
+| PaddingRight | `20` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+> **La barra de desplazamiento sí se activa pero no se ve:** `LayoutOverflowY` debe quedar en `Scroll` (si no, no baja), y para ocultar la barra pon la propiedad **ShowScrollbar** de `conAnaExport` en `false`. Si tu versión del contenedor no muestra esa propiedad, escríbela igual en la barra de fórmulas con el control seleccionado.
+
+---
+
+## 11.1 Control: `htmlAnaTitulo`
+**Tipo:** Insertar → Multimedia → **Visor de HTML**
+**Ubicación:** primer hijo de `conAnaExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| AutoHeight | `true` |
+| FillPortions | `0` |
+| PaddingTop | `0` |
+| PaddingBottom | `0` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+| HtmlText | ver abajo |
+
+```
+"<div style='font-family:Segoe UI;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px'>" &
+"<div><div style='font-size:11px;letter-spacing:1.2px;color:#88BC30;font-weight:700'>SEED PROCESSING AREA · EXPORT ANALYST</div>" &
+"<div style='font-size:22px;font-weight:700;color:#0C384C'>Análisis de exportaciones</div></div>" &
+"<div style='font-size:12px;color:#5a6b7b;text-align:right'>Fecha base: <b>" & Coalesce(varAnaBase; "Pack/treat start") & "</b><br>" &
+If(IsBlank(varAnaDesde); ""; Text(varAnaDesde; "[$-en-US]dd/mm/yyyy") & " – " & Text(DateAdd(varAnaHasta; -1; TimeUnit.Days); "[$-en-US]dd/mm/yyyy")) &
+"  ·  " & CountRows(colAnaFilt) & " líneas · " & CountRows(colAnaEnvios) & " envíos</div></div>"
+```
+
+---
+
+## 11.2 Barra de filtros
+
+### Control: `conAnaFiltros`
+**Tipo:** Insertar → Diseño → **Contenedor de diseño horizontal**
+**Ubicación:** segundo hijo de `conAnaExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Fill | `RGBA(255; 255; 255; 1)` |
+| Height | `56` |
+| FillPortions | `0` |
+| LayoutAlignItems | `LayoutAlignItems.Center` |
+| LayoutGap | `8` |
+| PaddingTop | `8` |
+| PaddingBottom | `8` |
+| PaddingLeft | `10` |
+| PaddingRight | `10` |
+| RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight | `10` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+Dentro de `conAnaFiltros`, en este orden:
+
+### Control: `DatePicker2` · Tipo: Insertar → Entrada → **Selector de fecha (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| DefaultDate | `DateAdd(Today(); -365; TimeUnit.Days)` |
+| Format | `"dd/mm/yyyy"` |
+| Placeholder | `"Desde"` |
+| Width | `135` |
+| OnChange | `Select(btnAnaCargar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `DatePicker4` · Tipo: **Selector de fecha (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| DefaultDate | `Today()` |
+| Format | `"dd/mm/yyyy"` |
+| Placeholder | `"Hasta"` |
+| Width | `135` |
+| OnChange | `Select(btnAnaCargar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `cmbAnaFechaBase` · Tipo: **Cuadro combinado (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `["Pack/treat start"; "CreatedDate"; "Shipping Date"; "Delivery Date"]` |
+| DefaultSelectedItems | `["Pack/treat start"]` |
+| ItemDisplayText | `ThisItem.Value` |
+| InputTextPlaceholder | `"Fecha base"` |
+| SelectMultiple | `false` |
+| FillPortions | `1` |
+| OnChange | `Select(btnAnaCargar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `cmbAnaTipo` · Tipo: **Cuadro combinado (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `["Todos"; "Seed"; "Tissue"]` |
+| DefaultSelectedItems | `["Todos"]` |
+| ItemDisplayText | `ThisItem.Value` |
+| InputTextPlaceholder | `"Tipo"` |
+| SelectMultiple | `false` |
+| FillPortions | `1` |
+| OnChange | `Select(btnAnaFiltrar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `cmbAnaCountry` · Tipo: **Cuadro combinado (moderno)**
+
+| Propiedad | Fórmula |
+|---|---|
+| DefaultSelectedItems | `["Todos"]` |
+| ItemDisplayText | `ThisItem.Value` |
+| InputTextPlaceholder | `"País"` |
+| SelectMultiple | `false` |
+| FillPortions | `1` |
+| OnChange | `Select(btnAnaFiltrar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+| Items | ver abajo |
+
+```
+Ungroup(
+    Table(
+        {Op: Table({Value: "Todos"})};
+        {Op: Sort(Distinct(colAna; SHIP_TO_COUNTRY); Value; SortOrder.Ascending)}
+    );
+    Op
+)
+```
+
+### Control: `txtAnaBuscar` · Tipo: **Entrada de texto (clásica)**
+
+| Propiedad | Fórmula |
+|---|---|
+| Default | `""` |
+| DelayOutput | `true` |
+| HintText | `"Request ID, SET, PEA, locación, programa, cultivo"` |
+| FillPortions | `2` |
+| Height | `34` |
+| PaddingLeft | `8` |
+| Size | `11` |
+| OnChange | `Select(btnAnaFiltrar)` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `icoAnaLimpiar` · Tipo: **Icono moderno**
+
+| Propiedad | Fórmula |
+|---|---|
+| Icon | `"Dismiss"` |
+| IconColor | `RGBA(215; 58; 60; 1)` |
+| Tooltip | `"Limpiar filtros"` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+| OnSelect | ver abajo |
+
+```
+Clear(colAnaCropSel);;
+Reset(txtAnaBuscar);;
+Reset(cmbAnaTipo);;
+Reset(cmbAnaCountry);;
+Reset(cmbAnaFechaBase);;
+Reset(DatePicker2);;
+Reset(DatePicker4);;
+Select(btnAnaCargar)
+```
+
+---
+
+## 11.3 Control: `htmlAnaKpis` (tarjetas KPI)
+**Tipo:** **Visor de HTML**
+**Ubicación:** tercer hijo de `conAnaExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| AutoHeight | `true` |
+| FillPortions | `0` |
+| PaddingTop / PaddingBottom / PaddingLeft / PaddingRight | `0` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+| HtmlText | ver abajo |
+
+```
+"<div style='font-family:Segoe UI;display:flex;flex-wrap:wrap;gap:10px'>" &
+Concat(
+    Table(
+        {t: "Envíos (IDs)"; v: Text(Coalesce(varAnaEnvios; 0); "[$-en-US]#,##0"); s: Text(Coalesce(varAnaEntregados; 0)) & " entregados"; c: "#0C384C"};
+        {t: "SETs enviados"; v: Text(Coalesce(varAnaSets; 0); "[$-en-US]#,##0"); s: "únicos por ID"; c: "#88BC30"};
+        {t: "Packets"; v: Text(Coalesce(varAnaPackets; 0); "[$-en-US]#,##0"); s: "suma de líneas"; c: "#2e9fd6"};
+        {t: "Peso neto"; v: Text(Coalesce(varAnaNeto; 0); "[$-en-US]#,##0.0") & " kg"; s: "bruto " & Text(Coalesce(varAnaBruto; 0); "[$-en-US]#,##0.0") & " kg"; c: "#7E3A66"};
+        {t: "Cajas"; v: Text(Coalesce(varAnaCajas; 0); "[$-en-US]#,##0"); s: "No. de caja distinto por ID"; c: "#C97E17"};
+        {t: "Lead solicitado"; v: Text(Coalesce(varAnaLeadReq; 0); "[$-en-US]0.0") & " d"; s: "Created → Requested ship"; c: "#17456B"};
+        {t: "Solicitud → envío"; v: Text(Coalesce(varAnaSolEnv; 0); "[$-en-US]0.0") & " d"; s: "Created → Shipping"; c: "#63756B"};
+        {t: "Ciclo total"; v: Text(Coalesce(varAnaCiclo; 0); "[$-en-US]0.0") & " d"; s: "Created → Delivery"; c: "#10241C"};
+        {t: "Envíos a tiempo"; v: Text(Coalesce(varAnaOnTime; 0); "[$-en-US]0.0") & "%"; s: Text(Coalesce(varAnaConFecha; 0)) & " con fecha de envío"; c: If(Coalesce(varAnaOnTime; 0) >= 85; "#2f9e5f"; "#d35442")}
+    ) As K;
+    "<div style='flex:1 1 150px;min-width:140px;background:#fff;border:1px solid #e3eaf1;border-left:4px solid " & K.c & ";border-radius:10px;padding:10px 12px'>" &
+    "<div style='font-size:10px;color:#5a6b7b;text-transform:uppercase;letter-spacing:.5px'>" & K.t & "</div>" &
+    "<div style='font-size:24px;font-weight:700;color:#16273a;margin:2px 0'>" & K.v & "</div>" &
+    "<div style='font-size:11px;color:#93a4b4'>" & K.s & "</div></div>"
+) & "</div>"
+```
+
+---
+
+## 11.4 Tarjetas por cultivo
+
+### Control: `lblAnaSecCultivo` · Tipo: **Etiqueta de texto** · Ubicación: cuarto hijo de `conAnaExport`
+
+| Propiedad | Fórmula |
+|---|---|
+| Text | `"Por cultivo  ·  toca una tarjeta para filtrar" & If(IsEmpty(colAnaCropSel); ""; "  (filtro: " & Concat(colAnaCropSel; CROP; ", ") & ")")` |
+| Color | `RGBA(12; 56; 76; 1)` |
+| FontWeight | `FontWeight.Bold` |
+| Size | `12` |
+| Height | `24` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Control: `galAnaCrop`
+**Tipo:** Insertar → **Galería horizontal en blanco**
+**Ubicación:** quinto hijo de `conAnaExport`.
+
+| Propiedad | Fórmula |
+|---|---|
+| Items | `Filter(colAnaCrop; CROP <> "Otros" Or ENVIOS > 0)` |
+| Height | `170` |
+| FillPortions | `0` |
+| TemplateSize | `220` |
+| TemplatePadding | `6` |
+| ShowScrollbar | `false` |
+| LayoutMinHeight | `16` |
+| LayoutMinWidth | `16` |
+
+### Hijo 1 — **Control:** `htmlAnaCropCard` · Tipo: **Visor de HTML**
+
+| Propiedad | Fórmula |
+|---|---|
+| Height | `Parent.TemplateHeight` |
+| Width | `Parent.TemplateWidth` |
+| PaddingTop / PaddingBottom / PaddingLeft / PaddingRight | `0` |
+| X | `0` |
+| Y | `0` |
+| HtmlText | ver abajo |
+
+```
+"<div style='font-family:Segoe UI;box-sizing:border-box;height:150px;background:" & If(ThisItem.SEL; "#F3F9E9"; "#fff") &
+";border:1px solid " & If(ThisItem.SEL; ThisItem.COLOR; "#e3eaf1") & ";border-top:5px solid " & ThisItem.COLOR & ";border-radius:12px;padding:10px 12px'>" &
+"<div style='display:flex;justify-content:space-between;align-items:center'><b style='font-size:14px;color:#16273a'>" & ThisItem.CROP & "</b>" &
+"<span style='font-size:10px;color:#93a4b4'>" & ThisItem.ENVIOS & " envíos</span></div>" &
+"<div style='font-size:28px;font-weight:700;color:" & ThisItem.COLOR & ";line-height:1.2'>" & ThisItem.SETS_UNICOS & "<span style='font-size:11px;color:#5a6b7b;font-weight:400'> SETs</span></div>" &
+"<div style='font-size:11px;color:#5a6b7b'>" & Text(ThisItem.PA
