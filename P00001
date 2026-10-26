@@ -1,0 +1,2024 @@
+0. REQUISITO PREVIO — COLUMNAS SHAREPOINT
+
+Lista RENDIMIENTOS_CATALOGO (agregar columnas):
+
+Columna	Tipo
+Nivel	Número
+Actividad, SubActividad, Generation, MCT, Program, OperationType, Confiabilidad	Texto
+RendP25, RendMeta, RendP90, RendPromedio, RendMediana	Número decimal
+NumRegistros, NumPersonas	Número
+FechaCalculo	Fecha y hora
+
+Lista PROGRAMACION (agregar): SubActividad, ClaveMeta, Confiabilidad (Texto) · RendMeta, HorasEstimadas (Decimal) · PersonasMin (Número).
+
+Lista PROGRAMACION_PERSONAS (agregar): MetaOpHora, RendHistorico (Decimal) · NivelEval (Número).
+
+1. FÓRMULAS DE APP (App → Fórmulas)
+
+AGREGAR al final del archivo de fórmulas:
+
+powerfx
+MaxHorasRegistro = 9;;
+MaxHorasDiaPersona = 9;;
+MinRegMeta = 5;;
+MinRegAlta = 30;;
+MinPersAlta = 5;;
+MinRegMedia = 10;;
+MinPersMedia = 3;;
+
+SetsSinMaterialOK = ["Actividades varias"; "Otros"];;
+ActividadesSinMaterialOK = ["Actividades varias"; "Otros"; "Ausencias"; "Entrenamientos"; "Oficina"];;
+
+fxMct(m: Text): Text =
+    With(
+        {x: Trim(Coalesce(m; ""))};
+        If(
+            IsBlank(x); "N/A";
+            Lower(x) in ["varios"; "various"]; "Varios";
+            x
+        )
+    );;
+
+fxSub(s: Text): Text =
+    With({x: Trim(Coalesce(s; ""))}; If(IsBlank(x) Or Lower(x) = "n/a"; "(sin subactividad)"; x));;
+
+fxTxt(t: Text): Text =
+    With({x: Trim(Coalesce(t; ""))}; If(IsBlank(x); "N/A"; x));;
+
+fxClave(nivel: Number; gen: Text; mct: Text; prog: Text; op: Text; act: Text; sub: Text): Text =
+    Switch(
+        nivel;
+        1; fxTxt(gen) & "|" & fxMct(mct) & "|" & fxTxt(prog) & "|" & fxTxt(op) & "|" & fxTxt(act) & "|" & fxSub(sub);
+        2; fxTxt(gen) & "|" & fxMct(mct) & "|" & fxTxt(prog) & "|*|" & fxTxt(act) & "|" & fxSub(sub);
+        3; fxTxt(gen) & "|" & fxMct(mct) & "|*|*|" & fxTxt(act) & "|" & fxSub(sub);
+        "*|*|*|*|" & fxTxt(act) & "|" & fxSub(sub)
+    );;
+
+fxConfiab(reg: Number; pers: Number): Text =
+    If(
+        reg >= MinRegAlta And pers >= MinPersAlta; "Alta";
+        reg >= MinRegMedia And pers >= MinPersMedia; "Media";
+        "Baja"
+    );;
+
+fxCumpleColor(mediana: Number; p25: Number; meta: Number): Color =
+    If(
+        meta <= 0; RGBA(150; 150; 150; 0,3);
+        mediana >= meta; RGBA(47; 158; 68; 0,18);
+        mediana >= p25; RGBA(232; 169; 60; 0,22);
+        RGBA(220; 38; 38; 0,16)
+    );;
+
+MODIFICAR (ya existe, cambiar valor):
+
+powerfx
+UmbralHabilitado = 3;;
+
+(La escala de evaluación es 1–4 donde 3 = “Cumple las expectativas”. Con 2 se estaba habilitando gente que “necesita mejorar”.)
+
+2. App.OnStart
+
+AGREGAR al final de la propiedad OnStart:
+
+powerfx
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+Set(gMetaDesde; DateAdd(Today(); -180; TimeUnit.Days));;
+Set(gMetaHasta; DateAdd(Today(); 1; TimeUnit.Days));;
+Set(gOrdRendF; "");;
+Set(gOrdRendA; "");;
+Clear(colFiltroGen);;
+Clear(colFiltroMct);;
+Clear(colFiltroProg);;
+Clear(colFiltroTrial);;
+Clear(colFiltroOp)
+3. PANTALLA scrRendimientos — MOTOR DE METAS
+3.1 dpMetaDesde — AGREGAR
+Tipo: ModernDatePicker
+Ubicación: scrRendimientos > conRaiz_Sets > conVista_AnaGlobal > conModoGlobal
+Propiedad	Fórmula
+DefaultDate	=DateAdd(Today(); -180; TimeUnit.Days)
+Format	="dd/mm/yyyy"
+Width	=130
+Visible	=varAdmin
+3.2 dpMetaHasta — AGREGAR
+Tipo: ModernDatePicker
+Ubicación: conVista_AnaGlobal > conModoGlobal
+Propiedad	Fórmula
+DefaultDate	=Today()
+Format	="dd/mm/yyyy"
+Width	=130
+Visible	=varAdmin
+3.3 btnCalcMetasRef — AGREGAR (motor de cálculo de metas)
+Tipo: Classic/Button
+Ubicación: conVista_AnaGlobal > conModoGlobal
+Propiedad	Fórmula
+Text	="⚙️ Recalcular metas de referencia"
+Fill	=colDark
+Color	=colBlanco
+Width	=230
+Height	=32
+Visible	=varAdmin
+
+OnSelect:
+
+powerfx
+=Set(gMetaDesde; Coalesce(dpMetaDesde.SelectedDate; DateAdd(Today(); -180; TimeUnit.Days)));;
+Set(gMetaHasta; DateAdd(Coalesce(dpMetaHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+
+ClearCollect(
+    colMetaBruto;
+    ForAll(
+        Filter(
+            REGISTRO_PERSONAL1;
+            Estado.Value = "Finalizado";
+            HorasTotales > 0;
+            HorasTotales <= MaxHorasRegistro;
+            FechaInicio >= gMetaDesde;
+            FechaInicio < gMetaHasta
+        ) As _r;
+        With(
+            {
+                _h: Coalesce(_r.HorasTotales; 0);
+                _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+            };
+            {
+                Codigo:      Coalesce(_r.CODIGO; "s/c");
+                Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                SetName:     Coalesce(_r.SetName; "Sin set");
+                Actividad:   fxTxt(_r.Job);
+                SubAct:      fxSub(_r.SubActividad.Value);
+                Gen:         fxTxt(_r.Generation);
+                Mct:         fxMct(_r.MTC);
+                Prog:        fxTxt(_r.Program);
+                TipoOp:      fxTxt(_r.TypeOperation.Value);
+                Cultivo:     fxTxt(_r.Cultivo);
+                FechaRaw:    _fi;
+                MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                Horas:       _h;
+                Mat:         _m;
+                Rend:        If(_h > 0; _m / _h; 0)
+            }
+        )
+    )
+);;
+
+ClearCollect(
+    colMetaDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colMetaBruto; 'FechaRaw'; 'Codigo'; '_d') As _g;
+                {
+                    ClaveDia: Text(_g.FechaRaw; "[$-es]yyyymmdd") & "|" & _g.Codigo;
+                    HorasDia: Sum(_g._d; Horas)
+                }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colMetaRaw;
+    Filter(
+        ForAll(
+            colMetaBruto As _b;
+            {
+                Codigo: _b.Codigo; Persona: _b.Persona; SetName: _b.SetName;
+                Actividad: _b.Actividad; SubAct: _b.SubAct;
+                Gen: _b.Gen; Mct: _b.Mct; Prog: _b.Prog; TipoOp: _b.TipoOp;
+                Horas: _b.Horas; Mat: _b.Mat; Rend: _b.Rend;
+                MismoDia: _b.MismoDia;
+                DiaOk: Not(
+                    (Text(_b.FechaRaw; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colMetaDiaExcl.ClaveDia
+                );
+                MatOk: _b.Mat > 0
+                       Or _b.SetName in SetsSinMaterialOK
+                       Or _b.Actividad in ActividadesSinMaterialOK
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk;
+        Rend > 0
+    )
+);;
+
+ClearCollect(
+    colMetaLargo;
+    Ungroup(
+        Table(
+            { _t: ForAll(colMetaRaw As r; { Nivel: 1; Clave: fxClave(1; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: r.Prog; TipoOp: r.TipoOp; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 2; Clave: fxClave(2; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: r.Prog; TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 3; Clave: fxClave(3; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: "*";    TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 4; Clave: fxClave(4; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: "*";    Mct: "*";    Prog: "*";    TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) }
+        );
+        '_t'
+    )
+);;
+
+ClearCollect(
+    colMetasCalc;
+    Filter(
+        ForAll(
+            GroupBy(colMetaLargo; 'Nivel'; 'Clave'; 'Actividad'; 'SubAct'; 'Gen'; 'Mct'; 'Prog'; 'TipoOp'; '_d') As g;
+            With(
+                {
+                    _o: Sort(g._d; Rend; SortOrder.Ascending);
+                    _n: CountRows(g._d)
+                };
+                With(
+                    {
+                        _l25: RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _f25: 1 + (_n - 1) * 0,25 - RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _l50: RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _f50: 1 + (_n - 1) * 0,50 - RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _l75: RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _f75: 1 + (_n - 1) * 0,75 - RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _l90: RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _f90: 1 + (_n - 1) * 0,90 - RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _nn: _n
+                    };
+                    With(
+                        {
+                            _p25: Last(FirstN(_o; _l25)).Rend + (Last(FirstN(_o; Min(_l25 + 1; _nn))).Rend - Last(FirstN(_o; _l25)).Rend) * _f25;
+                            _p50: Last(FirstN(_o; _l50)).Rend + (Last(FirstN(_o; Min(_l50 + 1; _nn))).Rend - Last(FirstN(_o; _l50)).Rend) * _f50;
+                            _p75: Last(FirstN(_o; _l75)).Rend + (Last(FirstN(_o; Min(_l75 + 1; _nn))).Rend - Last(FirstN(_o; _l75)).Rend) * _f75;
+                            _p90: Last(FirstN(_o; _l90)).Rend + (Last(FirstN(_o; Min(_l90 + 1; _nn))).Rend - Last(FirstN(_o; _l90)).Rend) * _f90;
+                            _hs: Sum(g._d; Horas);
+                            _ms: Sum(g._d; Mat);
+                            _np: CountRows(Distinct(g._d; Codigo))
+                        };
+                        {
+                            Clave:         g.Clave;
+                            Nivel:         g.Nivel;
+                            Actividad:     g.Actividad;
+                            SubActividad:  g.SubAct;
+                            Generation:    g.Gen;
+                            MCT:           g.Mct;
+                            Program:       g.Prog;
+                            OperationType: g.TipoOp;
+                            RendP25:       Round(_p25; 1);
+                            RendMediana:   Round(_p50; 1);
+                            RendMeta:      Round(_p75; 1);
+                            RendP90:       Round(_p90; 1);
+                            RendPromedio:  If(_hs > 0; Round(_ms / _hs; 1); 0);
+                            NumRegistros:  _nn;
+                            NumPersonas:   _np;
+                            Confiabilidad: fxConfiab(_nn; _np)
+                        }
+                    )
+                )
+            )
+        );
+        NumRegistros >= MinRegMeta
+    )
+);;
+
+ForAll(
+    colMetasCalc As mc;
+    Patch(
+        RENDIMIENTOS_CATALOGO;
+        Coalesce(LookUp(RENDIMIENTOS_CATALOGO; Title = mc.Clave); Defaults(RENDIMIENTOS_CATALOGO));
+        {
+            Title:         mc.Clave;
+            Nivel:         mc.Nivel;
+            Actividad:     mc.Actividad;
+            SubActividad:  mc.SubActividad;
+            Generation:    mc.Generation;
+            MCT:           mc.MCT;
+            Program:       mc.Program;
+            OperationType: mc.OperationType;
+            RendP25:       mc.RendP25;
+            RendMeta:      mc.RendMeta;
+            RendP90:       mc.RendP90;
+            RendPromedio:  mc.RendPromedio;
+            RendMediana:   mc.RendMediana;
+            NumRegistros:  mc.NumRegistros;
+            NumPersonas:   mc.NumPersonas;
+            Confiabilidad: mc.Confiabilidad;
+            FechaCalculo:  Now()
+        }
+    )
+);;
+
+Refresh(RENDIMIENTOS_CATALOGO);;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+Notify(
+    "✅ Metas recalculadas: " & CountRows(colMetasCalc) & " combinaciones | " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Alta")) & " Alta · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Media")) & " Media · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Baja")) & " Baja. Registros válidos: " &
+    CountRows(colMetaRaw) & " de " & CountRows(colMetaBruto);
+    NotificationType.Success
+)
+
+Nota de delegación: con más de 2.000 registros en el rango, acota dpMetaDesde/dpMetaHasta y recalcula por tramos, o migra este bloque a Power Automate escribiendo directo a RENDIMIENTOS_CATALOGO.
+
+4. PANTALLA scrRendimientos — CARGA Y ANÁLISIS
+4.1 btnCargarGlobal — MODIFICAR OnSelect
+
+Ubicación: conVista_AnaGlobal > btnCargarGlobal
+
+powerfx
+=Set(gGDesde; Coalesce(dpGDesde.SelectedDate; DateAdd(Today(); -30; TimeUnit.Days)));;
+Set(gGHasta; DateAdd(Coalesce(dpGHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+
+ClearCollect(
+    colGlobalBruto;
+    ForAll(
+        Filter(
+            REGISTRO_PERSONAL1;
+            Estado.Value = "Finalizado";
+            HorasTotales > 0;
+            HorasTotales <= MaxHorasRegistro;
+            FechaInicio >= gGDesde;
+            FechaInicio < gGHasta
+        ) As _r;
+        With(
+            {
+                _h: Coalesce(_r.HorasTotales; 0);
+                _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+            };
+            {
+                IDReg:       _r.ID;
+                SetName:     Coalesce(_r.SetName; "Sin set");
+                Cultivo:     fxTxt(_r.Cultivo);
+                Actividad:   fxTxt(_r.Job);
+                SubAct:      fxSub(_r.SubActividad.Value);
+                Program:     fxTxt(_r.Program);
+                Generacion:  fxTxt(_r.Generation);
+                Trial:       fxTxt(_r.TrialIntent);
+                Mct:         fxMct(_r.MTC);
+                TipoOp:      fxTxt(_r.TypeOperation.Value);
+                Field:       Coalesce(_r.Field; "—");
+                Greenhouse:  Coalesce(_r.Greenhouse; "—");
+                Codigo:      Coalesce(_r.CODIGO; "s/c");
+                Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                Responsable: Coalesce(_r.Responsable; "—");
+                EstadoTxt:   Coalesce(_r.Estado.Value; "Finalizado");
+                Comentarios: Coalesce(_r.Comentarios; "Sin comentarios");
+                Fecha:       _fi;
+                FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm/yyyy");
+                HoraIni:     Coalesce(_r.HoraInicio; "—");
+                HoraFin:     Coalesce(_r.HoraFin; "—");
+                Horas:       _h;
+                Mat:         _m;
+                Frutos:      Coalesce(_r.NumeroFrutos; 0);
+                Rend:        If(_h > 0; _m / _h; 0);
+                MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                MatOk:       _m > 0
+                             Or Coalesce(_r.SetName; "") in SetsSinMaterialOK
+                             Or fxTxt(_r.Job) in ActividadesSinMaterialOK
+            }
+        )
+    )
+);;
+
+ClearCollect(
+    colGlobalDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colGlobalBruto; 'Fecha'; 'Codigo'; '_d') As _g;
+                { ClaveDia: Text(_g.Fecha; "[$-es]yyyymmdd") & "|" & _g.Codigo; HorasDia: Sum(_g._d; Horas) }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colGlobalRaw;
+    Filter(
+        ForAll(
+            colGlobalBruto As _b;
+            {
+                IDReg: _b.IDReg; SetName: _b.SetName; Cultivo: _b.Cultivo;
+                Actividad: _b.Actividad; SubAct: _b.SubAct; Program: _b.Program;
+                Generacion: _b.Generacion; Trial: _b.Trial; Mct: _b.Mct; TipoOp: _b.TipoOp;
+                Field: _b.Field; Greenhouse: _b.Greenhouse; Codigo: _b.Codigo;
+                Persona: _b.Persona; Responsable: _b.Responsable; EstadoTxt: _b.EstadoTxt;
+                Comentarios: _b.Comentarios; Fecha: _b.Fecha; FechaTxt: _b.FechaTxt;
+                HoraIni: _b.HoraIni; HoraFin: _b.HoraFin; Horas: _b.Horas; Mat: _b.Mat;
+                Frutos: _b.Frutos; Rend: _b.Rend;
+                MismoDia: _b.MismoDia; MatOk: _b.MatOk;
+                DiaOk: Not((Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colGlobalDiaExcl.ClaveDia);
+                ClaveM1: fxClave(1; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM2: fxClave(2; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM3: fxClave(3; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM4: fxClave(4; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveGF: Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad & "|" & _b.SubAct;
+                ClaveGA: _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk
+    )
+);;
+
+Set(gGlobalTrunc; CountRows(colGlobalBruto) >= 2000);;
+Clear(colExclGF);;
+Clear(colExclGA);;
+Clear(colExclGM);;
+Select(btnRecalcGlobal)
+4.2 btnRecalcGlobal — MODIFICAR OnSelect
+
+Ubicación: conVista_AnaGlobal > btnRecalcGlobal
+
+powerfx
+=ClearCollect(
+    colGlobalFiltrado;
+    Filter(
+        colGlobalRaw;
+        (IsEmpty(colFiltroAct)    Or Actividad  in colFiltroAct.Valor);
+        (IsEmpty(colFiltroSubAct) Or SubAct     in colFiltroSubAct.Valor);
+        (IsEmpty(colFiltroPers)   Or Persona    in colFiltroPers.Valor);
+        (IsEmpty(colFiltroGen)    Or Generacion in colFiltroGen.Valor);
+        (IsEmpty(colFiltroMct)    Or Mct        in colFiltroMct.Valor);
+        (IsEmpty(colFiltroProg)   Or Program    in colFiltroProg.Valor);
+        (IsEmpty(colFiltroTrial)  Or Trial      in colFiltroTrial.Valor);
+        (IsEmpty(colFiltroOp)     Or TipoOp     in colFiltroOp.Valor);
+        (IsBlank(gfCrop.Selected.Value) Or Cultivo = gfCrop.Selected.Value);
+        (
+            IsBlank(Trim(TextInput11.Text))
+            Or StartsWith(SetName; Trim(TextInput11.Text))
+            Or StartsWith(Persona; Trim(TextInput11.Text))
+            Or StartsWith(Codigo; Trim(TextInput11.Text))
+            Or StartsWith(Actividad; Trim(TextInput11.Text))
+            Or StartsWith(SubAct; Trim(TextInput11.Text))
+            Or StartsWith(Cultivo; Trim(TextInput11.Text))
+            Or StartsWith(Generacion; Trim(TextInput11.Text))
+            Or StartsWith(TipoOp; Trim(TextInput11.Text))
+        )
+    )
+);;
+
+ClearCollect(
+    colAnaGlobalSet;
+    ForAll(
+        GroupBy(colGlobalFiltrado; 'SetName'; 'Cultivo'; 'Generacion'; 'Mct'; 'Program'; 'TipoOp'; 'Actividad'; 'SubAct'; 'ClaveM1'; 'ClaveM2'; 'ClaveM3'; 'ClaveM4'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending);
+                _ref: Coalesce(
+                        LookUp(colRendCat; Title = _g.ClaveM1 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM2 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM3);
+                        LookUp(colRendCat; Title = _g.ClaveM4)
+                      )
+            };
+            With(
+                {
+                    _med: If(
+                              _n = 0; 0;
+                              Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                              Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                          );
+                    _meta: Coalesce(_ref.RendMeta; 0)
+                };
+                {
+                    SetName: _g.SetName; Cultivo: _g.Cultivo; Generacion: _g.Generacion;
+                    Mct: _g.Mct; Program: _g.Program; TipoOp: _g.TipoOp;
+                    Actividad: _g.Actividad; SubActTxt: _g.SubAct;
+                    Personas: CountRows(Distinct(_g._d; Persona));
+                    Dias: CountRows(Distinct(_g._d; Fecha));
+                    Registros: _n;
+                    Horas: Round(_h; 2);
+                    Mat: _m;
+                    Frutos: Sum(_g._d; Frutos);
+                    Rend: If(_h > 0; Round(_m / _h; 1); 0);
+                    Mediana: _med;
+                    MinRef: Coalesce(_ref.RendP25; 0);
+                    MetaRef: _meta;
+                    MaxRef: Coalesce(_ref.RendP90; 0);
+                    Confiab: Coalesce(_ref.Confiabilidad; "Sin meta");
+                    NivelMeta: Coalesce(_ref.Nivel; 0);
+                    Cumpl: If(_meta > 0; Round(_med / _meta; 2); 0);
+                    Detalles: _g._d
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colAnaGlobalAtrib;
+    ForAll(
+        GroupBy(colGlobalFiltrado; 'Cultivo'; 'Actividad'; 'SubAct'; 'Program'; 'Generacion'; 'TipoOp'; 'Trial'; 'Mct'; 'ClaveM1'; 'ClaveM2'; 'ClaveM3'; 'ClaveM4'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending);
+                _ref: Coalesce(
+                        LookUp(colRendCat; Title = _g.ClaveM1 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM2 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM3);
+                        LookUp(colRendCat; Title = _g.ClaveM4)
+                      )
+            };
+            With(
+                {
+                    _med: If(
+                              _n = 0; 0;
+                              Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                              Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                          );
+                    _meta: Coalesce(_ref.RendMeta; 0)
+                };
+                {
+                    SetName: Concat(Distinct(_g._d; SetName); Value; ", ");
+                    Cultivo: _g.Cultivo; Actividad: _g.Actividad; SubAct: _g.SubAct;
+                    Program: _g.Program; Generacion: _g.Generacion; TipoOp: _g.TipoOp;
+                    Trial: _g.Trial; Mct: _g.Mct;
+                    Sets: CountRows(Distinct(_g._d; SetName));
+                    Personas: CountRows(Distinct(_g._d; Persona));
+                    Registros: _n;
+                    Horas: Round(_h; 2);
+                    Mat: _m;
+                    Frutos: Sum(_g._d; Frutos);
+                    Rend: If(_h > 0; Round(_m / _h; 1); 0);
+                    Mediana: _med;
+                    MinRef: Coalesce(_ref.RendP25; 0);
+                    MetaRef: _meta;
+                    MaxRef: Coalesce(_ref.RendP90; 0);
+                    Confiab: Coalesce(_ref.Confiabilidad; "Sin meta");
+                    Cumpl: If(_meta > 0; Round(_med / _meta; 2); 0);
+                    Detalles: _g._d
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colAnaGlobalPersFecha;
+    ForAll(
+        GroupBy(colGlobalFiltrado; 'Fecha'; 'FechaTxt'; 'SetName'; 'Generacion'; 'Mct'; 'Program'; 'TipoOp'; 'Codigo'; 'Persona'; 'Actividad'; 'SubAct'; 'ClaveGF'; 'ClaveM1'; 'ClaveM2'; 'ClaveM3'; 'ClaveM4'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending);
+                _ref: Coalesce(
+                        LookUp(colRendCat; Title = _g.ClaveM1 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM2 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM3);
+                        LookUp(colRendCat; Title = _g.ClaveM4)
+                      )
+            };
+            With(
+                {
+                    _med: If(
+                              _n = 0; 0;
+                              Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                              Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                          );
+                    _meta: Coalesce(_ref.RendMeta; 0)
+                };
+                {
+                    ClaveGF: _g.ClaveGF; FechaRaw: _g.Fecha; Fecha: _g.FechaTxt;
+                    SetName: _g.SetName; Generacion: _g.Generacion; Mct: _g.Mct;
+                    Program: _g.Program; TipoOp: _g.TipoOp; Codigo: _g.Codigo;
+                    Persona: _g.Persona; Actividad: _g.Actividad; SubAct: _g.SubAct;
+                    Horas: Round(_h; 2); Mat: _m; Frutos: Sum(_g._d; Frutos); Registros: _n;
+                    Rend: If(_h > 0; Round(_m / _h; 1); 0);
+                    Mediana: _med;
+                    MinRef: Coalesce(_ref.RendP25; 0);
+                    MetaRef: _meta;
+                    MaxRef: Coalesce(_ref.RendP90; 0);
+                    Confiab: Coalesce(_ref.Confiabilidad; "Sin meta");
+                    Cumpl: If(_meta > 0; Round(_med / _meta; 2); 0);
+                    Detalles: _g._d
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colAnaGlobalPersAcum;
+    ForAll(
+        GroupBy(colGlobalFiltrado; 'SetName'; 'Generacion'; 'Mct'; 'Program'; 'TipoOp'; 'Codigo'; 'Persona'; 'Actividad'; 'SubAct'; 'ClaveGA'; 'ClaveM1'; 'ClaveM2'; 'ClaveM3'; 'ClaveM4'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending);
+                _ref: Coalesce(
+                        LookUp(colRendCat; Title = _g.ClaveM1 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM2 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM3);
+                        LookUp(colRendCat; Title = _g.ClaveM4)
+                      )
+            };
+            With(
+                {
+                    _med: If(
+                              _n = 0; 0;
+                              Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                              Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                          );
+                    _meta: Coalesce(_ref.RendMeta; 0)
+                };
+                {
+                    ClaveGA: _g.ClaveGA; SetName: _g.SetName; Generacion: _g.Generacion;
+                    Mct: _g.Mct; Program: _g.Program; TipoOp: _g.TipoOp;
+                    Codigo: _g.Codigo; Persona: _g.Persona;
+                    Actividad: _g.Actividad; SubAct: _g.SubAct;
+                    Dias: CountRows(Distinct(_g._d; FechaTxt));
+                    Registros: _n; Horas: Round(_h; 2); Mat: _m; Frutos: Sum(_g._d; Frutos);
+                    Rend: If(_h > 0; Round(_m / _h; 1); 0);
+                    Mediana: _med;
+                    MinRef: Coalesce(_ref.RendP25; 0);
+                    MetaRef: _meta;
+                    MaxRef: Coalesce(_ref.RendP90; 0);
+                    Confiab: Coalesce(_ref.Confiabilidad; "Sin meta");
+                    Cumpl: If(_meta > 0; Round(_med / _meta; 2); 0);
+                    Detalles: _g._d
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colAnaGlobalSinSet;
+    ForAll(
+        GroupBy(colGlobalFiltrado; 'Codigo'; 'Persona'; 'Actividad'; 'SubAct'; 'Cultivo'; 'Generacion'; 'Mct'; 'Program'; 'TipoOp'; 'ClaveM1'; 'ClaveM2'; 'ClaveM3'; 'ClaveM4'; '_d') As _g;
+        With(
+            {
+                _h: Sum(_g._d; Horas);
+                _m: Sum(_g._d; Mat);
+                _n: CountRows(_g._d);
+                _o: Sort(_g._d; Rend; SortOrder.Ascending);
+                _ref: Coalesce(
+                        LookUp(colRendCat; Title = _g.ClaveM1 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM2 And Confiabilidad <> "Baja");
+                        LookUp(colRendCat; Title = _g.ClaveM3);
+                        LookUp(colRendCat; Title = _g.ClaveM4)
+                      )
+            };
+            With(
+                {
+                    _med: If(
+                              _n = 0; 0;
+                              Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                              Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                          );
+                    _meta: Coalesce(_ref.RendMeta; 0);
+                    _p25: Coalesce(_ref.RendP25; 0)
+                };
+                {
+                    ClaveGM: _g.Codigo & "|" & _g.Actividad & "|" & _g.SubAct & "|" & _g.Generacion & "|" & _g.Mct & "|" & _g.Program & "|" & _g.TipoOp;
+                    Codigo: _g.Codigo; Persona: _g.Persona;
+                    Actividad: _g.Actividad; SubAct: _g.SubAct; Cultivo: _g.Cultivo;
+                    Generacion: _g.Generacion; Mct: _g.Mct; Program: _g.Program; TipoOp: _g.TipoOp;
+                    SetsCant: CountRows(Distinct(_g._d; SetName));
+                    Dias: CountRows(Distinct(_g._d; FechaTxt));
+                    Registros: _n; Horas: Round(_h; 2); Mat: _m; Frutos: Sum(_g._d; Frutos);
+                    Rend: If(_h > 0; Round(_m / _h; 1); 0);
+                    Mediana: _med;
+                    MinRef: _p25;
+                    MetaRef: _meta;
+                    MaxRef: Coalesce(_ref.RendP90; 0);
+                    Confiab: Coalesce(_ref.Confiabilidad; "Sin meta");
+                    DifMeta: Round(_med - _meta; 1);
+                    PorcMeta: If(_meta > 0; (_med - _meta) / _meta; 0);
+                    Cumpl: If(_meta > 0; Round(_med / _meta; 2); 0);
+                    CumpleMeta: If(
+                                    _meta <= 0; "SIN META";
+                                    _med >= _meta; "CUMPLE";
+                                    _med >= _p25; "EN RANGO";
+                                    "BAJO MÍNIMO"
+                                )
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colGlobalKpiBase;
+    Filter(
+        colGlobalFiltrado;
+        Switch(
+            gGlobalModo;
+            "PersFecha"; Not(ClaveGF in colExclGF.Clave);
+            "PersAcum";  Not(ClaveGA in colExclGA.Clave);
+            true
+        )
+    )
+);;
+
+Set(gRendPromGlobal; With({_h: Sum(colGlobalKpiBase; Horas); _m: Sum(colGlobalKpiBase; Mat)}; If(_h > 0; _m / _h; 0)));;
+Set(
+    gRendMedGlobal;
+    With(
+        {_o: Sort(colGlobalKpiBase; Rend; SortOrder.Ascending); _n: CountRows(colGlobalKpiBase)};
+        If(
+            _n = 0; 0;
+            Mod(_n; 2) = 1; Last(FirstN(_o; (_n + 1) / 2)).Rend;
+            (Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2
+        )
+    )
+);;
+Set(gMetaPromGlobal; If(CountRows(colAnaGlobalSinSet) > 0; Round(Average(Filter(colAnaGlobalSinSet; MetaRef > 0); MetaRef); 1); 0));;
+Set(gPctCumple; With({_t: CountRows(Filter(colAnaGlobalSinSet; MetaRef > 0))}; If(_t > 0; CountRows(Filter(colAnaGlobalSinSet; CumpleMeta = "CUMPLE")) / _t; 0)));;
+Set(gPctBajoMin; With({_t: CountRows(Filter(colAnaGlobalSinSet; MetaRef > 0))}; If(_t > 0; CountRows(Filter(colAnaGlobalSinSet; CumpleMeta = "BAJO MÍNIMO")) / _t; 0)));;
+
+ClearCollect(
+    colKpiGlobal;
+    With(
+        {_h: Sum(colGlobalKpiBase; Horas); _m: Sum(colGlobalKpiBase; Mat); _f: Sum(colGlobalKpiBase; Frutos)};
+        Table(
+            { Orden: 1;  Titulo: "HORAS INVERTIDAS";      Valor: Text(Round(_h; 2)); Hex: "#0E7C86"; Mostrar: true };
+            { Orden: 2;  Titulo: "MAT / OPERACIONES";     Valor: Text(_m); Hex: "#2F9E44"; Mostrar: true };
+            { Orden: 3;  Titulo: "REND PROMEDIO (m/h)";   Valor: If(_h > 0; Text(Round(_m / _h; 1)); "0"); Hex: "#2563EB"; Mostrar: true };
+            { Orden: 4;  Titulo: "REND MEDIANA (m/h)";    Valor: Text(Round(gRendMedGlobal; 1)); Hex: "#7C3AED"; Mostrar: true };
+            { Orden: 5;  Titulo: "META PROM. (P75)";      Valor: Text(gMetaPromGlobal); Hex: "#0E2018"; Mostrar: true };
+            { Orden: 6;  Titulo: "% CUMPLE META";         Valor: Text(gPctCumple; "0,0%"); Hex: "#1E7A33"; Mostrar: true };
+            { Orden: 7;  Titulo: "% BAJO MÍNIMO (P25)";   Valor: Text(gPctBajoMin; "0,0%"); Hex: "#DC2626"; Mostrar: true };
+            { Orden: 8;  Titulo: "FRUTOS";                Valor: Text(_f); Hex: "#E8A93C"; Mostrar: _f > 0 };
+            { Orden: 9;  Titulo: "TOTAL SETS";            Valor: Text(CountRows(Distinct(colGlobalKpiBase; SetName))); Hex: "#1E7A33"; Mostrar: true };
+            { Orden: 10; Titulo: "PERSONAS";              Valor: Text(CountRows(Distinct(colGlobalKpiBase; Persona))); Hex: "#6B7A6F"; Mostrar: true };
+            { Orden: 11; Titulo: "REGISTROS VÁLIDOS";     Valor: Text(CountRows(colGlobalKpiBase)); Hex: "#94A5B3"; Mostrar: true }
+        )
+    )
+)
+4.3 Combobox de filtro — MODIFICAR Visible
+
+Ubicación: conVista_AnaGlobal > conFiltrosGlobal
+
+Control	Propiedad	Fórmula
+gfJob	Visible	=false
+gfSub	Visible	=false
+gfGen	Visible	=false
+gfMct	Visible	=false
+gfProg	Visible	=false
+gfTrial	Visible	=false
+gfOp	Visible	=false
+btnFiltroPopupGlobal_1	Visible	=false
+
+(Toda la selección pasa al panel de filtros; gfCrop se mantiene visible como filtro rápido de cultivo.)
+
+4.4 btnFiltroPopupGlobal — MODIFICAR
+
+Ubicación: conVista_AnaGlobal > conFiltrosGlobal
+
+Propiedad	Fórmula
+Text	="🔎 Filtros (" & CountRows(colFiltroAct) + CountRows(colFiltroSubAct) + CountRows(colFiltroPers) + CountRows(colFiltroGen) + CountRows(colFiltroMct) + CountRows(colFiltroProg) + CountRows(colFiltroTrial) + CountRows(colFiltroOp) & ")"
+Width	=200
+
+OnSelect:
+
+powerfx
+=Set(varOrigenFiltro; "Global");;
+Reset(txtBuscarActFiltro);;
+Reset(txtBuscarSubActFiltro);;
+Reset(txtBuscarPersFiltro);;
+Set(varInformation; true)
+4.5 Icon6 (limpiar filtros) — MODIFICAR OnSelect
+
+Ubicación: conVista_AnaGlobal > conFiltrosGlobal
+
+powerfx
+=Reset(gfCrop);;
+Reset(TextInput11);;
+Clear(colFiltroAct);;
+Clear(colFiltroSubAct);;
+Clear(colFiltroPers);;
+Clear(colFiltroGen);;
+Clear(colFiltroMct);;
+Clear(colFiltroProg);;
+Clear(colFiltroTrial);;
+Clear(colFiltroOp);;
+Select(btnRecalcGlobal)
+5. PANEL DE FILTROS conDrawerTL-Data (Selection_1) — CORRECCIÓN DE COLECCIONES
+
+Problema actual: Generación escribe en colFiltroPers, MCT en colFiltroAct, y Programa y Trial comparten colFiltroSubAct. Se pisan entre sí.
+
+5.1 Checkbox2_3 (Generación) — MODIFICAR
+
+Ubicación: conDrawerTL-Data > Selection_1 > Container28_6 > cntGENERACION > Galeria_1 > glGeneracion > Container36_17
+
+Propiedad	Fórmula
+Default	=ThisItem.Value in colFiltroGen.Valor
+OnCheck	=If(!(ThisItem.Value in colFiltroGen.Valor); Collect(colFiltroGen; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+OnUncheck	=RemoveIf(colFiltroGen; Valor = ThisItem.Value);; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.2 Button2_5 (Generación) — MODIFICAR
+Propiedad	Fórmula
+Fill	=If(ThisItem.Value in colFiltroGen.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+OnSelect	=Select(Parent);; If(ThisItem.Value in colFiltroGen.Valor; RemoveIf(colFiltroGen; Valor = ThisItem.Value); Collect(colFiltroGen; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.3 Label3_16 (título Generación) — MODIFICAR Text
+powerfx
+="SELECCIONA GENERACIÓN(ES) — " & CountRows(colFiltroGen) & " seleccionada(s)"
+5.4 Checkbox3_15 (MCT) — MODIFICAR
+
+Ubicación: Selection_1 > Container28_6 > cntMCT > Container35_3 > glMCTFiltro > Container36_18
+
+Propiedad	Fórmula
+Default	=ThisItem.Value in colFiltroMct.Valor
+OnCheck	=If(!(ThisItem.Value in colFiltroMct.Valor); Collect(colFiltroMct; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+OnUncheck	=RemoveIf(colFiltroMct; Valor = ThisItem.Value);; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.5 Button2_6 (MCT) — MODIFICAR
+Propiedad	Fórmula
+Fill	=If(ThisItem.Value in colFiltroMct.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+OnSelect	=Select(Parent);; If(ThisItem.Value in colFiltroMct.Valor; RemoveIf(colFiltroMct; Valor = ThisItem.Value); Collect(colFiltroMct; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.6 Label3_17 (título MCT) — MODIFICAR Text
+powerfx
+="SELECCIONA MCT — " & CountRows(colFiltroMct) & " seleccionado(s)"
+5.7 Checkbox3_16 (Programa) — MODIFICAR
+
+Ubicación: Selection_1 > Container28_6 > cntPROGRAMA > Container35_4 > galFiltroProgramas > Container36_19
+
+Propiedad	Fórmula
+Default	=ThisItem.Value in colFiltroProg.Valor
+OnCheck	=If(!(ThisItem.Value in colFiltroProg.Valor); Collect(colFiltroProg; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+OnUncheck	=RemoveIf(colFiltroProg; Valor = ThisItem.Value);; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.8 Button2_7 (Programa) — MODIFICAR
+Propiedad	Fórmula
+Fill	=If(ThisItem.Value in colFiltroProg.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+OnSelect	=Select(Parent);; If(ThisItem.Value in colFiltroProg.Valor; RemoveIf(colFiltroProg; Valor = ThisItem.Value); Collect(colFiltroProg; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.9 galFiltroProgramas — MODIFICAR Items
+powerfx
+=Filter(
+    Sort(
+        Distinct(
+            Filter(
+                If(varOrigenFiltro = "Global"; colGlobalRaw; colBaseSet);
+                IsEmpty(colFiltroMct) Or Mct in colFiltroMct.Valor
+            );
+            Program
+        );
+        Value;
+        SortOrder.Ascending
+    );
+    IsBlank(txtBuscarProgramaFiltro.Text) Or StartsWith(Value; txtBuscarProgramaFiltro.Text)
+)
+5.10 Checkbox3_17 (Trial) — MODIFICAR
+
+Ubicación: Selection_1 > Container28_6 > cntPROGRAMA_1 > Container35_5 > galFiltroProgramas_1 > Container36_20
+
+Propiedad	Fórmula
+Default	=ThisItem.Value in colFiltroTrial.Valor
+OnCheck	=If(!(ThisItem.Value in colFiltroTrial.Valor); Collect(colFiltroTrial; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+OnUncheck	=RemoveIf(colFiltroTrial; Valor = ThisItem.Value);; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.11 Button2_8 (Trial) — MODIFICAR
+Propiedad	Fórmula
+Fill	=If(ThisItem.Value in colFiltroTrial.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+OnSelect	=Select(Parent);; If(ThisItem.Value in colFiltroTrial.Valor; RemoveIf(colFiltroTrial; Valor = ThisItem.Value); Collect(colFiltroTrial; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.12 cntTIPOOP — AGREGAR (columna de Tipo de operación)
+Tipo: GroupContainer (AutoLayout, Vertical)
+Ubicación: conDrawerTL-Data > Selection_1 > Container28_6
+Propiedad	Fórmula
+LayoutDirection	=LayoutDirection.Vertical
+LayoutAlignItems	=LayoutAlignItems.Center
+PaddingTop / PaddingBottom / PaddingLeft / PaddingRight	=8
+
+Hijo 1 — lblTitTipoOp (Label):
+
+Propiedad	Fórmula
+Text	="TIPO DE OPERACIÓN — " & CountRows(colFiltroOp) & " seleccionado(s)"
+Fill	=RGBA(12; 59; 94; 1)
+Color	=RGBA(255; 255; 255; 1)
+FontWeight	=FontWeight.Bold
+Height	=28
+Size	=9
+Align	=Align.Center
+
+Hijo 2 — txtBuscarOpFiltro (ModernTextInput):
+
+Propiedad	Fórmula
+Placeholder	="Buscar tipo de operación..."
+AlignInContainer	=AlignInContainer.Stretch
+
+Hijo 3 — galFiltroOp (Gallery, BrowseLayout_Vertical_OneTextVariant_ver5.0):
+
+Propiedad	Fórmula
+Items	=Filter(Sort(Distinct(If(varOrigenFiltro = "Global"; colGlobalRaw; colBaseSet); TipoOp); Value; SortOrder.Ascending); IsBlank(txtBuscarOpFiltro.Text) Or StartsWith(Value; txtBuscarOpFiltro.Text))
+TemplateSize	=50
+WrapCount	=2
+Width	=Parent.Width
+Height	=Parent.Height - 70
+
+Hijo de la galería — lblOpFiltro (Label):
+
+Propiedad	Fórmula
+Text	=ThisItem.Value
+Size	=9
+Width	=Parent.TemplateWidth
+Height	=Parent.TemplateHeight
+Align	=Align.Center
+
+Hijo de la galería — btnOpFiltro (Classic/Button):
+
+Propiedad	Fórmula
+Fill	=If(ThisItem.Value in colFiltroOp.Valor; RGBA(136; 188; 48; 0,25); RGBA(0; 0; 0; 0))
+Text	=
+Width	=Parent.TemplateWidth
+Height	=Parent.TemplateHeight
+OnSelect	=If(ThisItem.Value in colFiltroOp.Valor; RemoveIf(colFiltroOp; Valor = ThisItem.Value); Collect(colFiltroOp; { Valor: ThisItem.Value }));; If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.13 btnLimpiarPanel_1 — MODIFICAR OnSelect
+powerfx
+=Clear(colFiltroAct);;
+Clear(colFiltroSubAct);;
+Clear(colFiltroPers);;
+Clear(colFiltroGen);;
+Clear(colFiltroMct);;
+Clear(colFiltroProg);;
+Clear(colFiltroTrial);;
+Clear(colFiltroOp);;
+Reset(txtBuscarMCTFiltro);;
+Reset(txtBuscarProgramaFiltro);;
+Reset(txtBuscarGeneracionFiltro);;
+Reset(txtBuscarProgramaFiltro_1);;
+Reset(txtBuscarOpFiltro);;
+If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+5.14 Button5_3 (Aplicar) — MODIFICAR Text
+powerfx
+="Aplicar (" & CountRows(colFiltroGen) + CountRows(colFiltroMct) + CountRows(colFiltroProg) + CountRows(colFiltroTrial) + CountRows(colFiltroOp) & " criterios)"
+5.15 btnLimpiarPanel (panel de Persona/Actividad/SubActividad) — MODIFICAR OnSelect
+powerfx
+=Clear(colFiltroAct);;
+Clear(colFiltroSubAct);;
+Clear(colFiltroPers);;
+Reset(txtBuscarActFiltro);;
+Reset(txtBuscarSubActFiltro);;
+Reset(txtBuscarPersFiltro);;
+If(varOrigenFiltro = "Global"; Select(btnRecalcGlobal); Select(btnRecalcAnaSet))
+6. COLUMNAS NUEVAS EN LAS TABLAS DE ANÁLISIS
+6.1 Tabla POR SET — encabezados (Container52_2)
+
+AGREGAR 5 Labels al final de conVista_AnaGlobal > conTablaGlobalSet > Container52_2, antes de lblHdrOpGSet_1:
+
+Control	Propiedad	Fórmula
+lblHdrMinGSet	Text	="Mín ref. (P25)"
+lblHdrMetaGSet	Text	="META (P75)"
+lblHdrMaxGSet	Text	="Máx ref. (P90)"
+lblHdrCumplGSet	Text	="Cumpl."
+lblHdrConfGSet	Text	="Confiab."
+
+Propiedades comunes de los 5: Align = Align.Center · FillPortions = 1 · FontWeight = FontWeight.Semibold · Size = If(Parent.Width >= bpTablet; 8; 8) · LayoutMinHeight = 16 · LayoutMinWidth = 16
+
+6.2 Tabla POR SET — filas (Container52_3)
+
+AGREGAR 5 Labels en galAnaGlobal > Container52_3, después de lblValMedGSet:
+
+Control	Propiedad	Fórmula
+lblMinGSet	Text	=Text(ThisItem.MinRef; "[$-es]0,0")
+lblMetaGSet	Text	=Text(ThisItem.MetaRef; "[$-es]0,0")
+lblMetaGSet	FontWeight	=FontWeight.Bold
+lblMaxGSet	Text	=Text(ThisItem.MaxRef; "[$-es]0,0")
+lblCumplGSet	Text	=If(ThisItem.MetaRef <= 0; "—"; Text(ThisItem.Cumpl; "0%"))
+lblCumplGSet	Fill	=fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+lblCumplGSet	FontWeight	=FontWeight.Bold
+lblConfGSet	Text	=ThisItem.Confiab
+lblConfGSet	Color	=Switch(ThisItem.Confiab; "Alta"; ColorValue("#1E7A33"); "Media"; ColorValue("#E8A93C"); ColorValue("#DC2626"))
+
+Comunes: Align = Align.Center · FillPortions = 1 · Size = If(Parent.Width >= bpTablet; 8; 8)
+
+6.3 Tabla POR ACTIVIDAD/ATRIBUTO — encabezados (Container52_6)
+
+AGREGAR, antes de Label37:
+
+Control	Propiedad	Fórmula
+lblHdrMinGAtrib	Text	="Mín (P25)"
+lblHdrMetaGAtrib	Text	="META (P75)"
+lblHdrMaxGAtrib	Text	="Máx (P90)"
+lblHdrCumplGAtrib	Text	="Cumpl."
+lblHdrConfGAtrib	Text	="Confiab."
+
+Comunes: Align = Align.Center · FillPortions = 1 · FontWeight = FontWeight.Semibold · Size = 8
+
+6.4 Tabla POR ACTIVIDAD/ATRIBUTO — filas (conFilaAtrib)
+
+AGREGAR, después de lblHdrMedGAtrib_1:
+
+Control	Propiedad	Fórmula
+lblMinGAtrib	Text	=Text(ThisItem.MinRef; "[$-es]0,0")
+lblMetaGAtrib	Text	=Text(ThisItem.MetaRef; "[$-es]0,0")
+lblMetaGAtrib	FontWeight	=FontWeight.Bold
+lblMaxGAtrib	Text	=Text(ThisItem.MaxRef; "[$-es]0,0")
+lblCumplGAtrib	Text	=If(ThisItem.MetaRef <= 0; "—"; Text(ThisItem.Cumpl; "0%"))
+lblCumplGAtrib	Fill	=fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+lblConfGAtrib	Text	=ThisItem.Confiab
+lblConfGAtrib	Color	=Switch(ThisItem.Confiab; "Alta"; ColorValue("#1E7A33"); "Media"; ColorValue("#E8A93C"); ColorValue("#DC2626"))
+
+MODIFICAR conFilaAtrib.Fill:
+
+powerfx
+=fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+6.5 Tabla POR PERSONA / FECHA — encabezados (Container52_7)
+
+AGREGAR, antes de Label55_8:
+
+Control	Propiedad	Fórmula
+lblHdrMinGPF	Text	="Mín (P25)"
+lblHdrMetaGPF	Text	="META (P75)"
+lblHdrMaxGPF	Text	="Máx (P90)"
+lblHdrCumplGPF	Text	="Cumpl. día"
+
+Comunes: Align = Align.Center · FillPortions = 1 · FontWeight = FontWeight.Semibold · Size = 8
+
+6.6 Tabla POR PERSONA / FECHA — filas (Container52_8)
+
+AGREGAR, después de lblMedianaF_1:
+
+Control	Propiedad	Fórmula
+lblMinGPF	Text	=Text(ThisItem.MinRef; "[$-es]0,0")
+lblMetaGPF	Text	=Text(ThisItem.MetaRef; "[$-es]0,0")
+lblMetaGPF	FontWeight	=FontWeight.Bold
+lblMaxGPF	Text	=Text(ThisItem.MaxRef; "[$-es]0,0")
+lblCumplGPF	Text	=If(ThisItem.MetaRef <= 0; "—"; Text(ThisItem.Cumpl; "0%"))
+lblCumplGPF	Fill	=fxCumpleColor(ThisItem.Rend; ThisItem.MinRef; ThisItem.MetaRef)
+
+MODIFICAR Container52_8.Fill:
+
+powerfx
+=If(
+    ThisItem.ClaveGF in colExclGF.Clave; RGBA(150; 150; 150; 0,28);
+    fxCumpleColor(ThisItem.Rend; ThisItem.MinRef; ThisItem.MetaRef)
+)
+6.7 Tabla ACUMULADO PERSONA — encabezados (Container52_9)
+
+MODIFICAR los dos últimos encabezados y AGREGAR tres:
+
+Control	Propiedad	Fórmula
+Label55_5	Text	="Mín (P25)"
+Label134_3	Text	="META (P75)"
+lblHdrMaxGPA (AGREGAR)	Text	="Máx (P90)"
+lblHdrCumplGPA (AGREGAR)	Text	="Cumpl."
+lblHdrConfGPA (AGREGAR)	Text	="Confiab."
+6.8 Tabla ACUMULADO PERSONA — filas (Container52_10)
+Control	Propiedad	Fórmula
+Label141_1	Text	=Text(ThisItem.MinRef; "[$-es]0,0")
+Label141_1	Color	=colDark
+lblVsMedianaA_1	Text	=Text(ThisItem.MetaRef; "[$-es]0,0")
+lblVsMedianaA_1	Color	=colDark
+lblVsMedianaA_1	FontWeight	=FontWeight.Bold
+lblMaxGPA (AGREGAR)	Text	=Text(ThisItem.MaxRef; "[$-es]0,0")
+lblCumplGPA (AGREGAR)	Text	=If(ThisItem.MetaRef <= 0; "—"; Text(ThisItem.Cumpl; "0%"))
+lblCumplGPA (AGREGAR)	Fill	=fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+lblConfGPA (AGREGAR)	Text	=ThisItem.Confiab
+
+MODIFICAR Container52_10.Fill:
+
+powerfx
+=If(
+    ThisItem.ClaveGA in colExclGA.Clave; RGBA(150; 150; 150; 0,28);
+    fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+)
+6.9 Tabla RENDIMIENTO VS META (conTablaGlobalSinSet)
+
+Encabezados (Container52_11) — MODIFICAR / AGREGAR:
+
+Control	Propiedad	Fórmula
+Label55_7	Text	="Mín (P25)"
+Label134_4	Text	="META (P75)"
+lblHdrMaxSinSet (AGREGAR)	Text	="Máx (P90)"
+lblHdrCumplSinSet (AGREGAR)	Text	="Cumpl."
+lblHdrConfSinSet (AGREGAR)	Text	="Confiab."
+lblHdrSubSinSet (AGREGAR, tras Label52_12)	Text	="SUBACTIVIDAD"
+
+Filas (Container52_12) — MODIFICAR / AGREGAR:
+
+Control	Propiedad	Fórmula
+Label141_2	Text	=Text(ThisItem.MinRef; "[$-es]0,0")
+lblVsMedianaA_2	Text	=Text(ThisItem.MetaRef; "[$-es]0,0")
+lblVsMedianaA_2	Color	=colDark
+lblVsMedianaA_2	FontWeight	=FontWeight.Bold
+lblMaxSinSet (AGREGAR)	Text	=Text(ThisItem.MaxRef; "[$-es]0,0")
+lblCumplSinSet (AGREGAR)	Text	=If(ThisItem.MetaRef <= 0; "SIN META"; Switch(ThisItem.CumpleMeta; "CUMPLE"; "✔ "; "EN RANGO"; "◑ "; "⚠️ ") & Text(ThisItem.Cumpl; "0%"))
+lblCumplSinSet (AGREGAR)	Fill	=fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+lblCumplSinSet (AGREGAR)	FontWeight	=FontWeight.Bold
+lblConfSinSet (AGREGAR)	Text	=ThisItem.Confiab
+lblConfSinSet (AGREGAR)	Color	=Switch(ThisItem.Confiab; "Alta"; ColorValue("#1E7A33"); "Media"; ColorValue("#E8A93C"); ColorValue("#DC2626"))
+
+MODIFICAR Container52_12.Fill:
+
+powerfx
+=If(
+    ThisItem.ClaveGM in colExclGM.Clave; RGBA(150; 150; 150; 0,28);
+    fxCumpleColor(ThisItem.Mediana; ThisItem.MinRef; ThisItem.MetaRef)
+)
+
+MODIFICAR galAnaGlobalSinSet.Items:
+
+powerfx
+=Switch(
+    gOrdRendA;
+    "Asc";  Sort(colAnaGlobalSinSet; Cumpl; SortOrder.Ascending);
+    "Desc"; Sort(colAnaGlobalSinSet; Cumpl; SortOrder.Descending);
+    Sort(colAnaGlobalSinSet; Cumpl; SortOrder.Ascending)
+)
+6.10 lblAvisoGlobal — MODIFICAR
+Propiedad	Fórmula
+Visible	=true
+Text	`=If(gGlobalTrunc; “⚠️ Se alcanzó el límite de 2.000 registros. Reduce el rango de fechas.”; “Rango: “ & Text(gGDesde; “[-es]dd/mm/yyyy") & " – " & Text(DateAdd(gGHasta; -1; TimeUnit.Days); "[ -es]dd/mm/yyyy”) & “
+7. PANTALLA Personal — PROGRAMACIÓN POR SETS
+7.1 conFiltroFechaSets — AGREGAR
+Tipo: GroupContainer (AutoLayout, Horizontal)
+Ubicación: Personal > Principal > conProgramacion > conPaso2 (como primer hijo, antes de txtBuscarSet1)
+Propiedad	Fórmula
+LayoutDirection	=LayoutDirection.Horizontal
+LayoutAlignItems	=LayoutAlignItems.Center
+LayoutGap	=8
+FillPortions	=0
+Height	=50
+PaddingTop / PaddingBottom / PaddingLeft / PaddingRight	=8
+
+Hijos:
+
+Control	Tipo	Propiedad	Fórmula
+lblFiltroFechaSet	Label	Text	="Sets creados:"
+lblFiltroFechaSet	Label	Size	=11
+lblFiltroFechaSet	Label	Width	=100
+dpSetDesdeProg	ModernDatePicker	Format	="dd/mm/yyyy"
+dpSetDesdeProg	ModernDatePicker	Placeholder	="Desde"
+dpSetDesdeProg	ModernDatePicker	Width	=150
+dpSetHastaProg	ModernDatePicker	Format	="dd/mm/yyyy"
+dpSetHastaProg	ModernDatePicker	Placeholder	="Hasta"
+dpSetHastaProg	ModernDatePicker	Width	=150
+icoLimpiarFechaSetProg	ModernIcon	Icon	="Dismiss"
+icoLimpiarFechaSetProg	ModernIcon	IconColor	=RGBA(220; 38; 38; 1)
+icoLimpiarFechaSetProg	ModernIcon	OnSelect	=Reset(dpSetDesdeProg);; Reset(dpSetHastaProg)
+icoLimpiarFechaSetProg	ModernIcon	Visible	=!IsBlank(dpSetDesdeProg.SelectedDate) Or !IsBlank(dpSetHastaProg.SelectedDate)
+lblContSets	Label	Text	=CountRows(galSetspaso2.AllItems) & " sets · " & CountRows(colSetsSel) & " seleccionados"
+lblContSets	Label	Size	=11
+lblContSets	Label	FillPortions	=1
+7.2 galSetspaso2 — MODIFICAR Items
+
+Ubicación: conProgramacion > conPaso2 > galSetspaso2
+
+powerfx
+=Sort(
+    Filter(
+        DATASUMMARY1;
+        (
+            gloAreaRec.Tipos.Value in ["Nursery"; "Semillero"; "Semilleros"; "SPA"; "Procesos"]
+            || Greenhouse = gloK1
+            || Greenhouse = gloK2
+            || Greenhouse = gloK3
+        );
+        (
+            IsBlank(txtBuscarSet1.Text)
+            || StartsWith(SetName; txtBuscarSet1.Text)
+            || StartsWith(Program.Value; txtBuscarSet1.Text)
+            || StartsWith(TrialIntent.Value; txtBuscarSet1.Text)
+            || StartsWith(MCT.Value; txtBuscarSet1.Text)
+            || StartsWith(Field; txtBuscarSet1.Text)
+            || StartsWith(VCR; txtBuscarSet1.Text)
+        );
+        (IsBlank(dpSetDesdeProg.SelectedDate) Or Created >= dpSetDesdeProg.SelectedDate);
+        (IsBlank(dpSetHastaProg.SelectedDate) Or Created < DateAdd(dpSetHastaProg.SelectedDate; 1; TimeUnit.Days))
+    );
+    SetName;
+    SortOrder.Ascending
+)
+7.3 btnTodosSets — MODIFICAR OnSelect
+powerfx
+=With(
+    { todos: galSetspaso2.AllItems };
+    If(
+        CountRows(colSetsSel) >= CountRows(todos);
+        Clear(colSetsSel);
+        ClearCollect(colSetsSel; todos)
+    )
+)
+7.4 drpSubActProg — AGREGAR (subactividad en programación)
+Tipo: ModernCombobox
+Ubicación: conProgramacion > conPaso3 (después de txtBuscarActividad)
+Propiedad	Fórmula
+InputTextPlaceholder	="Subactividad (si aplica)"
+ItemDisplayText	=ThisItem.Value
+SelectMultiple	=false
+Width	=Parent.Width - 32
+Visible	=gloActividadSel in ActividadesConSub
+OnChange	=Set(gloSubActSel; Coalesce(Self.Selected.Value; "(sin subactividad)"));; Select(btnResolverMeta)
+
+Items:
+
+powerfx
+=Switch(
+    gloActividadSel;
+    "Preparacion de semilla";              SubActPrepSemilla;
+    "Preparacion de Platos";               SubActPrepPlatos;
+    "Preparacion de Envios";               SubActEnvios;
+    "Preparacion de semilla para siembra"; SubActPrepSemSiembra;
+    "Siembra";                             SubActSiembra;
+    "Inventario";                          SubActInventario;
+    "Proceso de semilla";                  SubActPrepSemilla;
+    "Etiqueta de cosecha";                 SubActEtCos;
+    "Etiqueta de polinizacion";            SubActEtpol;
+    "Etiqueta de trasplante";              SubActEtTras;
+    "Conteo de Germinación";               SubActGerm;
+    "Poll Stat";                           SubAcPoll;
+    "FRNUM";                               FRNUM;
+    Blank()
+)
+7.5 btnResolverMeta — AGREGAR (resolución de meta con escalonamiento)
+Tipo: Classic/Button
+Ubicación: conProgramacion (hermano de btnLoadPaso4)
+Visible: =false
+
+OnSelect:
+
+powerfx
+=Set(gloSetRef; First(colSetsSel));;
+Set(gloSubActSel; Coalesce(gloSubActSel; "(sin subactividad)"));;
+Set(
+    gloClaveMeta;
+    {
+        N1: fxClave(1; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; gloSubActSel);
+        N2: fxClave(2; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; gloSubActSel);
+        N3: fxClave(3; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; gloSubActSel);
+        N4: fxClave(4; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; gloSubActSel)
+    }
+);;
+Set(
+    gloRefMeta;
+    Coalesce(
+        LookUp(colRendCat; Title = gloClaveMeta.N1 And Confiabilidad <> "Baja");
+        LookUp(colRendCat; Title = gloClaveMeta.N2 And Confiabilidad <> "Baja");
+        LookUp(colRendCat; Title = gloClaveMeta.N3);
+        LookUp(colRendCat; Title = gloClaveMeta.N4)
+    )
+);;
+Set(gloRendMeta; Coalesce(gloRefMeta.RendMeta; 0));;
+Set(gloRendMin; Coalesce(gloRefMeta.RendP25; 0));;
+Set(gloRendMax; Coalesce(gloRefMeta.RendP90; 0));;
+Set(gloConfiabMeta; Coalesce(gloRefMeta.Confiabilidad; "Sin meta"));;
+Set(gloNivelMeta; Coalesce(gloRefMeta.Nivel; 0));;
+Set(gloClaveMetaUsada; Coalesce(gloRefMeta.Title; "—"))
+7.6 lblRendReconocido — MODIFICAR Text
+
+Ubicación: conProgramacion > conPaso3 > galActividades > Container119 > lblRendReconocido
+
+powerfx
+=With(
+    {
+        s: First(colSetsSel);
+        sub: If(ThisItem.Actividad in ActividadesConSub; Coalesce(drpSubActProg.Selected.Value; "(sin subactividad)"); "(sin subactividad)")
+    };
+    With(
+        {
+            _r: Coalesce(
+                    LookUp(colRendCat; Title = fxClave(1; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; sub) And Confiabilidad <> "Baja");
+                    LookUp(colRendCat; Title = fxClave(2; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; sub) And Confiabilidad <> "Baja");
+                    LookUp(colRendCat; Title = fxClave(3; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; sub));
+                    LookUp(colRendCat; Title = fxClave(4; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; sub))
+                )
+        };
+        If(
+            IsBlank(_r);
+            "sin meta · recalcular catálogo";
+            "META " & Text(_r.RendMeta; "[$-es]0,0") & " op/h  (" & Text(_r.RendP25; "[$-es]0,0") & " – " & Text(_r.RendP90; "[$-es]0,0") & ")" &
+            Char(10) & "Nivel " & _r.Nivel & " · " & _r.Confiabilidad & " · " & _r.NumRegistros & " reg / " & _r.NumPersonas & " pers."
+        )
+    )
+)
+
+MODIFICAR también:
+
+Propiedad	Fórmula
+AutoHeight	=true
+Size	=10
+Width	=260
+7.7 btnPickAct — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > conPaso3 > galActividades > btnPickAct
+
+powerfx
+=Set(gloActividadSel; ThisItem.Actividad);;
+Set(gloActConfig; ThisItem);;
+Reset(drpSubActProg);;
+Set(gloSubActSel; "(sin subactividad)");;
+Select(btnResolverMeta);;
+If(
+    gloActividadSel in ActividadesConSub;
+    Notify("Selecciona la subactividad para afinar la meta."; NotificationType.Information);
+    Set(gloPasoProg; If(gloModoSet; "plan"; "personas"));;
+    If(gloModoSet; Select(btnLoadPaso4); Select(btnLoadPersonasEval))
+)
+7.8 btnLoadPaso4 — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > btnLoadPaso4
+
+powerfx
+=Select(btnResolverMeta);;
+Set(gloCropRef; If(!IsBlank(LookUp(ActividadesConCultivo; Value = gloActividadSel)); gloSetRef.Crop.Value; "General"));;
+
+ClearCollect(colEvalAll; EVALUACIONES_DETALLE);;
+
+ClearCollect(
+    colRegActBruto;
+    ForAll(
+        Filter(
+            REGISTRO_PERSONAL1;
+            Estado.Value = "Finalizado";
+            HorasTotales > 0;
+            HorasTotales <= MaxHorasRegistro;
+            Job = gloActividadSel
+        ) As _r;
+        With(
+            {
+                _h: Coalesce(_r.HorasTotales; 0);
+                _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+            };
+            {
+                Persona: Coalesce(_r.NombrePersona; "");
+                SubAct:  fxSub(_r.SubActividad.Value);
+                Horas:   _h;
+                Mat:     _m;
+                Rend:    If(_h > 0; _m / _h; 0);
+                Ok:      DateDiff(_fi; _ff; TimeUnit.Days) = 0
+                         And (_m > 0 Or Coalesce(_r.SetName; "") in SetsSinMaterialOK Or fxTxt(_r.Job) in ActividadesSinMaterialOK)
+            }
+        )
+    )
+);;
+
+ClearCollect(
+    colRegAct;
+    Filter(
+        colRegActBruto;
+        Ok;
+        Rend > 0;
+        gloSubActSel = "(sin subactividad)" Or SubAct = gloSubActSel
+    )
+);;
+
+ClearCollect(
+    colPersonalPaso4;
+    ForAll(
+        Filter(CATALOGO_PERSONAL1; Activo = "SI") As p;
+        With(
+            {
+                nota: Coalesce(
+                        LookUp(colEvalAll; PersonaEvaluada = p.Nombre And Actividad = gloActividadSel And Cultivo = gloCropRef; Puntaje);
+                        LookUp(colEvalAll; PersonaEvaluada = p.Nombre And Actividad = gloActividadSel; Puntaje);
+                        0
+                      );
+                regs: Filter(colRegAct; Persona = p.Nombre)
+            };
+            With(
+                {
+                    _n:  CountRows(regs);
+                    _o:  Sort(regs; Rend; SortOrder.Ascending);
+                    _h:  Sum(regs; Horas);
+                    _m:  Sum(regs; Mat)
+                };
+                With(
+                    {
+                        _med: If(
+                                  _n = 0; 0;
+                                  Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                                  Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                              );
+                        _prom: If(_h > 0; Round(_m / _h; 1); 0)
+                    };
+                    {
+                        Persona:   p.Nombre;
+                        Codigo:    p.CODIGO;
+                        Depto:     p.DEPARTAMENTO;
+                        Nivel:     nota;
+                        Registros: _n;
+                        Promedio:  _prom;
+                        Mediana:   _med;
+                        MetaRef:   gloRendMeta;
+                        Cumpl:     If(gloRendMeta > 0 And _n > 0; Round(_med / gloRendMeta; 2); 0);
+                        Match:     If(_n >= MinRegMeta; "histórico"; _n > 0; "pocos datos"; "sin historia");
+                        Habilitado: nota >= UmbralHabilitado
+                    }
+                )
+            )
+        )
+    )
+);;
+
+Set(gloEstadoArea; "Disponible de inmediato");;
+Set(gloOpsPorPlanta; Coalesce(gloOpsPorPlanta; 1));;
+Set(
+    gloOps;
+    If(
+        Sum(colSetsSel; PlantsRequired) > 0;
+        Sum(colSetsSel; PlantsRequired) * gloOpsPorPlanta;
+        Value(Coalesce(txtOpsManual.Text; "0"))
+    )
+);;
+Set(gloMeta; Coalesce(gloMeta; 8));;
+Set(
+    gloPersonasMin;
+    If(gloRendMeta > 0; RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0); 0)
+);;
+If(
+    gloRendMeta <= 0;
+    Notify("⚠️ No hay meta de referencia para esta combinación. Ejecuta 'Recalcular metas de referencia' en la pantalla de Análisis."; NotificationType.Warning)
+)
+7.9 galHabilitados — MODIFICAR Items
+
+Ubicación: conPaso4 > colPersonal1 > galHabilitados
+
+powerfx
+=Sort(
+    Filter(
+        colPersonalPaso4;
+        (If(tglSoloEval.Value; ThisRecord.Habilitado; true));
+        (
+            IsBlank(txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Persona; txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Codigo; txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Depto; txtBuscarPersonas.Text)
+        );
+        (IsBlank(drpFiltroAreaHE.Selected.Title) Or drpFiltroAreaHE.Selected.Title = "TODAS LAS ÁREAS" Or ThisRecord.Depto = drpFiltroAreaHE.Selected.Title)
+    );
+    Cumpl;
+    SortOrder.Descending
+)
+7.10 Tarjeta de persona (pcard) — MODIFICAR etiquetas
+Control	Propiedad	Fórmula
+lblMatch	Text	=ThisItem.Match & " · " & ThisItem.Registros & " reg."
+Label150	Text	="eval " & ThisItem.Nivel & "/4" & If(ThisItem.Habilitado; " ✔"; " ✖")
+Label150	Color	=If(ThisItem.Habilitado; ColorValue(hexLeafDark); ColorValue(hexDanger))
+lblOpHora	Text	="Mediana " & Text(ThisItem.Mediana; "[$-es]0,0") & " / Meta " & Text(ThisItem.MetaRef; "[$-es]0,0") & " op/h"
+lblOpHora	Color	=If(ThisItem.Cumpl >= 1; ColorValue(hexLeafDark); ThisItem.Cumpl > 0; ColorValue(hexAmber); ColorValue(hexMuted))
+
+lblCumplPersona — AGREGAR (Label dentro de pcard):
+
+Propiedad	Fórmula
+Text	=If(ThisItem.MetaRef <= 0 Or ThisItem.Registros = 0; "sin referencia"; Text(ThisItem.Cumpl; "0%") & " de la meta")
+Fill	=fxCumpleColor(ThisItem.Mediana; gloRendMin; ThisItem.MetaRef)
+Align	=Align.Center
+AlignInContainer	=AlignInContainer.Stretch
+Size	=11
+FontWeight	=FontWeight.Bold
+7.11 Button31 (asignar persona) — MODIFICAR OnSelect
+
+Ubicación: galHabilitados > Button31
+
+powerfx
+=If(
+    CountRows(Filter(colAsignados; Persona = ThisItem.Persona)) > 0;
+    RemoveIf(colAsignados; Persona = ThisItem.Persona);
+    Collect(
+        colAsignados;
+        {
+            Persona:   ThisItem.Persona;
+            Codigo:    ThisItem.Codigo;
+            Depto:     ThisItem.Depto;
+            Nivel:     ThisItem.Nivel;
+            MetaOpHora: gloRendMeta;
+            RendHist:  ThisItem.Mediana;
+            Frac:      1
+        }
+    )
+)
+7.12 tglSoloEval — MODIFICAR
+Propiedad	Fórmula
+TrueText	="Solo habilitados (≥" & UmbralHabilitado & ")"
+FalseText	="Todo el personal"
+Default	=true
+7.13 lblColB — MODIFICAR Text
+powerfx
+="Personal — " & gloActividadSel & If(gloSubActSel <> "(sin subactividad)"; " · " & gloSubActSel; "") &
+Char(10) & "META " & Text(gloRendMeta; "[$-es]0,0") & " op/h · Confiab. " & gloConfiabMeta & " · Nivel " & gloNivelMeta
+7.14 cardDatos — tarjetas de demanda
+Control	Propiedad	Fórmula
+Rend base	Text	=If(gloRendMeta > 0; "META " & Text(gloRendMeta; "[$-es]0,0") & " op/h (P25 " & Text(gloRendMin; "[$-es]0,0") & " · P90 " & Text(gloRendMax; "[$-es]0,0") & ")"; "⚠️ sin meta de referencia")
+Rend base	Color	=If(gloRendMeta > 0; ColorValue(hexLeafDark); ColorValue(hexDanger))
+Mínimo	Text	=If(gloRendMeta > 0; RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0) & " pers. (meta P75, jornada " & Text(JornadaEfectiva; "[$-es]0,0") & " h)"; "— recalcular catálogo de metas")
+
+lblConfiabMeta — AGREGAR (Label dentro de cardDatos):
+
+Propiedad	Fórmula
+Text	="Confiabilidad: " & gloConfiabMeta & " · Nivel " & gloNivelMeta & Char(10) & "Clave: " & gloClaveMetaUsada
+AutoHeight	=true
+Size	=10
+Color	=Switch(gloConfiabMeta; "Alta"; ColorValue(hexLeafDark); "Media"; ColorValue(hexAmber); ColorValue(hexDanger))
+AlignInContainer	=AlignInContainer.Stretch
+7.15 Simulador de cierre — MODIFICAR
+
+Ubicación: conPaso4 > colSimulador > cardCierre
+
+Control	Propiedad	Fórmula
+Capacidad	Text	="Capacidad: " & Text(Round(CountRows(colAsignados) * gloRendMeta; 0); "[$-es]#.##0") & " op/h (" & CountRows(colAsignados) & " pers × " & Text(gloRendMeta; "[$-es]0,0") & ")"
+Tiempo	Text	=With({cap: CountRows(colAsignados) * gloRendMeta}; If(cap > 0; Text(Round(gloOps / cap; 1); "[$-es]0,0"); "0") & " h de trabajo")
+Retraso	Text	="Retraso por estado del área: +" & Coalesce(LookUp(estadosArea; Estado = gloEstadoArea; RetrasoH); 0) & " h"
+
+lblVeredicto — MODIFICAR:
+
+Fill:
+
+powerfx
+=With(
+    {
+        cap: CountRows(colAsignados) * gloRendMeta;
+        retraso: Coalesce(LookUp(estadosArea; Estado = gloEstadoArea; RetrasoH); 0)
+    };
+    ColorValue(
+        If(
+            gloRendMeta <= 0 Or cap <= 0; hexDangerSoft;
+            (gloOps / Max(cap; 1) + retraso) <= gloMeta; hexLeafSoft;
+            hexDangerSoft
+        )
+    )
+)
+
+Text:
+
+powerfx
+=With(
+    {
+        cap: CountRows(colAsignados) * gloRendMeta;
+        retraso: Coalesce(LookUp(estadosArea; Estado = gloEstadoArea; RetrasoH); 0);
+        minPers: If(gloRendMeta > 0; RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0); 0)
+    };
+    With(
+        { horas: If(cap > 0; gloOps / cap; 0) + retraso };
+        Switch(
+            true;
+            gloRendMeta <= 0;  "⚠️ No hay meta de referencia (P75) para esta combinación. Recalcula el catálogo antes de programar.";
+            cap <= 0;          "⚠️ Selecciona personal para calcular el cierre. Mínimo sugerido: " & minPers & " personas.";
+            horas <= gloMeta;  "✅ Aprobado. Cierra en " & Text(Round(horas; 1); "[$-es]0,0") & " h (meta " & gloMeta & " h). Holgura " & Text(Round(gloMeta - horas; 1); "[$-es]0,0") & " h. Mínimo requerido: " & minPers & " pers.";
+            "❌ En riesgo. Tomará " & Text(Round(horas; 1); "[$-es]0,0") & " h; supera la meta por " & Text(Round(horas - gloMeta; 1); "[$-es]0,0") & " h. Faltan " & Max(0; minPers - CountRows(colAsignados)) & " personas."
+        )
+    )
+)
+7.16 lblKpiTit_2 — MODIFICAR Text
+
+Ubicación: colSimulador > cardKpi > lblKpiTit_2
+
+powerfx
+="Meta de referencia: " & Text(gloRendMeta; "[$-es]0,0") & " op/h · Personas mínimas: " &
+If(gloRendMeta > 0; RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0); 0)
+7.17 btnSiguiente — MODIFICAR OnSelect
+powerfx
+=Set(
+    gloPasoProg;
+    Switch(
+        gloPasoProg;
+        "area"; If(gloAreaSel = ""; "area"; If(gloModoSet; "sets"; "act"));
+        "sets"; If(CountRows(colSetsSel) > 0; "act"; "sets");
+        "act";  If(
+                    gloActividadSel = ""; "act";
+                    (gloActividadSel in ActividadesConSub) And IsBlank(drpSubActProg.Selected.Value); "act";
+                    If(gloModoSet; "plan"; "personas")
+                );
+        gloPasoProg
+    )
+);;
+If(
+    gloPasoProg = "act" And gloActividadSel <> "" And (gloActividadSel in ActividadesConSub) And IsBlank(drpSubActProg.Selected.Value);
+    Notify("⚠️ Selecciona la subactividad para calcular la meta."; NotificationType.Error)
+);;
+If(gloPasoProg = "plan"; Select(btnLoadPaso4));;
+If(gloPasoProg = "personas"; Select(btnLoadPersonasEval))
+7.18 btnInitProg — MODIFICAR OnSelect
+powerfx
+=Set(gloModoSet; Coalesce(gloModoSet; true));;
+Set(gloPasoProg; "area");;
+Set(gloAreaSel; "");;
+Set(gloActividadSel; "");;
+Set(gloSubActSel; "(sin subactividad)");;
+Set(gloMeta; 8);;
+Set(gloRendMeta; 0);;
+Set(gloRendMin; 0);;
+Set(gloRendMax; 0);;
+Set(gloConfiabMeta; "Sin meta");;
+Set(gloNivelMeta; 0);;
+Set(gloClaveMetaUsada; "—");;
+Set(gloEstadoArea; "Disponible de inmediato");;
+Clear(colSetsSel);;
+Clear(colAsignados);;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+ClearCollect(colActividades; ListaActividades)
+8. GENERAR Y GUARDAR LA PROGRAMACIÓN
+8.1 btnCrearPrograma — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > conNav > btnCrearPrograma
+
+powerfx
+=If(
+    gloRendMeta <= 0;
+    Notify("⚠️ No puedes crear el programa sin meta de referencia."; NotificationType.Error);
+    With(
+        {
+            _cap:     CountRows(colAsignados) * gloRendMeta;
+            _retraso: Coalesce(LookUp(estadosArea; Estado = gloEstadoArea; RetrasoH); 0)
+        };
+        With(
+            { _horas: If(_cap > 0; gloOps / _cap; 0) + _retraso };
+            Set(
+                gloProg;
+                Patch(
+                    PROGRAMACION;
+                    Defaults(PROGRAMACION);
+                    {
+                        Title:          gloAreaSel & " - " & gloActividadSel & " - " & Text(dtpFechaPlan.SelectedDate; "[$-es]dd/mm/yyyy");
+                        Fecha:          dtpFechaPlan.SelectedDate;
+                        Area:           gloAreaSel;
+                        Actividad:      gloActividadSel;
+                        SubActividad:   gloSubActSel;
+                        Cultivo:        If(CountRows(colSetsSel) > 0; First(colSetsSel).Crop.Value; "General");
+                        Operaciones:    gloOps;
+                        RendBase:       gloRendMeta;
+                        RendMeta:       gloRendMeta;
+                        ClaveMeta:      gloClaveMetaUsada;
+                        Confiabilidad:  gloConfiabMeta;
+                        MetaHoras:      gloMeta;
+                        HorasEstimadas: Round(_horas; 2);
+                        PersonasMin:    RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0);
+                        EstadoArea:     { Value: gloEstadoArea };
+                        Personas:       CountRows(colAsignados)
+                    }
+                )
+            );;
+            ForAll(
+                colAsignados As a;
+                Patch(
+                    PROGRAMACION_PERSONAS;
+                    Defaults(PROGRAMACION_PERSONAS);
+                    {
+                        Title:         a.Persona & " - " & gloActividadSel;
+                        IDPrograma:    gloProg.ID;
+                        Fecha:         dtpFechaPlan.SelectedDate;
+                        FechaInicio:   dtpFechaPlan.SelectedDate;
+                        FechaFin:      dtpFechaPlan.SelectedDate;
+                        Persona:       a.Persona;
+                        Area:          gloAreaSel;
+                        Actividad:     gloActividadSel;
+                        OpHora:        a.MetaOpHora;
+                        MetaOpHora:    a.MetaOpHora;
+                        RendHistorico: a.RendHist;
+                        NivelEval:     a.Nivel;
+                        Jornada:       If(a.Frac = 1; "Jornada"; "Media jornada")
+                    }
+                )
+            );;
+            Notify(
+                "✅ Programa creado: " & gloActividadSel & " en " & gloAreaSel & " · " &
+                CountRows(colAsignados) & " personas · " & Text(Round(_horas; 1); "[$-es]0,0") & " h estimadas.";
+                NotificationType.Success
+            );;
+            Set(gloPasoProg; "area");;
+            Select(btnInitProg)
+        )
+    )
+)
+8.2 btnExportarProgramacion — AGREGAR
+Tipo: Classic/Button
+Ubicación: Personal > Principal > conCalendario > Container111 (junto a btnExportPDF)
+Propiedad	Fórmula
+Text	="📥 Exportar Excel del día"
+Fill	=ColorValue(hexLeafDark)
+Color	=RGBA(255; 255; 255; 1)
+Width	=220
+DisplayMode	=If(CountRows(colDiaAsign) > 0; DisplayMode.Edit; DisplayMode.Disabled)
+
+OnSelect (requiere flujo de Power Automate ExportarProgramacionDia con entrada de texto JSON y salida fileurl):
+
+powerfx
+=Set(
+    gloJsonProg;
+    JSON(
+        ForAll(
+            colDiaAsign As d;
+            {
+                Fecha:        Text(gloDiaSel; "[$-es]dd/mm/yyyy");
+                Area:         d.Area;
+                Actividad:    d.Actividad;
+                Persona:      d.Persona;
+                Jornada:      d.Jornada;
+                MetaOpHora:   d.MetaOpHora;
+                RendHist:     d.RendHistorico;
+                NivelEval:    d.NivelEval
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Set(gloUrlExcelProg; ExportarProgramacionDia.Run(gloJsonProg; Text(gloDiaSel; "[$-es]yyyy-mm-dd")).fileurl);;
+Launch(gloUrlExcelProg);;
+Notify("📄 Programación exportada a Excel."; NotificationType.Success)
+8.3 btnBuildCal1 — MODIFICAR OnSelect
+
+Ubicación: Personal > btnBuildCal1 (se elimina el error comentado de Hex y se agrega la meta)
+
+powerfx
+=ClearCollect(
+    colDiaAsign;
+    Filter(PROGRAMACION_PERSONAS; FechaInicio <= gloDiaSel And FechaFin >= gloDiaSel)
+);;
+ClearCollect(colAreasCal; AREAS);;
+ClearCollect(
+    colDiaGrupos;
+    ForAll(
+        GroupBy(colDiaAsign; 'Area'; 'Actividad'; 'personas') As g;
+        {
+            Area:        g.Area;
+            Actividad:   g.Actividad;
+            NumPersonas: CountRows(g.personas);
+            MetaGrupo:   Round(Average(g.personas; MetaOpHora); 1);
+            Hex:         Coalesce(LookUp(colAreasCal; Area = g.Area; Hex); "#2F9E44");
+            PersonasHtml: Concat(
+                Sort(g.personas; Persona; SortOrder.Ascending);
+                "<div style='padding:3px 8px;border-bottom:1px solid #eef1eb;font-size:11px;color:#27322b'>" &
+                EncodeHTML(Persona) & " <span style='color:#6B7A6F'>· " & Text(MetaOpHora; "[$-es]0,0") & " op/h</span></div>"
+            )
+        }
+    )
+)
+8.4 HtmlText5 — MODIFICAR HtmlText
+
+Ubicación: conCalendario > galColumnas > HtmlText5
+
+powerfx
+=With(
+    { grupos: Sort(Filter(colDiaGrupos; Area = ThisItem.Area); Actividad; SortOrder.Ascending) };
+    "<div style='font-family:Segoe UI;height:100%;overflow-y:auto;border-left:1px solid #e3e8dd;box-sizing:border-box'>" &
+    Concat(
+        grupos;
+        "<div style='background:" & Hex & ";color:#fff;font-weight:600;font-size:11px;padding:4px 8px'>" &
+            EncodeHTML(Actividad) & " &middot; " & NumPersonas & " pers &middot; meta " & Text(MetaGrupo; "[$-es]0,0") & "</div>" &
+        PersonasHtml
+    ) &
+    "</div>"
+)
+9. MÓDULO DE EVALUACIONES — CORRECCIONES
+9.1 btnBuildMatriz — MODIFICAR OnSelect
+
+Ubicación: Personal > btnBuildMatriz
+
+Corrige: la nota validada se calculaba con pesos fijos aunque faltaran evaluaciones (penalizaba a quien solo tenía 1 ó 2). Ahora se normaliza por los pesos realmente presentes. Además se añade el rendimiento real filtrado y el criterio resumido con nota, número de evaluaciones y estado.
+
+powerfx
+=ClearCollect(
+    colMatriz;
+    ForAll(
+        GroupBy(colEvalPersona; 'Actividad'; 'Cultivo'; 'grupo') As g;
+        With(
+            {
+                rAuto: Filter(g.grupo; Tipos.Value = "Autoevaluación");
+                rEnc:  Filter(g.grupo; Tipos.Value = "Encargado");
+                rResp: Filter(g.grupo; Tipos.Value = "Responsable");
+                regs:  Filter(
+                           colRegPersona;
+                           (Job = g.Actividad || SubActividad.Value = g.Actividad);
+                           Estado.Value = "Finalizado";
+                           HorasTotales > 0;
+                           HorasTotales <= MaxHorasRegistro
+                       )
+            };
+            With(
+                {
+                    va: If(CountRows(rAuto) > 0; Average(rAuto; Puntaje); 0);
+                    ve: If(CountRows(rEnc)  > 0; Average(rEnc;  Puntaje); 0);
+                    vr: If(CountRows(rResp) > 0; Average(rResp; Puntaje); 0);
+                    pa: If(CountRows(rAuto) > 0; pesoAuto; 0);
+                    pe: If(CountRows(rEnc)  > 0; pesoEnc;  0);
+                    pr: If(CountRows(rResp) > 0; pesoResp; 0);
+                    horas: Sum(regs; Coalesce(HorasTotales; MinutosTotales / 60; 0));
+                    ops:   Sum(regs; Value(Coalesce(CantidadMateriales; "0")))
+                };
+                {
+                    Actividad:    g.Actividad;
+                    Cultivo:      g.Cultivo;
+                    Auto:         Round(va; 1);
+                    Enc:          Round(ve; 1);
+                    Resp:         Round(vr; 1);
+                    NumEval:      CountRows(g.grupo);
+                    NotaValidada: If(pa + pe + pr > 0; Round((va * pa + ve * pe + vr * pr) / (pa + pe + pr); 1); 0);
+                    OpHora:       If(horas > 0; Round(ops / horas; 1); 0);
+                    Registros:    CountRows(regs);
+                    Faltan:       (CountRows(rAuto) = 0) Or (CountRows(rEnc) = 0) Or (CountRows(rResp) = 0)
+                }
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colCritResumen;
+    ForAll(
+        factoresEval As f;
+        With(
+            {
+                enc:  Filter(colCritPersona; Criterio = f.Campo And Tipos.Value = "Encargado");
+                resp: Filter(colCritPersona; Criterio = f.Campo And Tipos.Value = "Responsable")
+            };
+            With(
+                {
+                    ve: If(CountRows(enc)  > 0; Average(enc;  Puntaje); 0);
+                    vr: If(CountRows(resp) > 0; Average(resp; Puntaje); 0);
+                    pe: If(CountRows(enc)  > 0; pesoEnc;  0);
+                    pr: If(CountRows(resp) > 0; pesoResp; 0)
+                };
+                With(
+                    { nota: If(pe + pr > 0; Round((ve * pe + vr * pr) / (pe + pr); 1); 0) };
+                    {
+                        Orden:     f.Orden;
+                        Criterio:  f.Etiqueta;
+                        Enc:       Round(ve; 1);
+                        Resp:      Round(vr; 1);
+                        Nota:      nota;
+                        NumEval:   CountRows(enc) + CountRows(resp);
+                        Evaluador: Coalesce(Last(Sort(enc; FechaEvaluacion; SortOrder.Ascending)).Evaluador; "—");
+                        UltimaFecha: Last(Sort(Table({f: Last(Sort(enc; FechaEvaluacion; SortOrder.Ascending)).FechaEvaluacion}; {f: Last(Sort(resp; FechaEvaluacion; SortOrder.Ascending)).FechaEvaluacion}); f; SortOrder.Ascending)).f;
+                        Estado:    Switch(
+                                       true;
+                                       nota >= 3,5; "Supera las expectativas";
+                                       nota >= 3;   "Cumple las expectativas";
+                                       nota >= 2;   "Necesita mejorar";
+                                       nota > 0;    "Deficiente";
+                                       "Sin evaluar"
+                                   )
+                    }
+                )
+            )
+        )
+    )
+)
+9.2 Galería de criterios galCriterios — CORREGIR TEXTOS FIJOS
+
+Ubicación: conMatriz > cnt03 > panelRecientes_1 > Container108 > galCriterios > Container109
+
+Control	Propiedad	Fórmula
+lblEncValor	Text	=Text(ThisItem.Enc; "[$-es]0,0")
+lblRespValor	Text	=Text(ThisItem.Resp; "[$-es]0,0")
+Label123	Text	=Text(ThisItem.Nota; "[$-es]0,0")
+Label123	Fill	=ColorValue(Switch(true; ThisItem.Nota >= 3; hexLeafSoft; ThisItem.Nota >= 2; hexAmberSoft; hexDangerSoft))
+Label123	Width	= (vacío, usar FillPortions)
+Label124	Text	=If(IsBlank(ThisItem.UltimaFecha); "—"; Text(ThisItem.UltimaFecha; "[$-es]dd/mm/yyyy"))
+Label125	Text	=ThisItem.Estado
+Label125	Color	=If(ThisItem.Nota >= 3; ColorValue(hexLeafDark); ThisItem.Nota >= 2; ColorValue(hexAmber); ColorValue(hexDanger))
+Label125_5	Text	=ThisItem.NumEval & " evaluación(es)"
+Label125_5	Color	=If(ThisItem.NumEval < 2; ColorValue(hexAmber); ColorValue(hexMuted))
+9.3 Encabezado de criterios rowHeadRec_6 — MODIFICAR
+Control	Propiedad	Fórmula
+Label75_2	Text	="Nota ponderada"
+Label76_2	Text	="Última evaluación"
+Label77_2	Text	="Estado"
+Label77_9	Text	="N.º eval."
+9.4 Galería de matriz galMatriz — MODIFICAR
+
+Ubicación: conMatriz > panelRecientes_1 > galMatriz > rowHeadRec_5
+
+Control	Propiedad	Fórmula
+lblNota	Fill	=Switch(true; ThisItem.NotaValidada >= UmbralHabilitado; RGBA(47; 158; 68; 1); ThisItem.NotaValidada >= 2; RGBA(232; 169; 60; 1); RGBA(220; 53; 69; 1))
+lblHoras	Text	=If(ThisItem.Registros = 0; "sin registros"; Text(ThisItem.OpHora; "[$-es]0,0") & " op/h · " & ThisItem.Registros & " reg.")
+lblHoras	Color	=If(ThisItem.Registros = 0; ColorValue(hexMuted); ColorValue(hexInk))
+
+lblFaltanEval — AGREGAR (Label dentro de rowHeadRec_5):
+
+Propiedad	Fórmula
+Text	=If(ThisItem.Faltan; "⚠️ " & ThisItem.NumEval & "/3"; "✔ " & ThisItem.NumEval & "/3")
+Color	=If(ThisItem.Faltan; ColorValue(hexAmber); ColorValue(hexLeafDark))
+Align	=Align.Center
+FillPortions	=1
+Size	=10
+9.5 lblFaltan — MODIFICAR Text
+
+Ubicación: conMatriz > panelRecientes_1 > lblFaltan
+
+powerfx
+=With(
+    { incompletas: CountRows(Filter(colMatriz; Faltan)) };
+    If(
+        CountRows(colMatriz) = 0;
+        "Sin evaluaciones registradas para esta persona.";
+        incompletas = 0;
+        "✅ Todas las actividades tienen las 3 evaluaciones.";
+        "⚠️ " & incompletas & " de " & CountRows(colMatriz) & " actividades no tienen las 3 evaluaciones. La nota se ponderó solo con las existentes."
+    )
+)
+9.6 lblNivel — MODIFICAR Text
+
+Ubicación: conMatriz > cnt03 > conPerfil > Container103 > lblNivel
+
+powerfx
+=With(
+    { prom: If(CountRows(colMatriz) > 0; Average(colMatriz; NotaValidada); 0) };
+    Switch(
+        true;
+        prom >= 3,5; "★ Especialista (" & Text(prom; "[$-es]0,0") & ")";
+        prom >= 3;   "Avanzado (" & Text(prom; "[$-es]0,0") & ")";
+        prom >= 2;   "Operario (" & Text(prom; "[$-es]0,0") & ")";
+        prom > 0;    "En formación (" & Text(prom; "[$-es]0,0") & ")";
+        "Sin evaluar"
+    )
+)
+9.7 galEvalAct → Button38 y Button39 — ELIMINAR
+
+Ubicación: conEvalForm > conTarjeta > galEvalAct > Container80_3
+Puntajes 8 y 10 están fuera de la escala 1–4 y pueden corromper los promedios. Eliminar ambos controles.
+
+9.8 btnF5 — ELIMINAR
+
+Ubicación: conEvalForm > conFactores > galFactores > Container80_5
+Mismo motivo: la escala de criterios es 1–4.
+
+9.9 btnGuardarEval — MODIFICAR DisplayMode
+powerfx
+=If(
+    (gloTipoEvalAbierto = "Encargado" And IsBlank(gloEvaluador))
+    Or IsBlank(drpCultivoEval.Selected.Cultivo)
+    Or CountRows(Filter(colEvalEnCurso; Puntaje > 0)) = 0;
+    DisplayMode.Disabled;
+    DisplayMode.Edit
+)
+9.10 btnLoadPersonasEval — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > btnLoadPersonasEval
+
+powerfx
+=ClearCollect(colEvalAll; EVALUACIONES_DETALLE);;
+ClearCollect(
+    colPersonasEval;
+    Sort(
+        ForAll(
+            Filter(CATALOGO_PERSONAL1; Activo = "SI") As p;
+            With(
+                {
+                    _n: Coalesce(
+                            LookUp(colEvalAll; PersonaEvaluada = p.Nombre And Actividad = gloActividadSel; Puntaje);
+                            0
+                        )
+                };
+                {
+                    Persona:    p.Nombre;
+                    Codigo:     p.CODIGO;
+                    Depto:      p.DEPARTAMENTO;
+                    Nota:       _n;
+                    Habilitado: _n >= UmbralHabilitado
+                }
+            )
+        );
+        Nota;
+        SortOrder.Descending
+    )
+)
+9.11 galPersonasEval — MODIFICAR Items
+powerfx
+=Sort(
+    Filter(
+        colPersonasEval;
+        (txtBuscarAreas_2.Text = "" Or StartsWith(Persona; txtBuscarAreas_2.Text) Or StartsWith(Codigo; txtBuscarAreas_2.Text));
+        (Not(tglSoloEval.Value) Or Habilitado)
+    );
+    Nota;
+    SortOrder.Descending
+)
+9.12 lblNotaEval — MODIFICAR Text y Color
+
+Ubicación: conPasoPersonas > galPersonasEval > conFilaEval > lblNotaEval
+
+Propiedad	Fórmula
+Text	="Evaluación: " & Text(ThisItem.Nota; "[$-es]0,0") & " / 4" & If(ThisItem.Habilitado; " ✔ habilitado"; " ✖ no habilitado")
+Color	=If(ThisItem.Habilitado; ColorValue(hexLeafDark); ColorValue(hexDanger))
+9.13 btnSelectEval — MODIFICAR OnSelect
+powerfx
+=If(
+    CountRows(Filter(colAsignados; Persona = ThisItem.Persona)) > 0;
+    RemoveIf(colAsignados; Persona = ThisItem.Persona);
+    If(
+        Not(ThisItem.Habilitado);
+        Notify("🚫 " & ThisItem.Persona & " no alcanza el nivel mínimo (" & UmbralHabilitado & ") para esta actividad."; NotificationType.Error);
+        Collect(
+            colAsignados;
+            {
+                Persona:    ThisItem.Persona;
+                Codigo:     ThisItem.Codigo;
+                Depto:      ThisItem.Depto;
+                Nivel:      ThisItem.Nota;
+                MetaOpHora: gloRendMeta;
+                RendHist:   0;
+                Frac:       1
+            }
+        )
+    )
+)
+10. CONTROLES A ELIMINAR (código muerto que rompe el cálculo)
+Control	Ubicación	Motivo
+Label164	scrRendimientos > galSetss > Container9	Bloque comentado de ~90 líneas dentro de Text, carga el editor sin aportar nada
+btnCargarAnaSet_1 / btnRecalcAnaSet_1	Personal > Container150 > cntpestañashoras	Duplican la lógica de btnCargarAnaSet de scrRendimientos usando gSetActivo, que no existe en la pantalla Personal
+galSetss_1	scrRendimientos > conBody_Sets01	Galería duplicada con Visible = false; consume delegación
+Button25	Personal > Button25	Duplicado exacto de btnGoView
+conDrawerGP	Personal > conDrawerGP	Visible = false, reemplazado por conDrawerGP1
