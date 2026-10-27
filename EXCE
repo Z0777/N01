@@ -1,0 +1,153 @@
+F. EXPORTACIÓN A EXCEL — FLUJO COMPLETO
+
+El error "Run" es una función desconocida significa que el flujo no existe ni está agregado a la app. Hay que crearlo.
+
+F.1 Crear la plantilla Excel (una sola vez)
+En la biblioteca Documentos compartidos del sitio SharePoint de la app, crea la carpeta ProgramacionPersonal.
+Dentro, sube un archivo PlantillaProgramacion.xlsx con una hoja Programacion y encabezados en la fila 1:
+Fecha | Codigo | Persona | Area | Actividad | Jornada | MetaOpHora | RendHistorico | NivelEval | Cumplimiento
+Selecciona A1:J1, Insertar → Tabla (con encabezados) y nómbrala TablaProgramacion. Guarda.
+F.2 Crear el flujo ExportarProgramacionDia (Power Automate)
+#	Acción	Configuración
+1	Disparador: PowerApps (V2)	Entrada 1 — Texto, nombre datosJson. Entrada 2 — Texto, nombre fechaTxt
+2	Inicializar variable	Nombre nombreArchivo, Tipo Cadena, Valor: Programacion_@{triggerBody()['text_1']}.xlsx
+3	SharePoint → Obtener contenido del archivo mediante la ruta de acceso	Sitio: tu sitio · Ruta: /Documentos compartidos/ProgramacionPersonal/PlantillaProgramacion.xlsx
+4	SharePoint → Crear archivo	Sitio: tu sitio · Ruta de carpeta: /Documentos compartidos/ProgramacionPersonal · Nombre: @{variables('nombreArchivo')} · Contenido: salida del paso 3
+5	Analizar JSON	Contenido: @{triggerBody()['text']} · Esquema: (ver abajo)
+6	Aplicar a cada uno sobre la salida del paso 5 → dentro: Excel Online (Business) → Agregar una fila a una tabla	Ubicación/Biblioteca: tu sitio · Archivo: Id del paso 4 · Tabla: TablaProgramacion · Mapea cada columna con el campo correspondiente del JSON
+7	SharePoint → Crear vínculo para compartir	Archivo: Id del paso 4 · Tipo: Vínculo de visualización · Ámbito: Organización
+8	Responder a PowerApp o flujo	Salida de texto, nombre fileurl, valor: @{body('Crear_vínculo_para_compartir')?['link']?['webUrl']}
+
+Esquema del paso 5:
+
+json
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "Fecha": { "type": "string" },
+      "Codigo": { "type": "string" },
+      "Persona": { "type": "string" },
+      "Area": { "type": "string" },
+      "Actividad": { "type": "string" },
+      "Jornada": { "type": "string" },
+      "MetaOpHora": { "type": "number" },
+      "RendHistorico": { "type": "number" },
+      "NivelEval": { "type": "number" },
+      "Cumplimiento": { "type": "string" }
+    }
+  }
+}
+
+Guarda el flujo. Luego en Power Apps: Power Automate → Agregar flujo → ExportarProgramacionDia. A partir de ese momento ExportarProgramacionDia.Run(...) existe.
+
+F.3 btnCalExcel — OnSelect
+
+Ubicación: conCalendario > conCalFiltros > btnCalExcel
+
+powerfx
+=Set(
+    gloJsonProg;
+    JSON(
+        ForAll(
+            colDiaFiltrado As d;
+            {
+                Fecha:         Text(gloDiaSel; "[$-es]dd/mm/yyyy");
+                Codigo:        d.Codigo;
+                Persona:       d.Persona;
+                Area:          d.Area;
+                Actividad:     d.Actividad;
+                Jornada:       d.Jornada;
+                MetaOpHora:    d.MetaOpHora;
+                RendHistorico: d.RendHistorico;
+                NivelEval:     d.NivelEval;
+                Cumplimiento:  If(
+                                   d.MetaOpHora <= 0 Or d.RendHistorico = 0; "Sin dato";
+                                   d.RendHistorico >= d.MetaOpHora; "Cumple";
+                                   d.RendHistorico >= d.MetaOpHora * 0,75; "En rango";
+                                   "Bajo meta"
+                               )
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Set(gloUrlExcelProg; ExportarProgramacionDia.Run(gloJsonProg; Text(gloDiaSel; "[$-es]yyyy-mm-dd")).fileurl);;
+If(
+    IsBlank(gloUrlExcelProg);
+    Notify("❌ No se pudo generar el archivo. Revisa el flujo ExportarProgramacionDia."; NotificationType.Error);
+    Launch(gloUrlExcelProg);;
+    Notify("📄 Programación exportada a Excel."; NotificationType.Success)
+)
+F.4 btnCalPDF — OnSelect (no requiere flujo)
+
+Ubicación: conCalendario > conCalFiltros > btnCalPDF
+
+powerfx
+=Set(varImprimiendoProg; true);;
+Download(
+    PDF(
+        conCalImpresion;
+        { Size: PaperSize.A4; Orientation: PaperOrientation.Landscape; ExpandContainers: true }
+    )
+);;
+Set(varImprimiendoProg; false)
+F.5 conCalImpresion — AGREGAR (vista imprimible)
+
+Tipo: GroupContainer AutoLayout vertical · Ubicación: Personal > Principal (hermano de conCalendario)
+
+Propiedad	Fórmula
+Visible	=varImprimiendoProg
+Fill	=RGBA(255; 255; 255; 1)
+Width	=Parent.Width
+Height	=Parent.Height
+LayoutOverflowY	=LayoutOverflow.Scroll
+
+Hijo — htmlProgImprimir (HtmlViewer):
+
+Propiedad	Fórmula
+Width	=Parent.Width
+Height	=Max(400; 30 * CountRows(colDiaFiltrado) + 160)
+Size	=11
+
+HtmlText:
+
+powerfx
+="<div style='font-family:Segoe UI,Arial,sans-serif;color:#16273a'>" &
+"<h2 style='margin:0 0 4px 0;color:#0E2018'>Distribución de personal · " & Text(gloDiaSel; "dddd d 'de' mmmm 'de' yyyy"; "es-ES") & "</h2>" &
+"<div style='font-size:11px;color:#5c6b79;margin-bottom:10px'>" & CountRows(colDiaFiltrado) & " personas · " &
+CountRows(Distinct(colDiaFiltrado; Area)) & " áreas · " & CountRows(Distinct(colDiaFiltrado; Actividad)) & " actividades · capacidad " &
+Text(Round(Sum(colDiaFiltrado; MetaOpHora); 0); "[$-es]#.##0") & " op/h · generado " & Text(Now(); "[$-es]dd/mm/yyyy hh:mm") & "</div>" &
+"<table style='border-collapse:collapse;width:100%;font-size:11px'>" &
+"<tr style='background:#0E2018;color:#fff'>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Código</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Persona</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Área</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Actividad</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Jornada</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Meta op/h</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Su mediana</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Vs meta</th>" &
+"</tr>" &
+Concat(
+    Sort(colDiaFiltrado; Area; SortOrder.Ascending);
+    "<tr>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Codigo) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Persona) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Area) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Actividad) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Jornada) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:right'>" & Text(MetaOpHora; "[$-es]0,0") & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:right'>" & If(RendHistorico > 0; Text(RendHistorico; "[$-es]0,0"); "s/d") & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:center;background:" &
+    If(
+        MetaOpHora <= 0 Or RendHistorico = 0; "#f1f5f9";
+        RendHistorico >= MetaOpHora; "#E8F5EC";
+        RendHistorico >= MetaOpHora * 0,75; "#FBF1DC";
+        "#FCE9E9"
+    ) & "'>" &
+    If(MetaOpHora <= 0 Or RendHistorico = 0; "—"; Text(RendHistorico / MetaOpHora; "0%")) & "</td>" &
+    "</tr>"
+) &
+"</table></div>"
