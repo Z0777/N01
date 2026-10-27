@@ -1,0 +1,646 @@
+3.2 btnBuildCal1 — MODIFICAR OnSelect
+powerfx
+=Set(gloDiaSel; Coalesce(gloDiaSel; Today()));;
+Set(gloCalVista; Coalesce(gloCalVista; "Columnas"));;
+Refresh(PROGRAMACION_PERSONAS);;
+ClearCollect(
+    colAreasCal;
+    ForAll(
+        Filter(AREAS; Activa = true) As a;
+        {
+            Area:      a.Area;
+            Tipo:      Coalesce(a.Tipos.Value; "");
+            Ubicacion: Coalesce(a.Ubicacion; "");
+            Orden:     Coalesce(a.Orden; 999);
+            TieneSets: Coalesce(a.TieneSets; false);
+            Hex:       Coalesce(
+                           If(IsBlank(Trim(Coalesce(a.Hex; ""))); Blank(); a.Hex);
+                           Switch(
+                               Coalesce(a.Tipos.Value; "");
+                               "Greenhouse"; "#2F9E44";
+                               "Produccion"; "#0E7C86";
+                               "Nursery";    "#E8A93C";
+                               "Semilleros"; "#B45309";
+                               "SPA";        "#2563EB";
+                               "Procesos";   "#7C3AED";
+                               "Crop";       "#1E7A33";
+                               "#0D323D"
+                           )
+                       )
+        }
+    )
+);;
+ClearCollect(
+    colDiaAsign;
+    ForAll(
+        Filter(PROGRAMACION_PERSONAS; FechaInicio <= gloDiaSel And FechaFin >= gloDiaSel) As p;
+        {
+            IDReg:         p.ID;
+            Fecha:         p.Fecha;
+            Persona:       Coalesce(p.Persona; "—");
+            Codigo:        Coalesce(p.Codigo; Coalesce(LookUp(CATALOGO_PERSONAL1; Nombre = p.Persona; CODIGO); "s/c"));
+            Area:          Coalesce(p.Area; "Sin área");
+            Actividad:     Coalesce(p.Actividad; "Sin actividad");
+            Jornada:       Coalesce(p.Jornada; "Jornada");
+            MetaOpHora:    Coalesce(p.MetaOpHora; p.OpHora; 0);
+            RendHistorico: Coalesce(p.RendHistorico; 0);
+            NivelEval:     Coalesce(p.NivelEval; 0)
+        }
+    )
+);;
+Reset(drpCalArea);;
+Reset(drpCalActividad);;
+Reset(txtCalBuscar);;
+Select(btnFiltrarCal)
+3.3 Encabezado de la tabla — hdrTp*
+
+Todos con: Align = Align.Center · Color = RGBA(255; 255; 255; 1) · FontWeight = FontWeight.Bold · Size = 10 · LayoutMinHeight = 16 · LayoutMinWidth = 16 · AlignInContainer = AlignInContainer.Stretch
+
+Control	FillPortions
+hdrTpCodigo	=0,8
+hdrTpPersona	=2
+hdrTpArea	=1,2
+hdrTpActividad	=1,8
+hdrTpJornada	=1
+hdrTpMeta	=1
+hdrTpHist	=1
+hdrTpCumpl	=1
+hdrTpEval	=0,8
+
+También en hdrTablaProg: AlignInContainer: =AlignInContainer.Stretch
+
+3.4 galProgTabla — AGREGAR (reemplaza Gallery7)
+Tipo: Gallery, BrowseLayout_Vertical_OneTextVariant_ver5.0
+Ubicación: conCalCuerpo > conCalTabla (después de hdrTablaProg)
+Propiedad	Fórmula
+Items	=Sort(colDiaFiltrado; Area; SortOrder.Ascending)
+TemplateSize	=42
+ShowScrollbar	=true
+Width	=Parent.Width
+FillPortions	=1
+LayoutMinHeight	=0
+LayoutMinWidth	=0
+AlignInContainer	=AlignInContainer.Stretch
+
+Hijo 1 — conFilaProg (GroupContainer AutoLayout horizontal):
+
+Propiedad	Fórmula
+Width	=Parent.TemplateWidth
+Height	=Parent.TemplateHeight
+LayoutAlignItems	=LayoutAlignItems.Stretch
+LayoutDirection	=LayoutDirection.Horizontal
+PaddingLeft / PaddingRight	=8
+PaddingTop / PaddingBottom	=2
+Fill	=If(Mod(ThisItem.Fila; 2) = 0; RGBA(248; 250; 245; 1); RGBA(255; 255; 255; 1))
+
+Labels hijos (todos: Align = Align.Center · Size = 10 · AlignInContainer = AlignInContainer.Stretch · LayoutMinHeight = 16 · LayoutMinWidth = 16):
+
+Control	Text	FillPortions	Extra
+lblTpCodigo	=ThisItem.Codigo	=0,8	
+lblTpPersona	=ThisItem.Persona	=2	FontWeight: =FontWeight.Semibold
+lblTpArea	=ThisItem.Area	=1,2	
+lblTpActividad	=ThisItem.Actividad	=1,8	
+lblTpJornada	=ThisItem.Jornada	=1	
+lblTpMeta	=Text(ThisItem.MetaOpHora; "[$-es]0,0")	=1	FontWeight: =FontWeight.Bold
+lblTpHist	=If(ThisItem.RendHistorico = 0; "sin historial"; Text(ThisItem.RendHistorico; "[$-es]0,0"))	=1	Color: =If(ThisItem.RendHistorico = 0; ColorValue(hexMuted); ColorValue(hexInk))
+lblTpCumpl	=If(ThisItem.MetaOpHora <= 0 Or ThisItem.RendHistorico = 0; "—"; Text(ThisItem.RendHistorico / ThisItem.MetaOpHora; "0%"))	=1	ver abajo
+lblTpEval	=ThisItem.NivelEval & "/4"	=0,8	Color: =If(ThisItem.NivelEval >= UmbralHabilitado; ColorValue(hexLeafDark); ColorValue(hexDanger))
+
+lblTpCumpl.Fill:
+
+powerfx
+=If(
+    ThisItem.MetaOpHora <= 0 Or ThisItem.RendHistorico = 0; RGBA(150; 150; 150; 0,2);
+    ThisItem.RendHistorico >= ThisItem.MetaOpHora;          RGBA(47; 158; 68; 0,2);
+    ThisItem.RendHistorico >= ThisItem.MetaOpHora * 0,75;   RGBA(232; 169; 60; 0,25);
+    RGBA(220; 38; 38; 0,18)
+)
+
+lblTpCumpl.FontWeight: =FontWeight.Bold
+
+Hijo 2 — btnFilaProg (Classic/Button):
+
+Propiedad	Fórmula
+Fill / HoverFill / PressedFill / BorderColor	=RGBA(0; 0; 0; 0)
+Text	=
+Width	=Parent.TemplateWidth
+Height	=Parent.TemplateHeight
+OnSelect	=Set(gloProgSel; ThisItem);; Set(varDrawerProg; true)
+3.5 btnCalExcel — OnSelect
+powerfx
+=Set(
+    gloJsonProg;
+    JSON(
+        ForAll(
+            Sort(colDiaFiltrado; Area; SortOrder.Ascending) As d;
+            {
+                Fecha:         Text(gloDiaSel; "[$-es]dd/mm/yyyy");
+                Codigo:        d.Codigo;
+                Persona:       d.Persona;
+                Area:          d.Area;
+                Actividad:     d.Actividad;
+                Jornada:       d.Jornada;
+                MetaOpHora:    d.MetaOpHora;
+                RendHistorico: d.RendHistorico;
+                NivelEval:     d.NivelEval;
+                Cumplimiento:  If(
+                                   d.MetaOpHora <= 0 Or d.RendHistorico = 0; "Sin dato";
+                                   d.RendHistorico >= d.MetaOpHora;          "Cumple";
+                                   d.RendHistorico >= d.MetaOpHora * 0,75;   "En rango";
+                                   "Bajo meta"
+                               )
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+IfError(
+    Set(gloUrlExcelProg; ExportarProgramacionDia.Run(gloJsonProg; Text(gloDiaSel; "[$-es]yyyy-mm-dd")).fileurl);
+    Set(gloUrlExcelProg; "")
+);;
+If(
+    IsBlank(gloUrlExcelProg);
+    Notify("❌ No se pudo generar el archivo. Verifica que el flujo 'ExportarProgramacionDia' esté agregado a la app."; NotificationType.Error);
+    Launch(gloUrlExcelProg);;
+    Notify("📄 Programación exportada a Excel."; NotificationType.Success)
+)
+
+Mientras no exista el flujo, deja el OnSelect solo con el bloque Set(gloJsonProg; ...) y un Notify, porque ExportarProgramacionDia.Run no compila si el flujo no está agregado en Power Automate → Agregar flujo.
+
+3.6 btnCalPDF — OnSelect
+powerfx
+=Set(varImprimiendoProg; true);;
+Download(
+    PDF(
+        conCalImpresion;
+        { Size: PaperSize.A4; Orientation: PaperOrientation.Landscape; ExpandContainers: true }
+    )
+);;
+Set(varImprimiendoProg; false)
+3.7 conCalSinAsignar — AGREGAR
+Tipo: GroupContainer AutoLayout
+Ubicación: conCalCuerpo (como tercer hijo, después de conCalTabla)
+Propiedad	Fórmula
+LayoutDirection	=LayoutDirection.Vertical
+LayoutAlignItems	=LayoutAlignItems.Stretch
+Width	=260
+FillPortions	=0
+Fill	=clrSurface
+BorderColor	=clrLine
+BorderThickness	=1
+Visible	=CountRows(colCalSinAsignar) > 0
+
+Hijo 1 — hdrSinAsignar (Label):
+
+Propiedad	Fórmula
+Text	="⚠️ SIN PROGRAMAR (" & CountRows(colCalSinAsignar) & ")"
+Fill	=ColorValue(hexDanger)
+Color	=RGBA(255; 255; 255; 1)
+FontWeight	=FontWeight.Bold
+Size	=11
+Align	=Align.Center
+Height	=36
+FillPortions	=0
+AlignInContainer	=AlignInContainer.Stretch
+
+Hijo 2 — galSinAsignar (Gallery vertical):
+
+Propiedad	Fórmula
+Items	=Sort(colCalSinAsignar; Nombre; SortOrder.Ascending)
+TemplateSize	=44
+ShowScrollbar	=false
+Width	=Parent.Width
+FillPortions	=1
+LayoutMinHeight	=0
+LayoutMinWidth	=0
+
+Hijo de la galería — lblSinAsignar (Label):
+
+Propiedad	Fórmula
+Text	=ThisItem.CODIGO & " · " & ThisItem.Nombre & Char(10) & ThisItem.DEPARTAMENTO
+Size	=9
+Width	=Parent.TemplateWidth
+Height	=Parent.TemplateHeight
+PaddingLeft	=8
+Color	=ColorValue(hexInk)
+3.8 conDrawerProg — AGREGAR
+Tipo: GroupContainer ManualLayout
+Ubicación: Personal > Principal (hermano de conCalendario)
+Propiedad	Fórmula
+Fill	=RGBA(16; 30; 44; 0,45)
+Height	=Parent.Height
+Width	=Parent.Width
+Visible	=varDrawerProg
+
+Hijo 1 — btnScrimProg (Classic/Button):
+
+Propiedad	Fórmula
+Fill / HoverFill / PressedFill	=RGBA(0; 0; 0; 0)
+Text	=
+Width	=Parent.Width
+Height	=Parent.Height
+OnSelect	=Set(varDrawerProg; false)
+
+Hijo 2 — htmlDetalleProg (HtmlViewer):
+
+Propiedad	Fórmula
+Width	=Min(520; Parent.Width - 40)
+Height	=320
+X	=(Parent.Width - Self.Width) / 2
+Y	=(Parent.Height - Self.Height) / 2
+
+HtmlText:
+
+powerfx
+="<div style='font-family:Segoe UI;background:#fff;border-radius:10px;padding:16px;border:1px solid #cbd5e1'>" &
+"<div style='font-size:16px;font-weight:700;color:#0f172a;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:10px'>👤 " &
+EncodeHTML(Coalesce(gloProgSel.Persona; "—")) & " <span style='color:#64748b;font-size:12px'>(" & EncodeHTML(Coalesce(gloProgSel.Codigo; "s/c")) & ")</span></div>" &
+"<table style='width:100%;border-collapse:collapse;font-size:12px'>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Fecha</b></td><td style='padding:5px'>" & Text(gloProgSel.Fecha; "[$-es]dd/mm/yyyy") & "</td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Área</b></td><td style='padding:5px'>" & EncodeHTML(Coalesce(gloProgSel.Area; "—")) & "</td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Actividad</b></td><td style='padding:5px'><b>" & EncodeHTML(Coalesce(gloProgSel.Actividad; "—")) & "</b></td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Jornada</b></td><td style='padding:5px'>" & EncodeHTML(Coalesce(gloProgSel.Jornada; "—")) & "</td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Meta asignada</b></td><td style='padding:5px'>" & Text(Coalesce(gloProgSel.MetaOpHora; 0); "[$-es]0,0") & " op/h</td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Su mediana histórica</b></td><td style='padding:5px'>" & Text(Coalesce(gloProgSel.RendHistorico; 0); "[$-es]0,0") & " op/h</td></tr>" &
+"<tr><td style='padding:5px;color:#64748b'><b>Nivel de evaluación</b></td><td style='padding:5px'>" & Coalesce(gloProgSel.NivelEval; 0) & " / 4</td></tr>" &
+"</table></div>"
+
+Hijo 3 — icoCerrarDrawerProg (ModernIcon):
+
+Propiedad	Fórmula
+Icon	="Dismiss"
+IconColor	=RGBA(255; 255; 255; 1)
+X	=htmlDetalleProg.X + htmlDetalleProg.Width - 36
+Y	=htmlDetalleProg.Y - 40
+OnSelect	=Set(varDrawerProg; false)
+3.9 conCalImpresion — AGREGAR
+Tipo: GroupContainer AutoLayout vertical
+Ubicación: Personal > Principal (hermano de conCalendario)
+Propiedad	Fórmula
+Visible	=varImprimiendoProg
+Fill	=RGBA(255; 255; 255; 1)
+Width	=Parent.Width
+Height	=Parent.Height
+LayoutOverflowY	=LayoutOverflow.Scroll
+
+Hijo — htmlProgImprimir (HtmlViewer):
+
+Propiedad	Fórmula
+Width	=Parent.Width
+Height	=Max(400; 30 * CountRows(colDiaFiltrado) + 160)
+Size	=11
+
+HtmlText:
+
+powerfx
+="<div style='font-family:Segoe UI,Arial,sans-serif;color:#16273a'>" &
+"<h2 style='margin:0 0 4px 0;color:#0E2018'>Distribución de personal · " & Text(gloDiaSel; "dddd d 'de' mmmm 'de' yyyy"; "es-ES") & "</h2>" &
+"<div style='font-size:11px;color:#5c6b79;margin-bottom:10px'>" & CountRows(colDiaFiltrado) & " personas · " &
+CountRows(Distinct(colDiaFiltrado; Area)) & " áreas · " & CountRows(Distinct(colDiaFiltrado; Actividad)) & " actividades · capacidad " &
+Text(Round(Sum(colDiaFiltrado; MetaOpHora); 0); "[$-es]#.##0") & " op/h · generado " & Text(Now(); "[$-es]dd/mm/yyyy hh:mm") & "</div>" &
+"<table style='border-collapse:collapse;width:100%;font-size:11px'>" &
+"<tr style='background:#0E2018;color:#fff'>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Código</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Persona</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Área</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Actividad</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Jornada</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Meta op/h</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Su mediana</th>" &
+"<th style='border:1px solid #e3eaf1;padding:5px'>Vs meta</th>" &
+"</tr>" &
+Concat(
+    Sort(colDiaFiltrado; Area; SortOrder.Ascending);
+    "<tr>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Codigo) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Persona) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Area) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Actividad) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px'>" & EncodeHTML(Jornada) & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:right'>" & Text(MetaOpHora; "[$-es]0,0") & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:right'>" & If(RendHistorico > 0; Text(RendHistorico; "[$-es]0,0"); "s/d") & "</td>" &
+    "<td style='border:1px solid #e3eaf1;padding:4px;text-align:center;background:" &
+    If(
+        MetaOpHora <= 0 Or RendHistorico = 0;              "#f1f5f9";
+        RendHistorico >= MetaOpHora;                       "#E8F5EC";
+        RendHistorico >= MetaOpHora * 0,75;                "#FBF1DC";
+        "#FCE9E9"
+    ) & "'>" &
+    If(MetaOpHora <= 0 Or RendHistorico = 0; "—"; Text(RendHistorico / MetaOpHora; "0%")) & "</td>" &
+    "</tr>"
+) &
+"</table></div>"
+3.10 Correcciones puntuales en conCalendario
+Control	Propiedad	Fórmula
+lblCalTitulo	Fill	=RGBA(0; 0; 0; 0)
+conCalKpis	Visible	=CountRows(colCalKpi) > 0
+galCalKpis	Y	(eliminar la propiedad)
+galCalKpis	Items	=Sort(colCalKpi; Orden; SortOrder.Ascending)
+galCalKpis	AlignInContainer	=AlignInContainer.Stretch
+lblKpiCalTit	Text	=ThisItem.Titulo
+conCardKpiCal	RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight	=8
+galColumnas	Y	(eliminar la propiedad)
+galColumnas	Height	=Parent.Height
+galColumnas	AlignInContainer	=AlignInContainer.Stretch
+conCalColumnas	FillPortions	=1
+conCalTabla	FillPortions	=1
+conCalCuerpo	FillPortions	=1
+hdrColArea	FillPortions	=0
+htmlColArea	Height	(eliminar)
+htmlColArea	Width	(eliminar)
+htmlColArea	X / Y	(eliminar)
+htmlColArea	FillPortions	=1
+conColArea	LayoutAlignItems	=LayoutAlignItems.Stretch
+conColArea	LayoutGap	=0
+conColArea	PaddingTop/Bottom/Left/Right	=0
+
+galColumnas.Items — MODIFICAR:
+
+powerfx
+=Sort(
+    ForAll(
+        Distinct(colDiaFiltrado; Area) As a;
+        With(
+            { _ref: LookUp(colAreasCal; Area = a.Value) };
+            {
+                Area:  a.Value;
+                Orden: Coalesce(_ref.Orden; 999);
+                Tipo:  Coalesce(_ref.Tipo; "");
+                Hex:   Coalesce(_ref.Hex; "#0D323D");
+                Pers:  CountRows(Filter(colDiaFiltrado; Area = a.Value))
+            }
+        )
+    );
+    Orden;
+    SortOrder.Ascending
+)
+
+lblCalVacioGen — AGREGAR (Label en conCalColumnas, después de galColumnas):
+
+Propiedad	Fórmula
+Text	="Sin asignaciones de personal para este día."
+Align	=Align.Center
+Color	=ColorValue(hexMuted)
+Size	=12
+Height	=40
+FillPortions	=0
+AlignInContainer	=AlignInContainer.Stretch
+Visible	=CountRows(colDiaFiltrado) = 0
+PARTE 4 — CORRECCIONES FUERA DE conCalendario
+4.1 btnAtras — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > conNav > btnAtras
+
+powerfx
+=Set(
+    gloPasoProg;
+    Switch(
+        gloPasoProg;
+        "plan";     "act";
+        "personas"; "act";
+        "act";      If(gloModoSet And Coalesce(gloAreaRec.TieneSets; false); "sets"; "area");
+        "sets";     "area";
+        "area"
+    )
+)
+4.2 btnArea — MODIFICAR OnSelect
+
+Ubicación: conProgramacion > conPaso1 > galAreas > btnArea
+
+powerfx
+=Set(gloAreaSel; ThisItem.Area);;
+Set(gloAreaRec; ThisItem);;
+Set(gloTipos; Coalesce(ThisItem.Tipos.Value; ""));;
+Set(gloUbicacion; Coalesce(ThisItem.Ubicacion; ""));;
+Set(gloK1; ThisItem.Area);;
+Set(gloK2; "GH" & ThisItem.Area);;
+Set(gloK3; Left(ThisItem.Area; 1) & " " & Mid(ThisItem.Area; 2; 9));;
+Clear(colSetsSel);;
+Set(gloPasoProg; If(gloModoSet And Coalesce(ThisItem.TieneSets; false); "sets"; "act"))
+4.3 btnSiguiente — MODIFICAR OnSelect
+powerfx
+=Set(
+    gloPasoProg;
+    Switch(
+        gloPasoProg;
+        "area"; If(
+                    gloAreaSel = ""; "area";
+                    If(gloModoSet And Coalesce(gloAreaRec.TieneSets; false); "sets"; "act")
+                );
+        "sets"; If(CountRows(colSetsSel) > 0; "act"; "sets");
+        "act";  If(gloActividadSel = ""; "act"; If(gloModoSet; "plan"; "personas"));
+        gloPasoProg
+    )
+);;
+If(gloPasoProg = "plan"; Select(btnLoadPaso4));;
+If(gloPasoProg = "personas"; Select(btnLoadPersonasEval))
+4.4 btnCrearPrograma — MODIFICAR (corregir Título: → Title:)
+
+Ubicación: conProgramacion > conNav > btnCrearPrograma
+
+Dentro del ForAll(colAsignados As a; Patch(PROGRAMACION_PERSONAS; ...)), la primera línea debe ser:
+
+powerfx
+Title:         a.Persona & " - " & gloActividadSel;
+
+(El resto del OnSelect ya está correcto.)
+
+4.5 drpFiltroAreaHE — MODIFICAR Items
+
+Ubicación: Container150 > ... > Container22_1 > drpFiltroAreaHE
+
+powerfx
+=Ungroup(
+    Table(
+        { _t: Table({ Título: "TODAS LAS ÁREAS" }) };
+        { _t: ShowColumns(colConfigAreasHE; Título) }
+    );
+    _t
+)
+
+ItemDisplayText: =ThisItem.Título
+
+Y en galPersonalInicio_1.Items, galHabilitados.Items y cualquier drpFiltroAreaHE.Selected.Title → cambiar a drpFiltroAreaHE.Selected.Título.
+
+4.6 HtmlText7 — MODIFICAR (línea _topeArea)
+
+Ubicación: conTab_Individual_1 > Container36_6 > HtmlText7
+
+powerfx
+_topeArea: Coalesce(LookUp(colConfigAreasHE; Título = gloPersonaSel.DEPARTAMENTO; TopeSemanalLV); varTopeGlobalLV)
+4.7 btnGuardarFin_1 — MODIFICAR OnSelect
+
+Ubicación: Container28_7 > Container38_1 > btnGuardarFin_1
+
+Está vacío (=) y el botón no hace nada. Como ese bloque entero (Container28_7) pertenece al flujo de cierre de la pantalla scrRendimientos y no al de Horas Extras, la solución correcta es:
+
+Propiedad	Fórmula
+Container28_7 → Visible	=false
+
+(Oculta el bloque duplicado completo: usa gSetActivo, que no existe en la pantalla Personal, y genera errores silenciosos.)
+
+4.8 galActividad_1 / galFinPersonal_1 / galActFin_1 / drpActFin_1 / btnModoFin_1
+
+Ubicación: dentro de Container150 (Horas Extras)
+
+Todos referencian gSetActivo.SetName, variable de la pantalla scrRendimientos. En Personal siempre está en blanco.
+
+Control	Propiedad	Fórmula
+Container25_1	Visible	=false (ya está)
+Container28_7	Visible	=false
+conTablaSetFecha_1	Visible	=false
+4.9 Button25 — ELIMINAR
+
+Ubicación: Personal > Button25. Está completamente comentado y duplica btnGoView.
+
+4.10 conDrawerGP — ELIMINAR
+
+Ubicación: Personal > conDrawerGP. Visible = false y Width = 20; lo reemplaza conDrawerGP1.
+
+4.11 btnBuildGanttPers + htmlBarPer — MODIFICAR
+
+btnBuildGanttPers.OnSelect:
+
+powerfx
+=ClearCollect(colGP; PROGRAMACION_PERSONAS);;
+ClearCollect(
+    colAreas;
+    ForAll(
+        Filter(AREAS; Activa = true) As a;
+        {
+            Area: a.Area;
+            Hex:  Coalesce(
+                      If(IsBlank(Trim(Coalesce(a.Hex; ""))); Blank(); a.Hex);
+                      Switch(
+                          Coalesce(a.Tipos.Value; "");
+                          "Greenhouse"; "#2F9E44";
+                          "Produccion"; "#0E7C86";
+                          "Nursery";    "#E8A93C";
+                          "Semilleros"; "#B45309";
+                          "SPA";        "#2563EB";
+                          "Procesos";   "#7C3AED";
+                          "Crop";       "#1E7A33";
+                          "#0D323D"
+                      )
+                  )
+        }
+    )
+);;
+Set(gloGPMin; Min(colGP; FechaInicio));;
+Set(gloGPMax; Max(colGP; Coalesce(FechaFin; FechaInicio)));;
+Set(gloGPSpan; Max(1; DateDiff(gloGPMin; gloGPMax; TimeUnit.Days)));;
+ClearCollect(colGPPersonas; Distinct(colGP; Persona))
+
+htmlBarPer.HtmlText — reemplazar la línea comentada del color por la real:
+
+powerfx
+="<div style='display:flex;align-items:center;height:44px;border-bottom:1px solid #eef1eb;background:#fff;font-family:Segoe UI'>" &
+    "<div style='width:160px;flex:0 0 160px;box-sizing:border-box;padding-left:6px;font-size:13px;color:#16273a;font-weight:600'>" & EncodeHTML(ThisItem.Value) & "</div>" &
+    "<div style='flex:1;position:relative;height:24px;background:#EEF1EB;border-radius:6px'>" &
+    If(
+        Today() >= gloGPMin And Today() <= gloGPMax;
+        "<div style='position:absolute;left:" & Round(DateDiff(gloGPMin; Today(); TimeUnit.Days) / Max(gloGPSpan; 1) * 100; 2) & "%;top:-2px;width:2px;height:28px;background:#DC2626;z-index:10'></div>";
+        ""
+    ) &
+    Concat(
+        Filter(colGP; Persona = ThisItem.Value) As b;
+        "<div title='" & EncodeHTML(b.Actividad) & "' style='position:absolute;left:" &
+        Round(DateDiff(gloGPMin; b.FechaInicio; TimeUnit.Days) / Max(gloGPSpan; 1) * 100; 2) & "%;width:" &
+        Round(Max(1; DateDiff(b.FechaInicio; Coalesce(b.FechaFin; b.FechaInicio); TimeUnit.Days)) / Max(gloGPSpan; 1) * 100; 2) &
+        "%;height:24px;border-radius:5px;box-sizing:border-box;padding:0 6px;display:flex;align-items:center;overflow:hidden;background:" &
+        Coalesce(LookUp(colAreas; Area = b.Area; Hex); "#2F9E44") & "'>" &
+        "<span style='color:#fff;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & EncodeHTML(b.Actividad) & "</span>" &
+        "</div>"
+    ) &
+    "</div></div>"
+4.12 Title3_1 (en galGPDetalle) — MODIFICAR Text
+
+ThisItem.Sets no existe en PROGRAMACION_PERSONAS.
+
+powerfx
+=ThisItem.Area & " · " & ThisItem.Actividad
+4.13 lblDrPill_4 y glCalDiaSets_2 (en conDrawerTL) — MODIFICAR
+
+Referencian varRegImport y colTrz, que no existen en esta app.
+
+Control	Propiedad	Fórmula
+lblDrPill_4	Visible	=false
+glCalDiaSets_2	Visible	=false
+lblCalDiaTit_2	Text	=gloEtapaSel.Etapa
+4.14 panelTL — MOVER
+
+Está dentro de glCalDiaSets_2 > Container80_4, lo que hace que el detalle de etapa se repita por cada fila. Muévelo como hijo directo de panelCalDia_2 y quita recCalCul_2 y Container80_4.
+
+lblTLDur.Fill — MODIFICAR (ya no hay ThisItem.Estatus):
+
+powerfx
+=ColorValue(hexLeaf)
+PARTE 5 — Button26 (“🔄 Recargar metas”): PARA QUÉ SIRVE Y CÓMO USARLO
+Qué hace hoy
+
+Button26.OnSelect ejecuta Select(btnRecalcCatalogo). Ese btnRecalcCatalogo es el motor viejo: calcula un promedio simple (TotalOps / TotalHoras) agrupado por Cultivo|TrialIntent|TipoOp|Program|Generation|MCT|SubActividad, sin filtros de calidad y sin percentiles. Sobrescribe RENDIMIENTOS_CATALOGO con claves que el nuevo sistema no sabe leer.
+
+Si lo ejecutas ahora, destruye el catálogo P25/P75/P90.
+
+Cómo debe quedar
+
+Hay que separar dos acciones distintas:
+
+Acción	Quién la hace	Cuándo	Dónde
+Recalcular metas (pesado, escribe en SharePoint)	btnCalcMetasRef	1 vez al mes, o tras cargar muchos registros nuevos	Pantalla scrRendimientos → conVista_AnaGlobal
+Recargar metas (ligero, solo lee)	Button26	Cada vez que entras a programar y alguien recalculó	Pantalla Personal → conProgramacion
+5.1 btnRecalcCatalogo — ELIMINAR
+
+Ubicación: Personal > btnRecalcCatalogo. Es el motor obsoleto; su lógica quedó reemplazada por btnCalcMetasRef.
+
+5.2 Button26 — MODIFICAR
+Propiedad	Fórmula
+Text	="🔄 Recargar metas (" & CountRows(colRendCat) & ")"
+Fill	=colDark
+Color	=colBlanco
+Width	=190
+Height	=32
+Tooltip	="Vuelve a leer el catálogo de metas P75 desde SharePoint. No recalcula: para eso usa 'Recalcular metas de referencia' en la pantalla de Análisis."
+
+OnSelect:
+
+powerfx
+=Refresh(RENDIMIENTOS_CATALOGO);;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+If(
+    gloActividadSel <> "" And CountRows(colSetsSel) > 0;
+    Select(btnResolverMeta)
+);;
+If(gloPasoProg = "plan"; Select(btnLoadPaso4));;
+Notify(
+    "🔄 Catálogo recargado: " & CountRows(colRendCat) & " metas (" &
+    CountRows(Filter(colRendCat; Nivel >= 5)) & " para programación).";
+    NotificationType.Success
+)
+5.3 lblEstadoMetas — AGREGAR
+Tipo: Label
+Ubicación: conProgramacion > "1" (después de Button26)
+Propiedad	Fórmula
+Text	=With({_f: Max(colRendCat; FechaCalculo)}; If(IsBlank(_f); "⚠️ Sin catálogo de metas"; "Metas calculadas el " & Text(_f; "[$-es]dd/mm/yyyy") & " (" & DateDiff(_f; Today(); TimeUnit.Days) & " días)"))
+Color	=With({_f: Max(colRendCat; FechaCalculo)}; If(IsBlank(_f) Or DateDiff(_f; Today(); TimeUnit.Days) > 45; ColorValue(hexDanger); ColorValue(hexMuted)))
+Size	=10
+Align	=Align.Center
+FillPortions	=1
+AlignInContainer	=AlignInContainer.Stretch
+PARTE 6 — PROTOCOLO DE OPERACIÓN DE LAS METAS
+
+Mensualmente (tú, como administrador):
+
+Pantalla scrRendimientos → botón 📊 Análisis.
+Fija dpMetaDesde = hace 180 días y dpMetaHasta = hoy.
+Pulsa ⚙️ Recalcular metas de referencia.
+Verifica el Notify: debe decir cuántas combinaciones son Alta / Media / Baja y cuántos registros válidos entraron de cuántos brutos. Si los válidos son menos del 40 % de los brutos, revisa si hay muchos cierres al día siguiente o jornadas >9 h.
+
+A diario (quien programa):
+
+Pantalla Personal → Programación.
+Lee lblEstadoMetas. Si está en rojo (>45 días), avisa al administrador.
+Pulsa 🔄 Recargar metas solo si alguien recalculó mientras la app estaba abierta.
+Sigue el flujo Ubicación → Sets → Actividad → Plan.
+
+Nunca: recalcular metas con el flujo de programación abierto a medias; el colRendCat en memoria quedaría desfasado del que ya resolvió btnResolverMeta.
