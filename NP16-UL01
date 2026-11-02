@@ -1,0 +1,626 @@
+0. VERIFICACIÓN DE BASES DE DATOS (hacer primero)
+
+Paso 1: en SharePoint, confirma que cada columna exista con este nombre y este tipo exacto.
+
+Lista	Columna	Tipo obligatorio
+ACCESOS_USUARIOS	Title	Una línea de texto (correo en minúsculas)
+	NombreUsuario	Una línea de texto
+	Rol	Una línea de texto (no Opción)
+	PermisosExtra, PermisosQuitar	Varias líneas de texto, texto sin formato
+	SedeGarita	Una línea de texto
+	Activo	Sí/No
+ROLES_PERMISOS	Title	Una línea de texto
+	Permisos	Varias líneas de texto, texto sin formato
+REGIST	FECHA	Fecha (solo fecha)
+	INGRESO, SALIDA	Fecha y hora
+	CODIGO, NOMBRE, TIPO, DEPARTAMENTO, GRUPO_JORNADA, AUTORIZA_EXCEPCION, VISITA_EMPRESA, VISITA_A, VISITA_MOTIVO, REGISTRA_INGRESO, REGISTRA_SALIDA	Una línea de texto
+	JUSTIFICACION, OBSERVACION	Varias líneas, texto sin formato
+	HORAS, HE_REALES, DIA_CONSECUTIVO	Número
+	DIA_LABORADO, DIA_DESCANSO, EXCEPCION	Sí/No
+	AREA	Opción: RD, CNP, VTI
+	CATEGORIA	Opción: los mismos valores de CATALOGO_PERSONAL1.Categoria y además V
+	ESTADO	Opción: ADENTRO, AFUERA, SIN SALIDA, DENEGADO
+CATALOGO_PERSONAL1	GrupoJornada, SEDE, CorreoSupervisor	Una línea de texto
+	MaxDiasConsecutivos, MaxDiasSemana, TopeDiarioHE	Número
+	ExcepcionHasta	Fecha
+ASISTENCIA_RESUMEN	Title, Nombre, EstadoSitio	Una línea de texto
+	UltimoIngreso, UltimaSalida	Fecha y hora
+	UltimoDiaLaborado	Fecha
+	DiasConsecutivos, DiasLaboradosAcum, HorasSitioAcum, HEDetectadasAcum	Número
+CONFIG_GRUPOS_JORNADA	Title, Descripcion, DiasLaborales	Una línea de texto
+	HorasDia, HorasUltimoDia	Número
+	Activo	Sí/No
+CONFIG_ACTIVIDADES_EVAL	Title, NivelCultivo	Una línea de texto
+	Activa	Sí/No
+CONFIG_AREAS_HORAS_EXTRAS	TopeDiarioHE, AlertaHESemana, MaxDiasConsecutivos, MaxDiasSemana, MaxSabDom	Número
+	CorreoResponsable, PermiteFinSemana, Activa	Una línea de texto (SI/NO)
+SOLICITUDES_PERMISOS	Estado, TipoPermiso, Codigo, NombrePersona, Departamento, SolicitadoPor, AutorizadoPor	Una línea de texto
+	FechaInicio, FechaFin, FechaSolicitud, FechaAutorizacion	Fecha y hora
+	Horas	Número
+	DiaCompleto	Sí/No
+
+En las tres columnas de Opción de REGIST, ve a Configuración de columna → “¿Permitir valores de relleno?” = Sí. Así un valor nuevo no rompe el Patch.
+
+Paso 2: en Power Apps, ve a Datos. En cada lista (REGIST, ROLES_PERMISOS, ACCESOS_USUARIOS, CATALOGO_PERSONAL1, ASISTENCIA_RESUMEN, CONFIG_*, SOLICITUDES_PERMISOS) abre ⋯ → Actualizar. Sin esto, la app no ve las columnas nuevas.
+
+1. APP
+1.1 App → Formulas — REEMPLAZAR estas 6 líneas
+
+Sin Coalesce sobre columnas que pueden venir vacías, para eliminar el error “argumentos no válidos”:
+
+powerfx
+gCorreoUsuario = Lower(Trim(User().Email));;
+gAccUsuario = LookUp(ACCESOS_USUARIOS; Title = gCorreoUsuario And Activo = true);;
+gAccRol = LookUp(ROLES_PERMISOS; Title = gAccUsuario.Rol);;
+gPermisosTxt = ";" & Lower(Substitute(gAccRol.Permisos & ";" & gAccUsuario.PermisosExtra; " "; "")) & ";";;
+gPermisosQuitarTxt = ";" & Lower(Substitute("" & gAccUsuario.PermisosQuitar; " "; "")) & ";";;
+gSedeGarita = If(IsBlank(gAccUsuario.SedeGarita); "RD"; gAccUsuario.SedeGarita);;
+
+Si Rol quedó creado como Opción, cambia la tercera línea a Title = gAccUsuario.Rol.Value. Lo recomendado es convertirlo a texto.
+
+1.2 App → OnStart — ELIMINAR texto suelto
+
+En la línea Clear(colInvSel);; Activar, borra la palabra Activar para que quede Clear(colInvSel);;.
+
+2. PANTALLA Personal
+Control	Ubicación	Propiedad	Fórmula
+drpCultivoProg	conProgramacion > conPaso3	ItemDisplayText	=Switch(ThisItem.Value; "Tomato"; "Tomate"; "Pepper"; "Chile"; "Melon"; "Melón"; "Watermelon"; "Sandía"; "Cucumber"; "Pepino"; ThisItem.Value)
+cmbCultivosEval	conEvalForm > conTarjeta	ItemDisplayText	=Switch(ThisItem.Value; "Tomato"; "Tomate"; "Pepper"; "Chile"; "Melon"; "Melón"; "Watermelon"; "Sandía"; "Cucumber"; "Pepino"; ThisItem.Value)
+cmbCultivosEval		SelectMultiple	=true
+drpJorGrupo	conVista_Jornada > conJorPersona	DefaultSelectedItems	=Filter(colGruposJornada; Title = Coalesce(gJorPersona.GrupoJornada; "L-V"))
+drpJorGrupo		SelectMultiple	=false
+lblPermRol	conVista_Accesos > conAccForm > galAccPermisos	Text	ver abajo
+btnCalcNotaEval	Personal (raíz)	Visible	=false (todo el código va solo en OnSelect; tu captura muestra que se pegó en Visible)
+galEvalAct	conEvalForm > conTarjeta	Items	ver abajo
+btnAsignarGrupoDepto	conVista_Jornada > conJorPersona	OnSelect	ver abajo
+
+lblPermRol.Text:
+
+powerfx
+=With(
+    { _p: Lower("" & cmbAccRol.Selected.Permisos) };
+    If(_p = "*" Or (";" & Lower(ThisItem.Clave) & ";") in (";" & _p & ";"); "✔ rol"; "")
+)
+
+galEvalAct.Items (sin funciones de usuario dentro de la galería):
+
+powerfx
+=Sort(
+    Filter(
+        colEvalEnCurso;
+        Not(RequiereCultivo)
+        Or IsEmpty(cmbCultivosEval.SelectedItems)
+        Or Cultivo in cmbCultivosEval.SelectedItems.Value
+        Or (Familia = "Solanáceas" And CountRows(Filter(cmbCultivosEval.SelectedItems; Value in ["Tomato"; "Pepper"])) > 0)
+        Or (Familia = "Cucurbitáceas" And CountRows(Filter(cmbCultivosEval.SelectedItems; Value in ["Melon"; "Watermelon"; "Cucumber"])) > 0)
+    );
+    Actividad & Cultivo;
+    SortOrder.Ascending
+)
+
+btnAsignarGrupoDepto.OnSelect (el ForAll ahora recorre una colección, no la misma lista que modifica):
+
+powerfx
+=With(
+    { _dep: gJorPersona.DEPARTAMENTO; _g: drpJorGrupo.Selected.Title };
+    ClearCollect(colTmpDepto; ShowColumns(Filter(CATALOGO_PERSONAL1; DEPARTAMENTO = _dep; Activo = "SI"); ID));;
+    Patch(
+        CATALOGO_PERSONAL1;
+        colTmpDepto;
+        ForAll(colTmpDepto As p; { GrupoJornada: _g })
+    );;
+    Set(gJorPersona; LookUp(CATALOGO_PERSONAL1; ID = gJorPersona.ID));;
+    Notify("✅ Grupo " & _g & " asignado a " & CountRows(colTmpDepto) & " personas de " & _dep & "."; NotificationType.Success)
+)
+3. PANTALLA REGISTROS — ESTRUCTURA (jerarquía y alineación)
+Control	Ubicación	Propiedad	Valor
+cntSP	REGISTROS	LayoutAlignItems	=LayoutAlignItems.Stretch
+cntSM	cntSP	Visible	=Not(gEsSoloGarita)
+conGarita	cntSP	LayoutAlignItems	=LayoutAlignItems.Stretch
+conGarita		FillPortions	=1
+conGarScan	conGarita	LayoutAlignItems	=LayoutAlignItems.Stretch
+conGarScan		FillPortions	=1
+conGarIzq	conGarScan	LayoutAlignItems	=LayoutAlignItems.Stretch
+conUltimoScan	conGarIzq	FillPortions	=1
+conUltimoScan		LayoutJustifyContent	=LayoutJustifyContent.Center
+conGarDer	conGarScan	FillPortions	=1
+galGarSede	conGarDer	Height	=40
+galGarSede		Items	ver §4.4
+txtGarBuscar	conGarDer	Visible	=gModoBusqueda
+hdrAdentros	conGarDer > hdrAdentro	FillPortions	=1
+Label204, Label205, Label206	hdrAdentros	Color	=RGBA(255; 255; 255; 1)
+galAdentro	MOVER: hoy está dentro de hdrAdentro. Córtalo y pégalo en conGarDer, debajo de hdrAdentro	FillPortions	=1
+galAdentro		TemplateSize	=40
+conFilaAd	galAdentro	Fill	=If(ThisItem.FECHA < Today(); RGBA(220; 38; 38; 0,12); RGBA(255; 255; 255; 1))
+conGarEvac	conGarita	LayoutAlignItems	=LayoutAlignItems.Stretch
+conGarEvac		FillPortions	=1
+galEvac	conGarEvac	FillPortions	=1
+Container113	galEvac	LayoutDirection	=LayoutDirection.Horizontal
+chkEvac	Container113	Width	=50
+lblEvacFila	Container113	FillPortions	=1
+Historial	conGarita	LayoutAlignItems	=LayoutAlignItems.Stretch
+Historial		FillPortions	=1
+Detalle	Historial	LayoutDirection	=LayoutDirection.Vertical
+Detalle		LayoutAlignItems	=LayoutAlignItems.Stretch
+Detalle		FillPortions	=1
+Detalle		Visible	=gHistVista = "Detalle"
+hdrHist	Detalle	FillPortions / Visible	=0 / =true
+hdrHFecha … hdrHNota (12 labels)	hdrHist	Color	=RGBA(255; 255; 255; 1)
+galHist	Detalle	FillPortions	=1
+conFilaHist	galHist	Width	=Parent.TemplateWidth
+conFilaHist		Height	=Parent.TemplateHeight
+conFilaHist		X / Y	(eliminar)
+Detalle_1	MOVER: hoy está dentro de Resumen. Córtalo y pégalo en Historial, debajo de Detalle	LayoutDirection	=LayoutDirection.Vertical
+Detalle_1		LayoutAlignItems	=LayoutAlignItems.Stretch
+Detalle_1		FillPortions	=1
+Detalle_1		Visible	=gHistVista = "Resumen"
+Resumen	conGarita	—	ELIMINAR (queda vacío; hoy aparece aunque estés en la pestaña Garita)
+hdrHistRes	Detalle_1	FillPortions / Visible	=0 / =true
+Labels de hdrHistRes	hdrHistRes	Color	=RGBA(255; 255; 255; 1)
+hdrHHEA (AGREGAR Label)	hdrHistRes, entre «HE REALES» y «DIFERENCIA»	Text / FillPortions / Color	="HE AUTORIZ." / =0,8 / =RGBA(255; 255; 255; 1)
+galHistRes	Detalle_1	FillPortions	=1
+hdrHistRes_1	galHistRes (fila)	Fill	=RGBA(255; 255; 255; 1)
+hdrHistRes_1		Visible	=true
+drpHistDepto, drpHistEstado, drpHistTipo	Historial > conHistFiltros	SelectMultiple	=false
+tmrSyncGarita	REGISTROS	Duration	=60000
+4. PANTALLA REGISTROS — LÓGICA
+4.1 REGISTROS → OnVisible — REEMPLAZAR (sin Navigate)
+powerfx
+=Set(gGarTab; If(fxPuede("garita"); "Scan"; fxPuede("garita_evacuacion"); "Evac"; "Hist"));;
+Set(gBusyScan; false);;
+Set(gScanCodigo; "");;
+Set(gModoBusqueda; false);;
+Set(gModoCamara; false);;
+Set(varPopVisita; false);;
+Set(varPopExcepcion; false);;
+Set(gReloj; Now());;
+Set(gUltimoScan; { Nombre: ""; Tipo: ""; Hora: DateAdd(Now(); -1; TimeUnit.Hours); Hex: "#E3E8DD"; Mensaje: "" });;
+Set(gHistDesde; Today());;
+Set(gHistHasta; Today());;
+Set(gHistVista; "Detalle");;
+Set(gEvacSoloFaltan; false);;
+If(
+    fxPuede("garita") Or fxPuede("garita_historial") Or fxPuede("garita_evacuacion");
+    ClearCollect(colConfigAreasHE; Filter(CONFIG_AREAS_HORAS_EXTRAS; Activa = "SI"));;
+    ClearCollect(colGruposJornada; Filter(CONFIG_GRUPOS_JORNADA; Activo = true));;
+    ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));;
+    Clear(colEvacPresentes);;
+    SetFocus(txtScan)
+)
+4.2 conSinAccesoGar — AGREGAR (reemplaza el Navigate que daba error)
+
+GroupContainer ManualLayout · hijo directo de REGISTROS, último en la lista para que quede encima.
+
+Propiedad	Fórmula
+Visible	=Not(fxPuede("garita") Or fxPuede("garita_historial") Or fxPuede("garita_evacuacion"))
+Width / Height	=Parent.Width / =Parent.Height
+Fill	=RGBA(16; 30; 44; 0,92)
+
+Hijos:
+
+Control	Tipo	Propiedad	Fórmula
+lblSinAccesoGar	Label	Text	="🔒 No tienes acceso al control de ingreso y salida."
+		Color / Size / Align	=RGBA(255; 255; 255; 1) / =20 / =Align.Center
+		Width / Height / X / Y	=Parent.Width / =60 / =0 / =Parent.Height / 2 - 60
+btnSalirSinAcceso	Classic/Button	Text	="← Volver"
+		OnSelect	=Navigate(Personal; ScreenTransition.None)
+		Visible	=fxPuede("personal") Or fxPuede("horasextras")
+		X / Y / Width	=(Parent.Width - 180) / 2 / =Parent.Height / 2 + 10 / =180
+4.3 Escáner y cursor — MODIFICAR / AGREGAR
+Control	Ubicación	Propiedad	Fórmula
+txtScan	conGarScan > conGarIzq	DisplayMode	=DisplayMode.Edit (si se deshabilita, pierde el foco y el siguiente gafete no entra)
+txtScan		Visible	=true
+txtScan		DelayOutput	=false
+txtScan		EnableSpellCheck	=false
+txtScan		Clear	=false
+txtScan		TabIndex	=0
+txtScan		AlignInContainer	=AlignInContainer.Stretch
+txtScan		BorderThickness	=3
+txtScan		BorderColor	=If(gBusyScan; ColorValue(hexAmber); ColorValue(hexLeaf))
+txtScan		OnChange	=If(Not(IsBlank(Trim(Self.Text))); Set(gScanCodigo; Self.Text);; Select(btnProcesarScan))
+bcScan	conGarIzq	Visible	=gModoCamara
+btnFocoScan	conGarIzq	OnSelect	=Set(gModoBusqueda; false);; Set(gModoCamara; false);; Reset(txtGarBuscar);; SetFocus(txtScan)
+btnFocoScan		Text	="🎯 Activar lector"
+
+btnModoCamara — AGREGAR · Classic/Button · conGarIzq (después de btnFocoScan)
+
+Propiedad	Fórmula
+Text	=If(gModoCamara; "⌨️ Usar lector / teclado"; "📷 Usar cámara (teléfono/tablet)")
+OnSelect	=Set(gModoCamara; Not(gModoCamara));; If(Not(gModoCamara); SetFocus(txtScan))
+
+btnBuscarAdentro — AGREGAR · Classic/Button · conGarDer (antes de txtGarBuscar)
+
+Propiedad	Fórmula
+Text	=If(gModoBusqueda; "✖ Cerrar búsqueda"; "🔍 Buscar persona adentro")
+OnSelect	=Set(gModoBusqueda; Not(gModoBusqueda));; If(gModoBusqueda; SetFocus(txtGarBuscar); Reset(txtGarBuscar);; SetFocus(txtScan))
+
+tmrFocoScan — AGREGAR · Timer · hijo directo de REGISTROS (devuelve el cursor al lector cada 1,5 s)
+
+Propiedad	Fórmula
+Duration	=1500
+Repeat / AutoStart	=true / =true
+Visible	=false
+OnTimerEnd	=If(gGarTab = "Scan" And Not(varPopVisita) And Not(varPopExcepcion) And Not(gModoBusqueda) And Not(gModoCamara) And Not(gBusyScan); SetFocus(txtScan))
+
+Configura el lector (USB, Bluetooth o de mesa) en modo teclado HID con sufijo Enter. Así cada gafete entra solo, se procesa y el cursor regresa a txtScan sin que nadie toque la pantalla.
+
+4.4 galGarSede → Items — REEMPLAZAR (AREA es Opción y no se puede agrupar directo)
+powerfx
+=ForAll(
+    Distinct(colAdentro; AREA.Value) As s;
+    {
+        Sede:     If(IsBlank(s.Value); "Sin sede"; s.Value);
+        Personas: CountRows(Filter(colAdentro; AREA.Value = s.Value))
+    }
+)
+4.5 btnEjecutarScan → OnSelect — REEMPLAZAR COMPLETO
+
+Este reemplazo quita el texto suelto, guarda AREA y CATEGORIA como {Value: } y corrige ESTADO.Value en _hPrev:
+
+powerfx
+=If(
+    gAccionScan = "CIERRE_E_INGRESO";
+    Patch(
+        REGIST;
+        gRegAbierto;
+        {
+            ESTADO:       {Value: "SIN SALIDA"};
+            DIA_LABORADO: true;
+            OBSERVACION:  "Salida no marcada. Cerrado automáticamente al registrar ingreso del " & Text(Now(); "dd/mm/yyyy hh:mm")
+        }
+    );;
+    Patch(
+        ASISTENCIA_RESUMEN;
+        Coalesce(gResumenScan; Defaults(ASISTENCIA_RESUMEN));
+        {
+            Title:             gCodScan;
+            Nombre:            gPersonaScan.Nombre;
+            UltimoDiaLaborado: gUltEf;
+            DiasConsecutivos:  gConsEf;
+            DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(IsBlank(gResumenScan.UltimoDiaLaborado) Or gUltEf <> gResumenScan.UltimoDiaLaborado; 1; 0)
+        }
+    );;
+    Set(gResumenScan; LookUp(ASISTENCIA_RESUMEN; Title = gCodScan));;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    Set(gAccionScan; "INGRESO")
+);;
+If(
+    gAccionScan = "INGRESO";
+    Set(
+        gRegNuevo;
+        Patch(
+            REGIST;
+            Defaults(REGIST);
+            {
+                Title:              gCodScan & " - " & Text(Today(); "yyyymmdd");
+                FECHA:              Today();
+                CODIGO:             gCodScan;
+                NOMBRE:             gPersonaScan.Nombre;
+                TIPO:               "Empleado";
+                AREA:               {Value: If(IsBlank(gPersonaScan.SEDE); gSedeGarita; gPersonaScan.SEDE)};
+                DEPARTAMENTO:       gPersonaScan.DEPARTAMENTO;
+                CATEGORIA:          {Value: gPersonaScan.Categoria.Value};
+                GRUPO_JORNADA:      If(IsBlank(gPersonaScan.GrupoJornada); "L-V"; gPersonaScan.GrupoJornada);
+                INGRESO:            Now();
+                ESTADO:             {Value: "ADENTRO"};
+                DIA_LABORADO:       false;
+                DIA_CONSECUTIVO:    gRachaScan;
+                DIA_DESCANSO:       Not(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()));
+                EXCEPCION:          gExcepcion;
+                JUSTIFICACION:      gJustifExc;
+                AUTORIZA_EXCEPCION: gAutorizaExc;
+                REGISTRA_INGRESO:   gCorreoUsuario
+            }
+        )
+    );;
+    Collect(colAdentro; gRegNuevo);;
+    Patch(
+        ASISTENCIA_RESUMEN;
+        Coalesce(gResumenScan; Defaults(ASISTENCIA_RESUMEN));
+        { Title: gCodScan; Nombre: gPersonaScan.Nombre; EstadoSitio: "ADENTRO"; UltimoIngreso: Now() }
+    );;
+    If(
+        gExcepcion And gCorreoAlertaScan <> "";
+        IfError(
+            Office365Outlook.SendEmailV2(
+                gCorreoAlertaScan;
+                "⛔ Ingreso por excepción: " & gPersonaScan.Nombre;
+                "<div style='font-family:Segoe UI'><p><b>" & EncodeHTML(gPersonaScan.Nombre) & "</b> (" & gCodScan & ") ingresó el " & Text(Now(); "dd/mm/yyyy hh:mm") & " superando el límite de días laborados.</p>" &
+                "<p>Día consecutivo: <b>" & gRachaScan & "</b> · Días en 7: <b>" & gDias7Scan & "</b></p>" &
+                "<p>Justificación: <i>" & EncodeHTML(gJustifExc) & "</i><br>Autorizó: <b>" & EncodeHTML(gAutorizaExc) & "</b><br>Registró: " & gCorreoUsuario & "</p></div>";
+                { Importance: "High" }
+            );
+            Notify("No se pudo enviar el aviso al supervisor."; NotificationType.Warning)
+        )
+    );;
+    Set(
+        gUltimoScan;
+        {
+            Nombre:  gPersonaScan.Nombre;
+            Tipo:    "INGRESO";
+            Hora:    Now();
+            Hex:     If(gExcepcion; "#E8A93C"; "#2F9E44");
+            Mensaje: gPersonaScan.DEPARTAMENTO & " · día " & gRachaScan & " consecutivo" &
+                     If(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()); ""; " · DÍA DE DESCANSO según su jornada") &
+                     If(gExcepcion; " · INGRESO POR EXCEPCIÓN"; "") &
+                     If(IsBlank(gPermisoHoy); ""; " · 📝 permiso " & gPermisoHoy.TipoPermiso & " " & Text(gPermisoHoy.FechaInicio; "hh:mm") & "-" & Text(gPermisoHoy.FechaFin; "hh:mm"))
+        }
+    )
+);;
+If(
+    gAccionScan = "SALIDA";
+    With(
+        {
+            _h:     Round(DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) / 60; 2);
+            _hPrev: Sum(Filter(colDiaScan; ID <> gRegAbierto.ID And ESTADO.Value = "AFUERA"); Coalesce(HORAS; 0));
+            _esp:   fxHorasEsperadas(gGrupoScan.DiasLaborales; gGrupoScan.HorasDia; gGrupoScan.HorasUltimoDia; gRegAbierto.FECHA)
+        };
+        With(
+            {
+                _hDia:      _hPrev + _h;
+                _yaContado: gResumenScan.UltimoDiaLaborado = gRegAbierto.FECHA
+            };
+            With(
+                { _heSeg: Round(Max(0; _hDia - _esp) - Max(0; _hPrev - _esp); 2) };
+                Patch(
+                    REGIST;
+                    gRegAbierto;
+                    {
+                        SALIDA:          Now();
+                        ESTADO:          {Value: "AFUERA"};
+                        HORAS:           _h;
+                        DIA_LABORADO:    _hDia >= HorasMinDiaLaborado;
+                        HE_REALES:       _heSeg;
+                        REGISTRA_SALIDA: gCorreoUsuario
+                    }
+                );;
+                Patch(
+                    ASISTENCIA_RESUMEN;
+                    Coalesce(gResumenScan; Defaults(ASISTENCIA_RESUMEN));
+                    {
+                        Title:             gCodScan;
+                        Nombre:            gPersonaScan.Nombre;
+                        EstadoSitio:       "AFUERA";
+                        UltimaSalida:      Now();
+                        HorasSitioAcum:    Coalesce(gResumenScan.HorasSitioAcum; 0) + _h;
+                        HEDetectadasAcum:  Coalesce(gResumenScan.HEDetectadasAcum; 0) + _heSeg;
+                        DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(_hDia >= HorasMinDiaLaborado And Not(_yaContado); 1; 0);
+                        DiasConsecutivos:  If(
+                                               _hDia >= HorasMinDiaLaborado And Not(_yaContado);
+                                               If(gResumenScan.UltimoDiaLaborado = DateAdd(gRegAbierto.FECHA; -1; TimeUnit.Days); Coalesce(gResumenScan.DiasConsecutivos; 0) + 1; 1);
+                                               Coalesce(gResumenScan.DiasConsecutivos; 0)
+                                           );
+                        UltimoDiaLaborado: If(_hDia >= HorasMinDiaLaborado; gRegAbierto.FECHA; gResumenScan.UltimoDiaLaborado)
+                    }
+                );;
+                RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+                Set(
+                    gUltimoScan;
+                    {
+                        Nombre:  gPersonaScan.Nombre;
+                        Tipo:    "SALIDA";
+                        Hora:    Now();
+                        Hex:     "#2563EB";
+                        Mensaje: Text(_h; "[$-es]0,0") & " h en este tramo · día: " & Text(_hDia; "[$-es]0,0") & " h" &
+                                 If(_hDia >= HorasMinDiaLaborado; " · ✔ día laborado"; " · ✖ aún no completa " & HorasMinDiaLaborado & " h") &
+                                 If(_heSeg > 0; " · HE detectadas: " & Text(_heSeg; "[$-es]0,0") & " h"; "")
+                    }
+                )
+            )
+        )
+    )
+);;
+If(
+    gAccionScan = "VISITA_CIERRE_NUEVA";
+    Patch(REGIST; gRegAbierto; { ESTADO: {Value: "SIN SALIDA"}; OBSERVACION: "Carnet no devuelto. Cerrado al reasignar el " & Text(Now(); "dd/mm/yyyy hh:mm") });;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    Set(gAccionScan; "VISITA_NUEVA")
+);;
+If(gAccionScan = "VISITA_NUEVA"; Set(varPopVisita; true));;
+If(
+    gAccionScan = "VISITA_SALIDA";
+    Patch(
+        REGIST;
+        gRegAbierto;
+        { SALIDA: Now(); ESTADO: {Value: "AFUERA"}; HORAS: Round(DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) / 60; 2); REGISTRA_SALIDA: gCorreoUsuario }
+    );;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    Set(gUltimoScan; { Nombre: gRegAbierto.NOMBRE; Tipo: "SALIDA"; Hora: Now(); Hex: "#2563EB"; Mensaje: "Visitante · carnet " & gCodScan & " devuelto" })
+);;
+If(gAccionScan = "BLOQUEO"; Set(varPopExcepcion; true));;
+If(
+    gAccionScan = "AVISO";
+    Set(gUltimoScan; { Nombre: If(IsBlank(gPersonaScan.Nombre); gCodScan; gPersonaScan.Nombre); Tipo: "AVISO"; Hora: Now(); Hex: "#E8A93C"; Mensaje: gMsgScan })
+);;
+If(
+    gAccionScan = "ERROR";
+    Set(gUltimoScan; { Nombre: gCodScan; Tipo: "ERROR"; Hora: Now(); Hex: "#DC2626"; Mensaje: gMsgScan })
+);;
+Set(gBusyScan; varPopVisita Or varPopExcepcion);;
+Reset(txtScan);;
+If(Not(gBusyScan); SetFocus(txtScan); varPopVisita; SetFocus(txtVisNombre); SetFocus(txtExcJustif))
+4.6 btnGuardarVisita → OnSelect (conPopVisita > conVisCard) — REEMPLAZAR
+powerfx
+=If(
+    Len(Trim(txtVisNombre.Text)) < 3;
+    Notify("⚠️ Escribe el nombre del visitante."; NotificationType.Error);
+    Set(
+        gRegNuevo;
+        Patch(
+            REGIST;
+            Defaults(REGIST);
+            {
+                Title:            gCodScan & " - " & Text(Today(); "yyyymmdd");
+                FECHA:            Today();
+                CODIGO:           gCodScan;
+                NOMBRE:           Upper(Trim(txtVisNombre.Text));
+                TIPO:             "Visitante";
+                AREA:             {Value: gSedeGarita};
+                DEPARTAMENTO:     "VISITANTE";
+                CATEGORIA:        {Value: "V"};
+                INGRESO:          Now();
+                ESTADO:           {Value: "ADENTRO"};
+                DIA_LABORADO:     false;
+                VISITA_EMPRESA:   Trim(txtVisEmpresa.Text);
+                VISITA_A:         Trim(txtVisA.Text);
+                VISITA_MOTIVO:    Trim(txtVisMotivo.Text);
+                REGISTRA_INGRESO: gCorreoUsuario
+            }
+        )
+    );;
+    Collect(colAdentro; gRegNuevo);;
+    Set(gUltimoScan; { Nombre: gRegNuevo.NOMBRE; Tipo: "INGRESO"; Hora: Now(); Hex: "#2563EB"; Mensaje: "Visitante · carnet " & gCodScan & If(IsBlank(Trim(txtVisA.Text)); ""; " · visita a " & Trim(txtVisA.Text)) });;
+    Set(varPopVisita; false);;
+    Set(gBusyScan; false);;
+    Reset(txtVisNombre);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);;
+    SetFocus(txtScan)
+)
+4.7 btnNoPermitirExc → OnSelect (conPopExcepcion > conExcCard) — REEMPLAZAR
+powerfx
+=Patch(
+    REGIST;
+    Defaults(REGIST);
+    {
+        Title:            gCodScan & " - " & Text(Today(); "yyyymmdd");
+        FECHA:            Today();
+        CODIGO:           gCodScan;
+        NOMBRE:           gPersonaScan.Nombre;
+        TIPO:             "Empleado";
+        AREA:             {Value: If(IsBlank(gPersonaScan.SEDE); gSedeGarita; gPersonaScan.SEDE)};
+        DEPARTAMENTO:     gPersonaScan.DEPARTAMENTO;
+        CATEGORIA:        {Value: gPersonaScan.Categoria.Value};
+        INGRESO:          Now();
+        ESTADO:           {Value: "DENEGADO"};
+        DIA_LABORADO:     false;
+        OBSERVACION:      gMsgScan;
+        REGISTRA_INGRESO: gCorreoUsuario
+    }
+);;
+Set(gUltimoScan; { Nombre: gPersonaScan.Nombre; Tipo: "DENEGADO"; Hora: Now(); Hex: "#DC2626"; Mensaje: "Superó el límite de días. No se permitió el ingreso." });;
+Set(varPopExcepcion; false);;
+Set(gBusyScan; false);;
+Reset(txtExcJustif);;
+Reset(txtExcAutoriza);;
+SetFocus(txtScan)
+4.8 btnHistFiltrar → OnSelect (REGISTROS raíz) — REEMPLAZAR
+
+Hoy, con los combobox vacíos (Selected en blanco), el filtro deja la tabla sin registros.
+
+powerfx
+=ClearCollect(
+    colHistFiltrado;
+    Filter(
+        colHist;
+        IsBlank(Trim(txtHistBuscar.Text)) Or StartsWith(NOMBRE; Trim(txtHistBuscar.Text)) Or StartsWith(CODIGO; Upper(Trim(txtHistBuscar.Text)));
+        IsBlank(drpHistDepto.Selected.Value) Or DEPARTAMENTO = drpHistDepto.Selected.Value;
+        IsBlank(drpHistEstado.Selected.Value) Or drpHistEstado.Selected.Value = "Todos" Or ESTADO.Value = drpHistEstado.Selected.Value;
+        IsBlank(drpHistTipo.Selected.Value) Or drpHistTipo.Selected.Value = "Todos" Or If(IsBlank(TIPO); If(CATEGORIA.Value = "V"; "Visitante"; "Empleado"); TIPO) = drpHistTipo.Selected.Value
+    )
+);;
+ClearCollect(
+    colHistResumen;
+    ForAll(
+        GroupBy(
+            Filter(colHistFiltrado; TIPO <> "Visitante" And CATEGORIA.Value <> "V");
+            'CODIGO'; 'NOMBRE'; 'DEPARTAMENTO'; '_d'
+        ) As g;
+        With(
+            {
+                _h:   Round(Sum(g._d; Coalesce(HORAS; 0)); 2);
+                _heR: Round(Sum(g._d; Coalesce(HE_REALES; 0)); 2);
+                _heA: Round(Sum(Filter(colHEHist; Codigo = g.CODIGO); HorasSolicitadas); 2)
+            };
+            {
+                CODIGO:        g.CODIGO;
+                NOMBRE:        g.NOMBRE;
+                DEPARTAMENTO:  g.DEPARTAMENTO;
+                Dias:          CountRows(Distinct(Filter(g._d; DIA_LABORADO = true Or ESTADO.Value = "SIN SALIDA"); FECHA));
+                Horas:         _h;
+                HEReales:      _heR;
+                HEAutorizadas: _heA;
+                Diferencia:    Round(_heR - _heA; 2);
+                SinSalida:     CountRows(Filter(g._d; ESTADO.Value = "SIN SALIDA"));
+                Excepciones:   CountRows(Filter(g._d; EXCEPCION = true));
+                Denegados:     CountRows(Filter(g._d; ESTADO.Value = "DENEGADO"))
+            }
+        )
+    )
+)
+4.9 btnHistExcel → OnSelect (Historial > conHistFiltros) — REEMPLAZAR
+powerfx
+=If(
+    gHistVista = "Detalle";
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistFiltrado; FECHA & NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Fecha:         Text(r.FECHA; "dd/mm/yyyy");
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Tipo:          If(IsBlank(r.TIPO); If(r.CATEGORIA.Value = "V"; "Visitante"; "Empleado"); r.TIPO);
+                    Departamento:  r.DEPARTAMENTO;
+                    Sede:          r.AREA.Value;
+                    Grupo:         r.GRUPO_JORNADA;
+                    Ingreso:       Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                    Salida:        If(IsBlank(r.SALIDA); ""; Text(r.SALIDA; "dd/mm/yyyy hh:mm"));
+                    Horas:         Coalesce(r.HORAS; 0);
+                    DiaLaborado:   If(r.DIA_LABORADO; "Sí"; "No");
+                    HEReales:      Coalesce(r.HE_REALES; 0);
+                    Estado:        r.ESTADO.Value;
+                    DiaDescanso:   If(r.DIA_DESCANSO; "Sí"; "No");
+                    Excepcion:     If(r.EXCEPCION; "Sí"; "No");
+                    Justificacion: "" & r.JUSTIFICACION;
+                    Autorizo:      "" & r.AUTORIZA_EXCEPCION;
+                    VisitaEmpresa: "" & r.VISITA_EMPRESA;
+                    VisitaA:       "" & r.VISITA_A;
+                    Observacion:   "" & r.OBSERVACION
+                }
+            );
+            JSONFormat.Compact
+        )
+    );;
+    Set(gColsExp; "Fecha;Codigo;Nombre;Tipo;Departamento;Sede;Grupo;Ingreso;Salida;Horas;DiaLaborado;HEReales;Estado;DiaDescanso;Excepcion;Justificacion;Autorizo;VisitaEmpresa;VisitaA;Observacion");
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistResumen; NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Codigo: r.CODIGO; Nombre: r.NOMBRE; Departamento: r.DEPARTAMENTO;
+                    DiasLaborados: r.Dias; Horas: r.Horas; HEReales: r.HEReales;
+                    HEAutorizadas: r.HEAutorizadas; Diferencia: r.Diferencia;
+                    SinSalida: r.SinSalida; Excepciones: r.Excepciones; Denegados: r.Denegados
+                }
+            );
+            JSONFormat.Compact
+        )
+    );;
+    Set(gColsExp; "Codigo;Nombre;Departamento;DiasLaborados;Horas;HEReales;HEAutorizadas;Diferencia;SinSalida;Excepciones;Denegados")
+);;
+IfError(
+    Set(
+        gUrlExp;
+        ExportarExcelGenerico.Run(
+            "Asistencia_" & gHistVista & "_" & Text(gHistDesde; "yyyymmdd") & "_" & Text(gHistHasta; "yyyymmdd");
+            gHistVista;
+            gColsExp;
+            gJsonExp
+        ).fileurl
+    );
+    Set(gUrlExp; "")
+);;
+If(
+    IsBlank(gUrlExp);
+    Notify("❌ No se pudo generar el Excel. Verifica que el flujo ExportarExcelGenerico esté agregado a la app."; NotificationType.Error);
+    Launch(gUrlExp);;
+    Notify("📄 Excel generado."; NotificationType.Success)
+)
+5. PRUEBA FINAL (en este orden)
+Comprobador de aplicaciones (estetoscopio) → debe quedar en 0 errores en App, Personal y REGISTROS.
+Entra a REGISTROS. Sin tocar nada, escanea un gafete. Debe pintarse verde ✅ INGRESO y el cursor debe volver solo a txtScan.
+Escanea el mismo gafete de nuevo antes de 10 min. Debe aparecer ⚠️ AVISO sin duplicar el registro.
+Escanea el mismo gafete después de 10 min. Debe aparecer 👋 SALIDA con las horas.
+Escanea VIS-01. Se abre el popup de visitante; al guardar, el cursor regresa al lector.
+Toca 🔍 Buscar persona adentro y escribe. El cursor no debe saltar al lector hasta que cierres la búsqueda.
