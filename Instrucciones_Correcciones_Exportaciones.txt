@@ -1,0 +1,1120 @@
+INSTRUCCIONES DE CORRECCIÓN, DISEÑO Y EXPORTACIONES (EXCEL / PDF)
+App: Personal + REGISTROS (garita) + scrRendimientos
+Fecha: 02/11/2026
+Sintaxis: Power Fx en español (separador ";" · encadenado ";;" · decimal con coma)
+
+======================================================================
+CONTENIDO
+======================================================================
+1. Escáner sin Enter — REGISTROS
+2. scrRendimientos — error de Navigate en OnVisible
+3. Orden y diseño de secciones — Personal
+   3.1 Horas Extras > Reglas y Áreas
+   3.2 Horas Extras > Acumulado
+   3.3 Permisos
+   3.4 Jornadas y límites
+   3.5 Accesos
+4. Script de Excel y flujos (Excel y PDF)
+5. Botones de descarga en cada pantalla
+   5.1 Botón de envío (uno por pantalla)
+   5.2 Personal — Distribución diaria
+   5.3 Personal — Horas extras (Acumulado)
+   5.4 Personal — Permisos
+   5.5 REGISTROS — Historial (Excel + PDF) y Evacuación (PDF)
+   5.6 scrRendimientos — Análisis global
+6. Prueba final
+
+
+======================================================================
+1. ESCÁNER SIN ENTER — PANTALLA REGISTROS
+======================================================================
+
+El txtScan clásico sí tiene OnChange, pero en ese control OnChange solo se
+dispara al presionar Enter o al salir del campo. Ninguna fórmula lo vuelve
+automático. La entrada de texto MODERNA con "Desencadenar salida = Retrasado"
+ejecuta OnChange sola, medio segundo después del último carácter. Así no hace
+falta Enter.
+
+1.1 App > Formulas — AGREGAR
+----------------------------------------------------------------------
+LargoMinCodigo = 4;;
+
+1.2 txtScan (clásico) — ELIMINAR
+----------------------------------------------------------------------
+Ubicación: REGISTROS > cntSP > conGarita > conGarScan > conGarIzq
+
+1.3 txtScan (moderno) — AGREGAR con el MISMO nombre
+----------------------------------------------------------------------
+Insertar > Entrada de texto (moderna)
+Ubicación: conGarIzq, primer hijo (arriba de bcScan)
+
+  Value ............................ =""
+  Placeholder ...................... ="📷 Escanee su gafete…"
+  Desencadenar salida (TriggerOutput)  En el panel derecho: Retrasado (Delayed)
+  OnChange ......................... =If(Len(Trim(Self.Value)) >= LargoMinCodigo; Set(gScanCodigo; Self.Value);; Select(btnProcesarScan))
+  DisplayMode ...................... =DisplayMode.Edit
+  Height ........................... =64
+  Size ............................. =22
+  Align ............................ =Align.Center
+  AlignInContainer ................. =AlignInContainer.Stretch
+
+Como conserva el nombre txtScan, SetFocus(txtScan), Reset(txtScan) y
+tmrFocoScan siguen funcionando sin cambios.
+
+Configuración del lector: modo TECLADO HID y con el IDIOMA DE TECLADO IGUAL
+AL DE LA PC (Español Latinoamérica). Si no coinciden, el guion de VIS-01 llega
+como otro carácter y el código no se encuentra. Prueba escaneando en el Bloc de
+notas: debe aparecer el código exacto.
+
+
+======================================================================
+2. scrRendimientos — ERROR DE NAVIGATE EN OnVisible
+======================================================================
+
+2.1 scrRendimientos > OnVisible — REEMPLAZAR
+----------------------------------------------------------------------
+=If(
+    fxPuede("rendimientos");
+    Refresh(DATASUMMARY1);;
+    Refresh(REGISTRO_PERSONAL1);;
+    If(IsBlank(gVista); Set(gVista; "Sets"))
+)
+
+2.2 conSinAccesoRend — AGREGAR
+----------------------------------------------------------------------
+GroupContainer ManualLayout · hijo directo de scrRendimientos, ÚLTIMO en el
+árbol (para que quede encima de todo).
+
+  Visible ......... =Not(fxPuede("rendimientos"))
+  Width ........... =Parent.Width
+  Height .......... =Parent.Height
+  Fill ............ =RGBA(16; 30; 44; 0,92)
+
+  Hijo lblSinAccesoRend (Label)
+    Text .......... ="🔒 No tienes acceso a Rendimientos."
+    Color ......... =RGBA(255; 255; 255; 1)
+    Size .......... =20
+    Align ......... =Align.Center
+    X ............. =0
+    Y ............. =Parent.Height / 2 - 60
+    Width ......... =Parent.Width
+    Height ........ =60
+
+  Hijo btnSalirSinAccesoRend (Classic/Button)
+    Text .......... ="← Volver"
+    OnSelect ...... =Navigate(Personal; ScreenTransition.None)
+    X ............. =(Parent.Width - 180) / 2
+    Y ............. =Parent.Height / 2 + 10
+    Width ......... =180
+
+
+======================================================================
+3. ORDEN Y DISEÑO DE SECCIONES — PANTALLA Personal
+======================================================================
+
+----------------------------------------------------------------------
+3.1 Horas Extras > pestaña ⚙️ Reglas y Áreas (conTab_General_1)
+----------------------------------------------------------------------
+
+PESTAÑA
+  btnTabGeneral1_1 (conVista_HorasExtras > cntpestañashoras)
+    OnSelect ...... =ClearCollect(colCfgCatTodas; CONFIG_AREAS_HORAS_EXTRAS);; Set(gTab; "General")
+    Text .......... ="⚙️ Reglas y Áreas"
+  conTab_General_1 (conVista_HorasExtras)
+    FillPortions .. =1
+    LayoutGap ..... =6
+    Padding (4) ... =8
+    Fill .......... =clrSurface
+
+BARRA SUPERIOR Container3_6
+  lblTopeGeneralLV ...... ELIMINAR
+  txtTopeGeneralLV ...... ELIMINAR
+  lblInfoJornada40h ..... ELIMINAR
+  txtNuevaAreaNombre .... HintText: ="DEPARTAMENTO exacto (ej. CROP / PROTECCIÓN VEGETAL)"
+  btnAgregarAreaCat ..... OnSelect: (ver abajo)
+  lblReglasInfo ......... AGREGAR (Label, último hijo)
+    Text ........ ="Reglas por categoría. Lo que dejes vacío en la persona (Jornadas y límites) usa esta regla."
+    FillPortions  =1
+    Size ........ =10
+    Color ....... =ColorValue(hexMuted)
+
+btnAgregarAreaCat.OnSelect:
+=With(
+    { _n: Upper(Trim(txtNuevaAreaNombre.Text)) };
+    If(
+        IsBlank(_n);
+        Notify("⚠️ Escribe el nombre exacto del departamento."; NotificationType.Error);
+        !IsBlank(LookUp(CONFIG_AREAS_HORAS_EXTRAS; Title = _n));
+        Notify("⚠️ Esa categoría ya existe."; NotificationType.Warning);
+        Patch(
+            CONFIG_AREAS_HORAS_EXTRAS;
+            Defaults(CONFIG_AREAS_HORAS_EXTRAS);
+            {
+                Title:               _n;
+                TopeDiarioHE:        TopeDiarioHEDefault;
+                AlertaHESemana:      AlertaHESemanaDefault;
+                MaxDiasConsecutivos: MaxDiasConsecDefault;
+                MaxDiasSemana:       MaxDiasSemanaDefault;
+                PermiteFinSemana:    "SI";
+                MaxSabDom:           8;
+                Activa:              "SI"
+            }
+        );;
+        ClearCollect(colCfgCatTodas; CONFIG_AREAS_HORAS_EXTRAS);;
+        ClearCollect(colConfigAreasHE; Filter(CONFIG_AREAS_HORAS_EXTRAS; Activa = "SI"));;
+        Reset(txtNuevaAreaNombre);;
+        Notify("✅ Categoría " & _n & " agregada con valores por defecto."; NotificationType.Success)
+    )
+)
+
+TABLA Container46_1
+  Container46_1
+    Height ............ (eliminar la propiedad)
+    FillPortions ...... =1
+    AlignInContainer .. =AlignInContainer.Stretch
+  Container52_14 (encabezado)
+    Fill .............. =ColorValue(hexInk)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    X / Y ............. (eliminar)
+  galConfigAreasUnificada
+    Items ............. =Sort(colCfgCatTodas; Title; SortOrder.Ascending)
+    FillPortions ...... =1
+    TemplateSize ...... =48
+
+ENCABEZADO: eliminar los 7 labels de Container52_14 (Label50_41, Label50_42,
+Label133_7, Label50_45, Label134_7, Label55_10, Label51_22) y agregar estos 10
+en este orden. Todos: Color = RGBA(255; 255; 255; 1) · FontWeight = FontWeight.Bold
+· Size = 10 · Align = Align.Center
+
+  Control          Text                       FillPortions
+  hdrCfgArea       ="Área / Departamento"     =1,6
+  hdrCfgTopeDia    ="HE por día"              =0,8
+  hdrCfgAlerta     ="Alerta HE semana"        =0,9
+  hdrCfgMaxCons    ="Máx. días consec."       =0,9
+  hdrCfgMaxSem     ="Máx. días / semana"      =0,9
+  hdrCfgFDS        ="HE en descanso"          =1
+  hdrCfgMaxFDS     ="Máx. HE descanso"        =0,8
+  hdrCfgCorreo     ="Correo responsable"      =1,8
+  hdrCfgActiva     ="Activa"                  =0,7
+  hdrCfgGuardar    ="Guardar"                 =0,8
+
+FILA Container20_5 (dentro de galConfigAreasUnificada)
+  LayoutAlignItems = Center · Fill = RGBA(255; 255; 255; 1) · PaddingLeft/Right = 6
+
+  txtHorasLJFila ....... ELIMINAR
+  txtHorasVieFila ...... ELIMINAR
+  txtTopeSemFila ....... ELIMINAR
+  lblNombreAreaCfg ..... MODIFICAR
+    Text ............... ="📍 " & ThisItem.Title
+    FillPortions ....... =1,6
+  txtCfgTopeDia ........ AGREGAR (Classic/TextInput)
+    Default ............ =Text(Coalesce(ThisItem.TopeDiarioHE; TopeDiarioHEDefault))
+    Format ............. =TextFormat.Number
+    FillPortions ....... =0,8
+    Align .............. =Align.Center
+  txtCfgAlerta ......... AGREGAR (Classic/TextInput)
+    Default ............ =Text(Coalesce(ThisItem.AlertaHESemana; AlertaHESemanaDefault))
+    Format ............. =TextFormat.Number
+    FillPortions ....... =0,9
+    Align .............. =Align.Center
+  txtCfgMaxCons ........ AGREGAR (Classic/TextInput)
+    Default ............ =Text(Coalesce(ThisItem.MaxDiasConsecutivos; MaxDiasConsecDefault))
+    Format ............. =TextFormat.Number
+    FillPortions ....... =0,9
+    Align .............. =Align.Center
+  txtCfgMaxSem ......... AGREGAR (Classic/TextInput)
+    Default ............ =Text(Coalesce(ThisItem.MaxDiasSemana; MaxDiasSemanaDefault))
+    Format ............. =TextFormat.Number
+    FillPortions ....... =0,9
+    Align .............. =Align.Center
+  btnToggleFDSFila ..... MODIFICAR
+    FillPortions ....... =1
+    OnSelect ........... (ver abajo)
+  txtMaxSabDomFila ..... MODIFICAR
+    Default ............ =Text(Coalesce(ThisItem.MaxSabDom; 8))
+    Format ............. =TextFormat.Number
+    FillPortions ....... =0,8
+    Width .............. (eliminar)
+  txtCfgCorreo ......... AGREGAR (Classic/TextInput)
+    Default ............ =Coalesce(ThisItem.CorreoResponsable; "")
+    HintText ........... ="correo@empresa.com"
+    FillPortions ....... =1,8
+  tglCfgActiva ......... AGREGAR (Classic/Toggle)
+    Default ............ =Coalesce(ThisItem.Activa; "SI") = "SI"
+    FillPortions ....... =0,7
+    TrueText ........... ="Sí"
+    FalseText .......... ="No"
+  btnGuardarAreaCfg .... MODIFICAR
+    FillPortions ....... =0,8
+    Width .............. (eliminar)
+    OnSelect ........... (ver abajo)
+
+btnToggleFDSFila.OnSelect:
+=Patch(
+    CONFIG_AREAS_HORAS_EXTRAS;
+    LookUp(CONFIG_AREAS_HORAS_EXTRAS; ID = ThisItem.ID);
+    { PermiteFinSemana: If(Coalesce(ThisItem.PermiteFinSemana; "SI") = "SI"; "NO"; "SI") }
+);;
+ClearCollect(colCfgCatTodas; CONFIG_AREAS_HORAS_EXTRAS);;
+ClearCollect(colConfigAreasHE; Filter(CONFIG_AREAS_HORAS_EXTRAS; Activa = "SI"))
+
+btnGuardarAreaCfg.OnSelect:
+=Patch(
+    CONFIG_AREAS_HORAS_EXTRAS;
+    LookUp(CONFIG_AREAS_HORAS_EXTRAS; ID = ThisItem.ID);
+    {
+        TopeDiarioHE:        Value(txtCfgTopeDia.Text);
+        AlertaHESemana:      Value(txtCfgAlerta.Text);
+        MaxDiasConsecutivos: Value(txtCfgMaxCons.Text);
+        MaxDiasSemana:       Value(txtCfgMaxSem.Text);
+        MaxSabDom:           Value(txtMaxSabDomFila.Text);
+        CorreoResponsable:   Lower(Trim(txtCfgCorreo.Text));
+        Activa:              If(tglCfgActiva.Value; "SI"; "NO")
+    }
+);;
+ClearCollect(colCfgCatTodas; CONFIG_AREAS_HORAS_EXTRAS);;
+ClearCollect(colConfigAreasHE; Filter(CONFIG_AREAS_HORAS_EXTRAS; Activa = "SI"));;
+Select(btnCalcDispHE);;
+Notify("✅ Reglas guardadas para " & ThisItem.Title & "."; NotificationType.Success)
+
+----------------------------------------------------------------------
+3.2 Horas Extras > pestaña Acumulado
+    (para que el rango no dependa de los últimos 120 días)
+----------------------------------------------------------------------
+
+  btnTabAnaSetAcum_1 (cntpestañashoras)
+    OnSelect .......... (ver abajo)
+  dpDesde_1 (conVista_AcumHE > conFiltroFechasAcum)
+    OnChange .......... =Select(btnCargarHERango)
+  dpHasta_1 (conFiltroFechasAcum)
+    OnChange .......... =Select(btnCargarHERango)
+  galAcumuladoAutorizadoHE---YES (conVista_AcumHE)
+    Items ............. (ver abajo)
+    Height ............ (eliminar)
+    FillPortions ...... =1
+  btnHEExcel ........... AGREGAR (Classic/Button en conFiltroFechasAcum)
+    Text .............. ="📥 Excel"
+    Width ............. =100
+    OnSelect .......... =Set(gFormatoExp; "xlsx");; Select(btnArmarExpHE)
+  btnHEPDF ............. AGREGAR (Classic/Button en conFiltroFechasAcum)
+    Text .............. ="📄 PDF"
+    Width ............. =90
+    OnSelect .......... =Set(gFormatoExp; "pdf");; Select(btnArmarExpHE)
+  btnCargarHERango ..... AGREGAR (Classic/Button en Personal, raíz)
+    Visible ........... =false
+    OnSelect .......... (ver abajo)
+
+btnTabAnaSetAcum_1.OnSelect:
+=Refresh(BD_HORAS_EXTRAS_ACUMULADAS);;
+ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS);;
+Select(btnCargarHERango);;
+Set(gTab; "AnaAcum")
+
+btnCargarHERango.OnSelect:
+=ClearCollect(
+    colHERango;
+    Filter(
+        SOLICITUDES_HORAS_EXTRAS;
+        FechaRequerida >= Coalesce(dpDesde_1.SelectedDate; Date(Year(Today()); Month(Today()); 1));
+        FechaRequerida <= Coalesce(dpHasta_1.SelectedDate; Today());
+        Estado.Value = "Autorizado"
+    )
+)
+
+galAcumuladoAutorizadoHE---YES.Items:
+=ForAll(
+    GroupBy(
+        Filter(
+            colHERango;
+            IsBlank(drpAreaAcumHE.Selected.Title) Or drpAreaAcumHE.Selected.Title = "TODAS" Or Area = drpAreaAcumHE.Selected.Title
+        );
+        'Codigo'; 'NombrePersona'; 'Area'; 'Rol'; '_registrosAut'
+    ) As _g;
+    {
+        Codigo:              _g.Codigo;
+        NombrePersona:       _g.NombrePersona;
+        Area:                _g.Area;
+        Rol:                 _g.Rol;
+        SesionesAutorizadas: CountRows(_g._registrosAut);
+        TotalHorasPeriodo:   Sum(_g._registrosAut; HorasSolicitadas);
+        HistoricoGeneralBD:  Coalesce(LookUp(colAcumuladosHE; Codigo = _g.Codigo; TotalHorasAutorizadas); Sum(_g._registrosAut; HorasSolicitadas))
+    }
+)
+
+----------------------------------------------------------------------
+3.3 Permisos (conVista_Permisos)
+    hdrPerm y galPermisos quedaron FUERA de conPermLista; por eso se ven
+    sueltos al costado.
+----------------------------------------------------------------------
+
+  conVista_Permisos (Principal)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    LayoutGap ......... =10
+    Padding (4) ....... =10
+  conPermForm (conVista_Permisos)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    LayoutGap ......... =6
+    Padding (4) ....... =10
+    Fill .............. =clrSurface
+    LayoutOverflowY ... =LayoutOverflow.Scroll
+  conPermFechaIni ...... AGREGAR GroupContainer horizontal en conPermForm, después de tglPermDiaCompleto
+    Height ............ =44
+    FillPortions ...... =0
+    LayoutGap ......... =6
+  dpPermDesde .......... MOVER dentro de conPermFechaIni
+    FillPortions ...... =1
+    Placeholder ....... ="Desde"
+  txtPermHoraIni ....... MOVER dentro de conPermFechaIni
+    Width ............. =90
+    HintText .......... ="hh:mm"
+  conPermFechaFin ...... AGREGAR GroupContainer horizontal en conPermForm, después de conPermFechaIni
+    Height ............ =44
+    FillPortions ...... =0
+    LayoutGap ......... =6
+  dpPermHasta .......... MOVER dentro de conPermFechaFin
+    FillPortions ...... =1
+    Placeholder ....... ="Hasta"
+  txtPermHoraFin ....... MOVER dentro de conPermFechaFin
+    Width ............. =90
+    HintText .......... ="hh:mm"
+  drpPermTipo (conPermForm)
+    InputTextPlaceholder ="Tipo de permiso"
+  cmbPermPersona (conPermForm)
+    InputTextPlaceholder ="Buscar persona…"
+  btnGuardarPermiso (conPermForm)
+    Height ............ =40
+  conPermLista (conVista_Permisos)
+    FillPortions ...... =1
+    LayoutGap ......... =4
+    Padding (4) ....... =8
+    Fill .............. =clrSurface
+  hdrPerm .............. MOVER dentro de conPermLista, debajo de conPermFiltros
+    FillPortions ...... =0
+    Height ............ =32
+    Fill .............. =ColorValue(hexInk)
+  Label183 … Label191 (hdrPerm)
+    Color ............. =RGBA(255; 255; 255; 1)
+  Label189 (hdrPerm)
+    Text .............. ="SOLICITÓ / AUTORIZÓ"
+  Label190 (hdrPerm) ... ELIMINAR (columna sobrante: la fila tiene 8 columnas)
+  galPermisos .......... MOVER dentro de conPermLista, debajo de hdrPerm
+    FillPortions ...... =1
+    TemplateSize ...... =52
+    Items ............. (ver abajo)
+  drpPermFEstado (conPermFiltros)
+    DefaultSelectedItems =["Todos"]
+    SelectMultiple .... =false
+  btnPermExcel ......... AGREGAR (Classic/Button en conPermFiltros)
+    Text .............. ="📥 Excel"
+    Width ............. =100
+    OnSelect .......... =Set(gFormatoExp; "xlsx");; Select(btnArmarExpPerm)
+  btnPermPDF ........... AGREGAR (Classic/Button en conPermFiltros)
+    Text .............. ="📄 PDF"
+    Width ............. =90
+    OnSelect .......... =Set(gFormatoExp; "pdf");; Select(btnArmarExpPerm)
+
+galPermisos.Items:
+=Sort(
+    Filter(
+        colPermisos;
+        IsBlank(drpPermFEstado.Selected.Value) Or drpPermFEstado.Selected.Value = "Todos" Or Estado = drpPermFEstado.Selected.Value;
+        IsBlank(Trim(txtPermFBuscar.Text)) Or StartsWith(NombrePersona; Trim(txtPermFBuscar.Text)) Or StartsWith(Codigo; Trim(txtPermFBuscar.Text))
+    );
+    FechaInicio;
+    SortOrder.Descending
+)
+
+----------------------------------------------------------------------
+3.4 Jornadas y límites (conVista_Jornada)
+    Las categorías ahora se editan SOLO en "Reglas y Áreas" (3.1).
+    En esta vista quedan dos columnas: grupos de jornada y ajuste por persona.
+----------------------------------------------------------------------
+
+  conJorCat ............ ELIMINAR (con todos sus hijos)
+  conVista_Jornada (Principal)
+    LayoutGap ......... =10
+    Padding (4) ....... =10
+  conJorGrupos (conVista_Jornada)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    Width ............. =300
+    Fill .............. =clrSurface
+    Padding (4) ....... =8
+  galJorGrupos (conJorGrupos)
+    FillPortions ...... =1
+    TemplateSize ...... =64
+  Container166 (galJorGrupos)
+    Height ............ =Parent.TemplateHeight - 4
+  lblJorGrupNota ....... MOVER fuera de la galería, a conJorGrupos debajo de galJorGrupos
+    Height ............ =40
+    Size .............. =9
+    Color ............. =ColorValue(hexMuted)
+  conJorPersona (conVista_Jornada)
+    FillPortions ...... =1
+    Fill .............. =clrSurface
+    Padding (4) ....... =10
+    LayoutGap ......... =6
+    LayoutOverflowY ... =LayoutOverflow.Scroll
+  htmlJorResumen (conJorPersona)
+    Height ............ =230
+    AlignInContainer .. =AlignInContainer.Stretch
+  drpJorGrupo .......... InputTextPlaceholder: ="Grupo de jornada"
+  txtJorSede ........... HintText: ="Sede (RD, CNP, VTI)"
+  txtJorTopeHE ......... HintText: ="HE por día (vacío = categoría)"
+  txtJorCorreo ......... HintText: ="Correo del supervisor"
+  conJorBtns ........... AGREGAR GroupContainer horizontal, último hijo de conJorPersona
+    Height ............ =44
+    FillPortions ...... =0
+    LayoutGap ......... =8
+  btnGuardarJorPersona . MOVER dentro de conJorBtns · FillPortions =1
+  btnAsignarGrupoDepto . MOVER dentro de conJorBtns · FillPortions =1,4
+
+----------------------------------------------------------------------
+3.5 Accesos (conVista_Accesos)
+----------------------------------------------------------------------
+
+  conVista_Accesos (Principal)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    LayoutGap ......... =10
+    Padding (4) ....... =10
+  conAccLista (conVista_Accesos)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    Fill .............. =clrSurface
+    Padding (4) ....... =8
+    LayoutGap ......... =4
+  hdrAcc (conAccLista)
+    Fill .............. =ColorValue(hexInk)
+    FillPortions ...... =0
+  hdrAccNombre … hdrAccEstado (hdrAcc)
+    Color ............. =RGBA(255; 255; 255; 1)
+  galAccesos (conAccLista)
+    FillPortions ...... =1
+    TemplateSize ...... =44
+  conAccForm (conVista_Accesos)
+    LayoutAlignItems .. =LayoutAlignItems.Stretch
+    FillPortions ...... =1
+    Fill .............. =clrSurface
+    Padding (4) ....... =10
+    LayoutGap ......... =6
+  txtAccCorreo ......... HintText: ="correo@empresa.com"
+  txtAccNombre ......... HintText: ="Nombre completo"
+  cmbAccRol ............ InputTextPlaceholder: ="Rol"
+  galAccPermisos (conAccForm)
+    FillPortions ...... =1
+    TemplateSize ...... =34
+  Button43 (galAccPermisos > conFilaPerm) ... ELIMINAR (botón vacío sobrante)
+  lblPermRol (conFilaPerm) .................. Width: =70
+  chkPermExtra / chkPermQuitar (conFilaPerm)  Width: =60
+  conAccBtns ........... AGREGAR GroupContainer horizontal en conAccForm, antes de lblAccNota
+    Height ............ =44
+    FillPortions ...... =0
+    LayoutGap ......... =8
+  btnGuardarAcceso ..... MOVER dentro de conAccBtns
+    FillPortions ...... =1
+    Text .............. ="💾 Guardar acceso"
+  btnNuevoAcceso ....... MOVER dentro de conAccBtns
+    Width ............. =120
+    Text .............. ="➕ Nuevo"
+
+
+======================================================================
+4. SCRIPT DE EXCEL Y FLUJOS (crear una sola vez)
+======================================================================
+
+Dos flujos sirven para TODAS las descargas: uno genera Excel y el otro PDF.
+Los dos usan el mismo script y reciben los mismos 4 datos desde la app.
+
+----------------------------------------------------------------------
+4.1 Preparar la plantilla
+----------------------------------------------------------------------
+1. En el sitio de SharePoint de la app: Documentos > + Nuevo > Carpeta >
+   "Exportaciones".
+2. Dentro de esa carpeta: + Nuevo > Libro de Excel. Ciérralo sin escribir nada
+   y renómbralo "PlantillaVacia.xlsx".
+3. En tu OneDrive (misma cuenta con la que crearás los flujos), crea la carpeta
+   "Exportaciones". El flujo PDF guarda ahí archivos temporales y los borra al
+   terminar.
+
+----------------------------------------------------------------------
+4.2 Crear el script ExportarExcelGenerico
+----------------------------------------------------------------------
+1. Abre PlantillaVacia.xlsx en Excel para la web.
+2. Pestaña Automatizar > Nuevo script.
+3. Borra el código de ejemplo y pega este:
+
+function main(
+  workbook: ExcelScript.Workbook,
+  nombreHoja: string,
+  columnas: string,
+  datosJson: string
+) {
+  const datos = JSON.parse(datosJson || "[]") as Fila[];
+  const hojaNombre = (nombreHoja || "Datos").replace(/[\\\/\?\*\[\]:]/g, "-").substring(0, 31);
+  let hoja = workbook.getWorksheet(hojaNombre);
+  if (!hoja) {
+    hoja = workbook.addWorksheet(hojaNombre);
+  }
+  hoja.getRange().clear();
+
+  let encabezados: string[] = (columnas || "")
+    .split(";")
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+  if (encabezados.length === 0 && datos.length > 0) {
+    encabezados = Object.keys(datos[0]);
+  }
+  if (datos.length === 0 || encabezados.length === 0) {
+    hoja.getRange("A1").setValue("Sin datos para el filtro seleccionado");
+    hoja.activate();
+    return;
+  }
+
+  hoja.getRangeByIndexes(0, 0, 1, encabezados.length).setValues([encabezados]);
+
+  const bloque = 1000;
+  for (let i = 0; i < datos.length; i += bloque) {
+    const parte = datos.slice(i, i + bloque);
+    const valores: (string | number | boolean)[][] = parte.map((f) =>
+      encabezados.map((c) => {
+        const v = f[c];
+        return v === null || v === undefined ? "" : v;
+      })
+    );
+    hoja.getRangeByIndexes(i + 1, 0, valores.length, encabezados.length).setValues(valores);
+  }
+
+  const rango = hoja.getRangeByIndexes(0, 0, datos.length + 1, encabezados.length);
+  const tabla = hoja.addTable(rango, true);
+  tabla.setPredefinedTableStyle("TableStyleMedium2");
+  rango.getFormat().autofitColumns();
+  hoja.getFreezePanes().freezeRows(1);
+
+  const pagina = hoja.getPageLayout();
+  try { pagina.setOrientation(ExcelScript.PageOrientation.landscape); } catch (e) { }
+  try { pagina.setZoom({ horizontalFitToPages: 1, verticalFitToPages: 0 }); } catch (e) {
+    try { pagina.setZoom({ scale: 60 }); } catch (e2) { }
+  }
+  try { pagina.setCenterHorizontally(true); } catch (e) { }
+  try { pagina.setPrintTitleRows("$1:$1"); } catch (e) { }
+
+  hoja.activate();
+  workbook.getWorksheets().forEach((h) => {
+    if (h.getName() !== hojaNombre && h.getUsedRange() === undefined) {
+      h.delete();
+    }
+  });
+}
+
+interface Fila {
+  [clave: string]: string | number | boolean | null;
+}
+
+4. Haz clic en el nombre "Script 1" (arriba del editor) y cámbialo a
+   "ExportarExcelGenerico".
+5. Haz clic en Guardar script. Queda guardado en tu OneDrive, en
+   Documentos > Office Scripts.
+
+Si la pestaña Automatizar no aparece, los Office Scripts están desactivados en
+el tenant. Pide a TI que los habilite en el Centro de administración de
+Microsoft 365 (Configuración > Office Scripts).
+
+----------------------------------------------------------------------
+4.3 Flujo ExportarExcelGenerico
+----------------------------------------------------------------------
+make.powerautomate.com > Crear > Flujo de nube instantáneo >
+nombre "ExportarExcelGenerico" > desencadenador Power Apps (V2) > Crear.
+
+Paso 1 · Power Apps (V2)
+   + Agregar una entrada > Texto, cuatro veces, EN ESTE ORDEN:
+   nombreArchivo, nombreHoja, columnas, datosJson
+
+Paso 2 · Componer (renómbrala "NombreBase")
+   Entradas > Expresión:
+   concat(triggerBody()['text'], '_', formatDateTime(convertFromUtc(utcNow(), 'Central America Standard Time'), 'yyyyMMdd_HHmmss'))
+
+Paso 3 · SharePoint · Obtener contenido de archivo mediante ruta de acceso
+   Dirección del sitio: tu sitio
+   Ruta: /Documentos compartidos/Exportaciones/PlantillaVacia.xlsx
+
+Paso 4 · SharePoint · Crear archivo
+   Sitio: tu sitio
+   Ruta de la carpeta: /Documentos compartidos/Exportaciones
+   Nombre: @{outputs('NombreBase')}.xlsx
+   Contenido: Contenido del archivo (paso 3)
+
+Paso 5 · Retraso
+   Recuento 3 · Unidad Segundo
+
+Paso 6 · Excel Online (Business) · Ejecutar script
+   Ubicación: tu sitio · Biblioteca: Documentos · Archivo: Id (paso 4)
+   Script: ExportarExcelGenerico
+   nombreHoja = entrada nombreHoja
+   columnas   = entrada columnas
+   datosJson  = entrada datosJson
+
+Paso 7 · SharePoint · Crear vínculo para compartir para un archivo o carpeta
+   Sitio: tu sitio · Biblioteca: Documentos · Id. de elemento: ItemId (paso 4)
+   Tipo de vínculo: Ver · Ámbito: Organización
+
+Paso 8 · Responder a una aplicación o flujo de Power Apps
+   + Agregar una salida > Texto · Nombre: fileurl
+   Valor: Vínculo para compartir (paso 7)
+
+Guarda el flujo.
+
+Si triggerBody()['text'] no devuelve el nombre, en el paso 2 usa el contenido
+dinámico "nombreArchivo" en lugar de la expresión.
+
+----------------------------------------------------------------------
+4.4 Flujo ExportarPDFGenerico
+----------------------------------------------------------------------
+Crea otro Flujo de nube instantáneo con desencadenador Power Apps (V2):
+
+Paso 1  · Power Apps (V2)
+          Las mismas 4 entradas de texto, en el mismo orden:
+          nombreArchivo, nombreHoja, columnas, datosJson
+Paso 2  · Componer (NombreBase) — misma expresión que en 4.3
+Paso 3  · SharePoint · Obtener contenido de archivo mediante ruta de acceso
+          /Documentos compartidos/Exportaciones/PlantillaVacia.xlsx
+Paso 4  · OneDrive para la Empresa · Crear archivo
+          Ruta de la carpeta: /Exportaciones
+          Nombre: @{outputs('NombreBase')}.xlsx
+          Contenido: Contenido del archivo (paso 3)
+Paso 5  · Retraso — 3 segundos
+Paso 6  · Excel Online (Business) · Ejecutar script
+          Ubicación: OneDrive para la Empresa · Biblioteca: OneDrive
+          Archivo: Id (paso 4) · Script: ExportarExcelGenerico
+          los mismos 3 parámetros
+Paso 7  · Retraso — 5 segundos (deja que Excel guarde antes de convertir)
+Paso 8  · OneDrive para la Empresa · Convertir archivo
+          Archivo: Id (paso 4) · Tipo de destino: PDF
+Paso 9  · SharePoint · Crear archivo
+          Carpeta: /Documentos compartidos/Exportaciones
+          Nombre: @{outputs('NombreBase')}.pdf
+          Contenido: Contenido del archivo (paso 8)
+Paso 10 · OneDrive para la Empresa · Eliminar archivo
+          Archivo: Id (paso 4)
+Paso 11 · SharePoint · Crear vínculo para compartir para un archivo o carpeta
+          Id. de elemento: ItemId (paso 9) · Tipo: Ver · Ámbito: Organización
+Paso 12 · Responder a una aplicación o flujo de Power Apps
+          Salida de texto fileurl = Vínculo para compartir (paso 11)
+
+----------------------------------------------------------------------
+4.5 Conectar los flujos a la app
+----------------------------------------------------------------------
+En Power Apps Studio: icono Power Automate (barra izquierda) > Agregar flujo >
+selecciona ExportarExcelGenerico y luego ExportarPDFGenerico.
+
+Si más adelante cambias las entradas de un flujo, QUÍTALO Y VUELVE A
+AGREGARLO en la app. Si no, .Run marca error. El flujo viejo
+ExportarProgramacionDia ya no se usa: quítalo de la app.
+
+
+======================================================================
+5. BOTONES DE DESCARGA EN CADA PANTALLA
+======================================================================
+
+Cada sección tiene un botón oculto que ARMA los datos (btnArmarExp…) y un
+botón oculto por pantalla que ENVÍA al flujo (btnEnviarExport…). Los botones
+visibles de Excel y PDF solo indican el formato. Se hace así porque Select()
+se ejecuta al terminar la fórmula: si todo fuera en un mismo botón, el flujo
+recibiría los datos vacíos.
+
+----------------------------------------------------------------------
+5.1 Botón de envío — AGREGAR uno en cada pantalla
+----------------------------------------------------------------------
+Classic/Button · Visible = false
+
+  btnEnviarExport ..... Personal (raíz)
+  btnEnviarExportG .... REGISTROS (raíz)
+  btnEnviarExportR .... scrRendimientos (raíz)
+
+OnSelect (el mismo en los tres):
+=If(
+    IsBlank(gJsonExp) Or gJsonExp = "[]";
+    Notify("⚠️ No hay datos para exportar con los filtros actuales."; NotificationType.Warning);
+    Notify("⏳ Generando " & If(gFormatoExp = "pdf"; "PDF"; "Excel") & "… espera unos segundos."; NotificationType.Information);;
+    Set(gUrlExp; "");;
+    IfError(
+        If(
+            gFormatoExp = "pdf";
+            Set(gUrlExp; ExportarPDFGenerico.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp).fileurl);
+            Set(gUrlExp; ExportarExcelGenerico.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp).fileurl)
+        );
+        Set(gUrlExp; "")
+    );;
+    If(
+        IsBlank(gUrlExp);
+        Notify("❌ No se pudo generar el archivo. Revisa el historial de ejecuciones del flujo en Power Automate."; NotificationType.Error);
+        Launch(gUrlExp);;
+        Notify("📄 Archivo listo."; NotificationType.Success)
+    )
+)
+
+----------------------------------------------------------------------
+5.2 Personal — Distribución diaria
+----------------------------------------------------------------------
+  btnCalExcel (conCalendario > conCalFiltros)
+    OnSelect .. =Set(gFormatoExp; "xlsx");; Select(btnArmarExpCal)
+  btnCalPDF (conCalendario > conCalFiltros)
+    OnSelect .. =Set(gFormatoExp; "pdf");; Select(btnArmarExpCal)
+  conCalImpresion (Principal) ... ELIMINAR (ya no se usa)
+  btnArmarExpCal ................ AGREGAR en Personal (raíz), Visible = false
+
+btnArmarExpCal.OnSelect:
+=Set(gNombreExp; "Programacion_" & Text(gloDiaSel; "yyyymmdd"));;
+Set(gHojaExp; "Programacion");;
+Set(gColsExp; "Fecha;Codigo;Persona;Area;Actividad;Jornada;MetaOpHora;SuMediana;NivelEval;Cumplimiento");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            Sort(colDiaFiltrado; Area; SortOrder.Ascending) As d;
+            {
+                Fecha:        Text(gloDiaSel; "dd/mm/yyyy");
+                Codigo:       d.Codigo;
+                Persona:      d.Persona;
+                Area:         d.Area;
+                Actividad:    d.Actividad;
+                Jornada:      d.Jornada;
+                MetaOpHora:   d.MetaOpHora;
+                SuMediana:    d.RendHistorico;
+                NivelEval:    d.NivelEval;
+                Cumplimiento: If(
+                                  d.MetaOpHora <= 0 Or d.RendHistorico = 0; "Sin dato";
+                                  d.RendHistorico >= d.MetaOpHora;          "Cumple";
+                                  d.RendHistorico >= d.MetaOpHora * 0,75;   "En rango";
+                                  "Bajo meta"
+                              )
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+----------------------------------------------------------------------
+5.3 Personal — Horas extras (Acumulado)
+----------------------------------------------------------------------
+btnArmarExpHE · AGREGAR en Personal (raíz) · Visible = false
+
+btnArmarExpHE.OnSelect:
+=With(
+    {
+        _d: Coalesce(dpDesde_1.SelectedDate; Date(Year(Today()); Month(Today()); 1));
+        _h: Coalesce(dpHasta_1.SelectedDate; Today())
+    };
+    Set(gNombreExp; "HorasExtras_" & Text(_d; "yyyymmdd") & "_" & Text(_h; "yyyymmdd"))
+);;
+Set(gHojaExp; "HorasExtras");;
+Set(gColsExp; "Fecha;Semana;Codigo;Nombre;Area;Rol;Actividad;SubActividad;HoraInicio;HoraFin;Horas;Justificacion;SolicitadoPor;AutorizadoPor;FechaAutorizacion");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            Sort(
+                Filter(colHERango; IsBlank(drpAreaAcumHE.Selected.Title) Or drpAreaAcumHE.Selected.Title = "TODAS" Or Area = drpAreaAcumHE.Selected.Title);
+                FechaRequerida;
+                SortOrder.Ascending
+            ) As r;
+            {
+                Fecha:             Text(r.FechaRequerida; "dd/mm/yyyy");
+                Semana:            "" & r.SemanaAnio;
+                Codigo:            r.Codigo;
+                Nombre:            r.NombrePersona;
+                Area:              r.Area;
+                Rol:               "" & r.Rol;
+                Actividad:         "" & r.Actividad;
+                SubActividad:      "" & r.SubActividad;
+                HoraInicio:        "" & r.HoraInicio;
+                HoraFin:           "" & r.HoraFin;
+                Horas:             Coalesce(r.HorasSolicitadas; 0);
+                Justificacion:     "" & r.Justificacion;
+                SolicitadoPor:     "" & r.SolicitadoPor;
+                AutorizadoPor:     "" & r.AutorizadoPor;
+                FechaAutorizacion: If(IsBlank(r.FechaHoraAutorizacion); ""; Text(r.FechaHoraAutorizacion; "dd/mm/yyyy hh:mm"))
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+----------------------------------------------------------------------
+5.4 Personal — Permisos
+----------------------------------------------------------------------
+btnArmarExpPerm · AGREGAR en Personal (raíz) · Visible = false
+
+btnArmarExpPerm.OnSelect:
+=Set(gNombreExp; "Permisos_" & Text(Coalesce(dpPermFDesde.SelectedDate; Today()); "yyyymmdd") & "_" & Text(Coalesce(dpPermFHasta.SelectedDate; Today()); "yyyymmdd"));;
+Set(gHojaExp; "Permisos");;
+Set(gColsExp; "Codigo;Nombre;Departamento;Tipo;Desde;Hasta;DiaCompleto;Horas;Motivo;Estado;SolicitadoPor;FechaSolicitud;AutorizadoPor;FechaAutorizacion");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            galPermisos.AllItems As r;
+            {
+                Codigo:            r.Codigo;
+                Nombre:            r.NombrePersona;
+                Departamento:      "" & r.Departamento;
+                Tipo:              "" & r.TipoPermiso;
+                Desde:             Text(r.FechaInicio; "dd/mm/yyyy hh:mm");
+                Hasta:             Text(r.FechaFin; "dd/mm/yyyy hh:mm");
+                DiaCompleto:       If(r.DiaCompleto; "Sí"; "No");
+                Horas:             Coalesce(r.Horas; 0);
+                Motivo:            "" & r.Motivo;
+                Estado:            r.Estado;
+                SolicitadoPor:     "" & r.SolicitadoPor;
+                FechaSolicitud:    If(IsBlank(r.FechaSolicitud); ""; Text(r.FechaSolicitud; "dd/mm/yyyy hh:mm"));
+                AutorizadoPor:     "" & r.AutorizadoPor;
+                FechaAutorizacion: If(IsBlank(r.FechaAutorizacion); ""; Text(r.FechaAutorizacion; "dd/mm/yyyy hh:mm"))
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+----------------------------------------------------------------------
+5.5 REGISTROS — HISTORIAL (Excel + PDF) y EVACUACIÓN (PDF)
+----------------------------------------------------------------------
+
+  btnHistExcel (REGISTROS > conGarita > Historial > conHistFiltros)
+    OnSelect .. =Set(gFormatoExp; "xlsx");; Select(btnArmarExpHist)
+
+  btnHistPDF ........ AGREGAR (Classic/Button en conHistFiltros, junto a btnHistExcel)
+    Text ...... ="📄 PDF"
+    Visible ... =fxPuede("garita_exportar")
+    OnSelect .. =Set(gFormatoExp; "pdf");; Select(btnArmarExpHist)
+
+  btnEvacPDF ........ AGREGAR (Classic/Button en REGISTROS > conGarita > conGarEvac > conEvacBtns)
+    Text ...... ="📄 PDF lista"
+    OnSelect .. =Set(gFormatoExp; "pdf");; Select(btnArmarExpEvac)
+    (btnEvacImprimir con =Print() se conserva para imprimir directo)
+
+  btnArmarExpHist ... AGREGAR en REGISTROS (raíz), Visible = false
+  btnArmarExpEvac ... AGREGAR en REGISTROS (raíz), Visible = false
+  btnEnviarExportG .. AGREGAR en REGISTROS (raíz), Visible = false (ver 5.1)
+
+btnArmarExpHist.OnSelect  (exporta la vista abierta: "Detalle" o "Resumen"):
+=Set(gNombreExp; "Asistencia_" & gHistVista & "_" & Text(gHistDesde; "yyyymmdd") & "_" & Text(gHistHasta; "yyyymmdd"));;
+Set(gHojaExp; gHistVista);;
+If(
+    gHistVista = "Detalle";
+    Set(gColsExp; "Fecha;Codigo;Nombre;Tipo;Departamento;Sede;Grupo;Ingreso;Salida;Horas;DiaLaborado;HEReales;Estado;DiaDescanso;Excepcion;Justificacion;Autorizo;VisitaEmpresa;VisitaA;Observacion");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistFiltrado; FECHA & NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Fecha:         Text(r.FECHA; "dd/mm/yyyy");
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Tipo:          If(IsBlank(r.TIPO); If(r.CATEGORIA.Value = "V"; "Visitante"; "Empleado"); r.TIPO);
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    Sede:          "" & r.AREA.Value;
+                    Grupo:         "" & r.GRUPO_JORNADA;
+                    Ingreso:       Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                    Salida:        If(IsBlank(r.SALIDA); ""; Text(r.SALIDA; "dd/mm/yyyy hh:mm"));
+                    Horas:         Coalesce(r.HORAS; 0);
+                    DiaLaborado:   If(r.DIA_LABORADO; "Sí"; "No");
+                    HEReales:      Coalesce(r.HE_REALES; 0);
+                    Estado:        "" & r.ESTADO.Value;
+                    DiaDescanso:   If(r.DIA_DESCANSO; "Sí"; "No");
+                    Excepcion:     If(r.EXCEPCION; "Sí"; "No");
+                    Justificacion: "" & r.JUSTIFICACION;
+                    Autorizo:      "" & r.AUTORIZA_EXCEPCION;
+                    VisitaEmpresa: "" & r.VISITA_EMPRESA;
+                    VisitaA:       "" & r.VISITA_A;
+                    Observacion:   "" & r.OBSERVACION
+                }
+            );
+            JSONFormat.Compact
+        )
+    );
+    Set(gColsExp; "Codigo;Nombre;Departamento;DiasLaborados;Horas;HEReales;HEAutorizadas;Diferencia;SinSalida;Excepciones;Denegados");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistResumen; NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    DiasLaborados: r.Dias;
+                    Horas:         r.Horas;
+                    HEReales:      r.HEReales;
+                    HEAutorizadas: r.HEAutorizadas;
+                    Diferencia:    r.Diferencia;
+                    SinSalida:     r.SinSalida;
+                    Excepciones:   r.Excepciones;
+                    Denegados:     r.Denegados
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportG)
+
+btnArmarExpEvac.OnSelect  (lista de personas en sitio con confirmación):
+=Set(gNombreExp; "Evacuacion_" & Text(Now(); "yyyymmdd_hhmm"));;
+Set(gHojaExp; "Evacuacion");;
+Set(gColsExp; "Nombre;Codigo;Tipo;Departamento;Sede;Ingreso;Confirmado");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            Sort(colAdentro; DEPARTAMENTO & NOMBRE; SortOrder.Ascending) As r;
+            {
+                Nombre:       r.NOMBRE;
+                Codigo:       r.CODIGO;
+                Tipo:         If(r.TIPO = "Visitante" Or r.CATEGORIA.Value = "V"; "Visitante"; "Empleado");
+                Departamento: "" & r.DEPARTAMENTO;
+                Sede:         "" & r.AREA.Value;
+                Ingreso:      Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                Confirmado:   If(r.ID in colEvacPresentes.ID; "✔ Presente"; "FALTA")
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExportG)
+
+----------------------------------------------------------------------
+5.6 scrRendimientos — Análisis global
+----------------------------------------------------------------------
+  btnExportarExcelGlobal (icono) ... ELIMINAR
+    (está en el contenedor de los botones de modo, junto a btnGlobalPorAtributo)
+  btnExcelGlobal ... AGREGAR (Classic/Button en ese mismo contenedor)
+    Text ...... ="📥 Excel"
+    Width ..... =100
+    Height .... =32
+    Fill ...... =ColorValue(hexLeafDark)
+    Color ..... =colBlanco
+    Visible ... =fxPuede("rendimientos_analisis")
+    OnSelect .. =Set(gFormatoExp; "xlsx");; Select(btnArmarExpRend)
+  btnPDFGlobal ..... AGREGAR (Classic/Button en el mismo contenedor)
+    Text ...... ="📄 PDF"
+    Width ..... =90
+    Height .... =32
+    Fill ...... =ColorValue(hexDanger)
+    Color ..... =colBlanco
+    Visible ... =fxPuede("rendimientos_analisis")
+    OnSelect .. =Set(gFormatoExp; "pdf");; Select(btnArmarExpRend)
+  btnArmarExpRend .. AGREGAR en scrRendimientos (raíz), Visible = false
+  btnEnviarExportR . AGREGAR en scrRendimientos (raíz), Visible = false (ver 5.1)
+
+btnArmarExpRend.OnSelect  (exporta la tabla que esté abierta en ese momento):
+=Set(gNombreExp; "Rendimiento_" & gGlobalModo & "_" & Text(gGDesde; "yyyymmdd") & "_" & Text(DateAdd(gGHasta; -1; TimeUnit.Days); "yyyymmdd"));;
+Set(gHojaExp; Switch(gGlobalModo; "Set"; "PorSet"; "Atributo"; "PorActividad"; "PersFecha"; "PersonaFecha"; "PersAcum"; "PersonaAcumulado"; "VsMeta"));;
+Set(
+    gColsExp;
+    Switch(
+        gGlobalModo;
+        "Set";       "Set;Cultivo;Generacion;MCT;Programa;TipoOp;Actividad;Subactividad;Personas;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "Atributo";  "Cultivo;Actividad;Subactividad;Programa;Generacion;TipoOp;Trial;MCT;NumSets;Sets;Personas;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "PersFecha"; "Fecha;Set;Codigo;Persona;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Registros;Horas;Materiales;Frutos;Rend;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "PersAcum";  "Set;Codigo;Persona;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "Codigo;Persona;Cultivo;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Sets;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;DifMeta;CumplPct;Estado;Confiabilidad"
+    )
+);;
+Set(
+    gJsonExp;
+    Switch(
+        gGlobalModo;
+        "Set";
+        JSON(
+            ForAll(
+                colAnaGlobalSet As r;
+                {
+                    Set: r.SetName; Cultivo: r.Cultivo; Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp;
+                    Actividad: r.Actividad; Subactividad: r.SubActTxt; Personas: r.Personas; Dias: r.Dias; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "Atributo";
+        JSON(
+            ForAll(
+                colAnaGlobalAtrib As r;
+                {
+                    Cultivo: r.Cultivo; Actividad: r.Actividad; Subactividad: r.SubAct; Programa: r.Program; Generacion: r.Generacion;
+                    TipoOp: r.TipoOp; Trial: r.Trial; MCT: r.Mct; NumSets: r.Sets; Sets: r.SetName; Personas: r.Personas;
+                    Registros: r.Registros; Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "PersFecha";
+        JSON(
+            ForAll(
+                Sort(colAnaGlobalPersFecha; FechaRaw; SortOrder.Ascending) As r;
+                {
+                    Fecha: r.Fecha; Set: r.SetName; Codigo: r.Codigo; Persona: r.Persona; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; Rend: r.Rend;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "PersAcum";
+        JSON(
+            ForAll(
+                colAnaGlobalPersAcum As r;
+                {
+                    Set: r.SetName; Codigo: r.Codigo; Persona: r.Persona; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Dias: r.Dias; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        JSON(
+            ForAll(
+                Sort(colAnaGlobalSinSet; Cumpl; SortOrder.Ascending) As r;
+                {
+                    Codigo: r.Codigo; Persona: r.Persona; Cultivo: r.Cultivo; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Sets: r.SetsCant; Dias: r.Dias;
+                    Registros: r.Registros; Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; DifMeta: r.DifMeta; CumplPct: Round(r.Cumpl * 100; 0);
+                    Estado: r.CumpleMeta; Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportR)
+
+
+======================================================================
+6. PRUEBA FINAL (en este orden)
+======================================================================
+1. Comprobador de aplicaciones > 0 errores en Personal, REGISTROS y
+   scrRendimientos.
+2. REGISTROS: escanea un gafete SIN tocar la pantalla. A los ~0,5 s debe
+   pintarse ✅ INGRESO, el campo debe limpiarse y el cursor debe quedar listo
+   para el siguiente gafete.
+3. Horas Extras > ⚙️ Reglas y Áreas: cambia el tope diario de una categoría y
+   guarda. En "Solicitar", el saldo de esa área debe reflejar el cambio.
+4. Permisos: el formulario debe verse a la izquierda y la lista con su
+   encabezado a la derecha. Prueba 📥 Excel y 📄 PDF.
+5. REGISTROS > Historial: consulta un rango, prueba 📥 Excel y 📄 PDF en vista
+   Detalle y en vista Resumen.
+   REGISTROS > Evacuación: marca algunas personas como presentes y prueba
+   📄 PDF lista (debe mostrar "✔ Presente" o "FALTA").
+6. Descarga Excel y PDF en Distribución diaria, Acumulado de HE y Análisis de
+   rendimientos. Cada uno abre un vínculo al archivo en
+   Documentos compartidos/Exportaciones.
+7. Si un botón muestra "❌ No se pudo generar", abre el flujo en Power Automate
+   > Historial de ejecuciones de 28 días > abre la ejecución fallida. El paso en
+   rojo indica qué falta (casi siempre el archivo del paso "Ejecutar script" o
+   el nombre del script).
