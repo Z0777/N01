@@ -1,0 +1,1666 @@
+═══════════════════════════════════════════════════════════════════════════════
+ SISTEMA DE PERSONAL — PENDIENTES Y CORRECCIONES (06/11/2026)
+ Pantallas: Personal · REGISTROS · scrRendimientos
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Las fórmulas van SIN el signo "=" al inicio: pégalas tal cual en la barra.
+ Solo aparecen los controles que hay que AGREGAR, MODIFICAR o ELIMINAR.
+═══════════════════════════════════════════════════════════════════════════════
+
+ÍNDICE
+  0. Lo que encontré (resumen)
+  1. SharePoint y Fórmulas de App
+  2. PERSONAL · Metas de programación ("No hay meta de referencia")
+  3. PERSONAL · Línea de tiempo (con selector de set en popup)
+  4. PERSONAL · Gantt de personal
+  5. REGISTROS · Horas de planilla y motivo de salida
+  6. REGISTROS · Pestaña "Permisos" para garita
+  7. RENDIMIENTOS · Correcciones
+  8. DESCARGAS Excel / PDF (error "fileurl" y "No se pudo generar")
+  9. Orden de implementación y pruebas
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 0. LO QUE ENCONTRÉ
+═══════════════════════════════════════════════════════════════════════════════
+ a) "No hay meta de referencia" NO es por un botón mal presionado.
+    La programación busca la meta con fxClave nivel 5, 6, 7 y 8 (actividad sin
+    subactividad), pero:
+      • fxClave (Fórmulas de App) solo tiene los niveles 1 a 4; con 5–8 todas
+        las claves terminan iguales ("*|*|*|*|Actividad|*").
+      • btnCalcMetasRef (Rendimientos) solo guarda los niveles 1 a 4.
+    Por eso la clave que busca la programación no existe nunca en
+    RENDIMIENTOS_CATALOGO. Se corrige en 1.3, 2 y 7.4.
+ b) btnRecalcCatalogo (Personal, oculto) es un cálculo VIEJO que escribe en
+    RENDIMIENTOS_CATALOGO con otro formato de clave. Nadie lo llama: ELIMINARLO.
+ c) En REGISTROS, btnEnviarExportG tiene comentada la línea del PDF; por eso el
+    botón Excel nunca ejecuta el flujo y sale "No se pudo generar el archivo".
+ d) El error ".fileurl" en la primera línea de btnEnviarExport (Personal) es la
+    línea del PDF: el flujo ExportarPDFGenerico no está agregado a la app o su
+    respuesta no tiene la salida "fileurl". Ver sección 8.
+ e) btnMantCalcular tiene todo su código en la propiedad Visible (por eso los
+    errores "función de comportamiento en una propiedad que no es de
+    comportamiento"). Ver 7.1.
+ f) Hora distinta en SharePoint: Power Apps guarda la hora bien; SharePoint la
+    muestra con la zona horaria del SITIO. Ver 1.2.
+ g) Línea de tiempo y Gantt: siguen con la versión anterior (sin implementar).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. SHAREPOINT Y FÓRMULAS DE APP
+═══════════════════════════════════════════════════════════════════════════════
+
+ 1.1 Columnas nuevas en la lista REGIST (sitio de la app)
+ ─────────────────────────────────────────────────────────
+   Nombre exacto        Tipo
+   INGRESO_PLANILLA     Una línea de texto     (ej. "07:00")
+   SALIDA_PLANILLA      Una línea de texto     (ej. "17:00")
+   MOTIVO_SALIDA        Una línea de texto     (ej. "Permiso Médico 10:00-12:00 · cita IGSS")
+   Se guardan como TEXTO a propósito: así la hora de planilla nunca cambia por
+   la zona horaria. INGRESO y SALIDA reales no se tocan.
+   Después: Power Apps → Datos → REGIST → ⋯ → Actualizar.
+
+ 1.2 Hora distinta en SharePoint (8:00 en la PC, 6:00 en SharePoint)
+ ─────────────────────────────────────────────────────────────────────
+   Power Apps guarda Now() en UTC y SharePoint lo muestra con la zona horaria
+   del sitio. Una diferencia de 2 horas significa que el sitio está en
+   (UTC-08:00) Pacífico. Guatemala es UTC-06:00.
+   Corregir en CADA sitio que usa la app (incluye Proyectos-usuarios):
+     Engranaje ⚙ → Información del sitio → Ver toda la configuración del sitio
+     → Configuración regional → Zona horaria: (UTC-06:00) América Central
+     → Aceptar.
+   Esto no cambia los datos, solo cómo los muestra SharePoint. En la app y en
+   las descargas las horas ya salen correctas (Text() usa la hora del equipo).
+
+ 1.3 Fórmulas de App — fxClave (MODIFICAR, reemplaza la definición completa)
+ ─────────────────────────────────────────────────────────────────────────────
+   Niveles 1–4: igual que antes (los usa el análisis de Rendimientos).
+   Niveles 5–8: lo mismo pero con subactividad "*" (los usa la programación).
+
+fxClave(nivel: Number; gen: Text; mct: Text; prog: Text; op: Text; act: Text; sub: Text): Text =
+    With(
+        { _s: If(nivel >= 5; "*"; fxSub(sub)) };
+        Switch(
+            Mod(nivel - 1; 4) + 1;
+            1; fxTxt(gen) & "|" & fxMct(mct) & "|" & fxTxt(prog) & "|" & fxTxt(op) & "|" & fxTxt(act) & "|" & _s;
+            2; fxTxt(gen) & "|" & fxMct(mct) & "|" & fxTxt(prog) & "|*|" & fxTxt(act) & "|" & _s;
+            3; fxTxt(gen) & "|" & fxMct(mct) & "|*|*|" & fxTxt(act) & "|" & _s;
+            "*|*|*|*|" & fxTxt(act) & "|" & _s
+        )
+    );;
+
+   Lo demás de Fórmulas de App está correcto.
+
+ 1.4 App.OnStart (MODIFICAR solo esta línea, la 106)
+ ─────────────────────────────────────────────────────
+   El catálogo ahora tiene el doble de filas; se carga por nivel para no
+   pasar del límite de 2.000 filas por consulta.
+   Reemplaza:
+    ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+   por:
+    ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+    ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)));;
+   El resto del OnStart está correcto.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. PERSONAL · METAS DE PROGRAMACIÓN
+═══════════════════════════════════════════════════════════════════════════════
+ FLUJO CORRECTO (después de aplicar 1.3, 2.x y 7.4):
+   1) Rendimientos → 📊 Análisis → (opcional: rango en dpMetaDesde/dpMetaHasta,
+      por defecto 180 días) → botón "Recalcular metas" (btnCalcMetasRef).
+      Requiere el permiso rendimientos_metas. Guarda los niveles 1–8 en
+      RENDIMIENTOS_CATALOGO. Hazlo una vez a la semana o después de corregir
+      datos con 🛠 Corregir datos.
+   2) Personal → Programación → "🔄 Recargar metas" (btnRecargarMetas).
+      Vuelve a leer el catálogo y busca la meta de la actividad elegida.
+   3) Elige área → sets → actividad. La meta se busca en este orden:
+      nivel 5 (Generación+MCT+Programa+TipoOp) → 6 (sin TipoOp) → 7 (solo
+      Generación+MCT) → 8 (solo la actividad). Los niveles 5 y 6 se usan
+      solo si su confiabilidad no es "Baja".
+   Si aun así dice "No hay meta": esa actividad tiene menos de 5 registros
+   válidos (MinRegMeta) en el rango. Amplía dpMetaDesde y vuelve a recalcular.
+
+─────────────────────────────────────────────────────────────────
+ btnRecalcCatalogo  (Classic/Button, oculto)  ·  Personal (raíz)
+─────────────────────────────────────────────────────────────────
+ ELIMINAR.
+ Recomendado: en RENDIMIENTOS_CATALOGO borra las filas que tengan la columna
+ Nivel vacía (las dejó ese botón viejo).
+
+─────────────────────────────────────────────────────────────────
+ Personal  (Pantalla)
+─────────────────────────────────────────────────────────────────
+ OnVisible:
+Set(gloVista; "home");;
+Set(gloVistaPedida; "home");;
+Set(gloPaso; 1);;
+ClearCollect(colActividades; ListaActividades);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)))
+
+─────────────────────────────────────────────────────────────────
+ btnRecargarMetas  (Classic/Button)  ·  conProgramacion > "1"
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Refresh(RENDIMIENTOS_CATALOGO);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)));;
+If(gloActividadSel <> ""; Select(btnResolverMeta);; Select(btnCalcNotaEval));;
+If(gloPasoProg = "plan"; Select(btnLoadPaso4));;
+Notify("🔄 Catálogo recargado: " & CountRows(colRendCat) & " metas."; NotificationType.Success)
+─────────────────────────────────────────────────────────────────
+ btnInitProg  (Classic/Button, oculto)  ·  Personal (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Set(gloModoSet; Coalesce(gloModoSet; true));;
+Set(gloPasoProg; "area");;
+Set(gloAreaSel; "");;
+Set(gloActividadSel; "");;
+Set(gloMeta; 8);;
+Set(gloRendMeta; 0);;
+Set(gloRendMin; 0);;
+Set(gloRendMax; 0);;
+Set(gloRendProm; 0);;
+Set(gloRendMedRef; 0);;
+Set(gloConfiabMeta; "Sin meta");;
+Set(gloNivelMeta; 0);;
+Set(gloRegMeta; 0);;
+Set(gloPersMeta; 0);;
+Set(gloClaveMetaUsada; "—");;
+Set(gloEstadoArea; "Disponible de inmediato");;
+Clear(colSetsSel);;
+Clear(colAsignados);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)));;
+ClearCollect(colActividades; ListaActividades)
+ btnResolverMeta, lblRendReconocido, btnLoadPaso4: están correctos (funcionan
+ en cuanto existan los niveles 5–8 en el catálogo).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. PERSONAL · LÍNEA DE TIEMPO
+═══════════════════════════════════════════════════════════════════════════════
+ Queda: encabezado con "📂 Elegir set" → resumen (avance, etapa actual,
+ próxima etapa) → escala → barras con la línea roja de HOY. El set se elige en
+ un popup con búsqueda y filtros (cultivo, área).
+
+─────────────────────────────────────────────────────────────────
+ conLineaTiempo  (GroupContainer AutoLayout)  ·  Principal
+─────────────────────────────────────────────────────────────────
+ Width:             Parent.Width - conMens.Width
+ LayoutAlignItems:  LayoutAlignItems.Stretch
+ LayoutGap:         8
+ PaddingTop / PaddingBottom / PaddingLeft / PaddingRight: 10
+ (Visible, Fill, LayoutOverflowY: están correctos)
+
+ ELIMINAR dentro de conLineaTiempo:
+   • Container92_2 (con drpSetTL, txtBuscarSetTL, galSetsTL, Button23)
+   • rectHoy
+   • colSol_1 (con galEscalaTL)
+   • Button32
+
+─────────────────────────────────────────────────────────────────
+ conTLHeader  (GroupContainer AutoLayout HORIZONTAL)
+              ·  AGREGAR como PRIMER hijo de conLineaTiempo
+─────────────────────────────────────────────────────────────────
+ Height: 56 · FillPortions: 0 · Fill: ColorValue(hexInk)
+ LayoutAlignItems: LayoutAlignItems.Center · LayoutGap: 10
+ PaddingLeft: 12 · PaddingRight: 12
+ Hijos:
+   btnTLElegirSet (Classic/Button)
+     Text:     "📂 Elegir set"
+     Width: 150 · Height: 36
+     Fill:     colGreen
+     Color:    ColorValue(hexInk)
+     OnSelect:
+Set(gPickSetOrigen; "tl");;
+Reset(txtPickSetBuscar);;
+Reset(drpPickSetCultivo);;
+Reset(drpPickSetArea);;
+Set(varPickSet; true);;
+SetFocus(txtPickSetBuscar)
+   lblTLSet (Label)
+     Text:       If(IsBlank(gloSetTL); "Sin set seleccionado"; gloSetTL.SetName)
+     Color:      RGBA(255; 255; 255; 1)
+     FontWeight: FontWeight.Bold · Size: 16 · FillPortions: 1
+
+─────────────────────────────────────────────────────────────────
+ htmlTLResumen  (HtmlViewer)  ·  AGREGAR como 2.º hijo de conLineaTiempo
+─────────────────────────────────────────────────────────────────
+ Height: 96 · FillPortions: 0 · AlignInContainer: AlignInContainer.Stretch
+ HtmlText:
+If(
+    IsBlank(gloSetTL);
+    "";
+    With(
+        {
+            _act: LookUp(colTimeline; Inicio <= Today() And Coalesce(Fin; Inicio) >= Today());
+            _sig: First(Sort(Filter(colTimeline; Inicio > Today()); Inicio; SortOrder.Ascending));
+            _av:  Max(0; Min(100; Round(DateDiff(gloTLMin; Today(); TimeUnit.Days) / Max(gloTLSpan; 1) * 100; 0)))
+        };
+        "<div style='font-family:Segoe UI;display:flex;gap:10px'>" &
+        "<div style='flex:2;border:1px solid #E3E8DD;border-radius:8px;padding:8px 12px;background:#fff'>" &
+            "<div style='font-size:11px;color:#6B7A6F'>Set</div>" &
+            "<div style='font-size:13px;color:#0E2018'><b>" & EncodeHTML(gloSetTL.Area.Value) & "</b> · " & EncodeHTML(gloSetTL.Crop.Value) &
+            " · " & EncodeHTML(gloSetTL.Program.Value) & " · " & EncodeHTML(gloSetTL.Generation.Value) & " · GH " & EncodeHTML(Coalesce(gloSetTL.Greenhouse; "—")) & "</div>" &
+            "<div style='margin-top:6px;height:8px;background:#EEF1EB;border-radius:4px'><div style='width:" & _av & "%;height:8px;background:#2F9E44;border-radius:4px'></div></div>" &
+            "<div style='font-size:10px;color:#6B7A6F;margin-top:2px'>Avance del ciclo: " & _av & "% · " & Text(gloTLMin; "dd/mm/yyyy") & " → " & Text(gloTLMax; "dd/mm/yyyy") & "</div>" &
+        "</div>" &
+        "<div style='flex:1;border:1px solid #E3E8DD;border-radius:8px;padding:8px 12px;background:#E8F5EC'>" &
+            "<div style='font-size:11px;color:#1E7A33'>Etapa actual</div>" &
+            "<div style='font-size:14px;font-weight:700;color:#0E2018'>" & If(IsBlank(_act); "—"; EncodeHTML(_act.Etapa)) & "</div>" &
+            "<div style='font-size:10px;color:#6B7A6F'>" & If(IsBlank(_act); ""; "hasta " & Text(Coalesce(_act.Fin; _act.Inicio); "dd/mm")) & "</div>" &
+        "</div>" &
+        "<div style='flex:1;border:1px solid #E3E8DD;border-radius:8px;padding:8px 12px;background:#FBF1DC'>" &
+            "<div style='font-size:11px;color:#B45309'>Próxima etapa</div>" &
+            "<div style='font-size:14px;font-weight:700;color:#0E2018'>" & If(IsBlank(_sig); "—"; EncodeHTML(_sig.Etapa)) & "</div>" &
+            "<div style='font-size:10px;color:#6B7A6F'>" & If(IsBlank(_sig); ""; "inicia " & Text(_sig.Inicio; "dd/mm") & " (en " & DateDiff(Today(); _sig.Inicio; TimeUnit.Days) & " d)") & "</div>" &
+        "</div></div>"
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ conTLCuerpo  (GroupContainer AutoLayout VERTICAL)
+              ·  AGREGAR como 3.º hijo de conLineaTiempo
+─────────────────────────────────────────────────────────────────
+ FillPortions: 1 · Fill: clrSurface · LayoutAlignItems: LayoutAlignItems.Stretch
+ LayoutGap: 4 · PaddingTop / PaddingBottom / PaddingLeft / PaddingRight: 8
+ MOVER dentro (en este orden): conEscalaTL, galTimeline
+ AGREGAR al final: lblTLVacio (Label)
+     Text:    "Elige un set con 📂 Elegir set para ver su línea de tiempo."
+     Visible: IsEmpty(colTimeline)
+     Align: Align.Center · Color: ColorValue(hexMuted) · Height: 60
+
+ conEscalaTL (dentro de conTLCuerpo):
+     Width: (borrar la fórmula) · AlignInContainer: AlignInContainer.Stretch
+ lblSpacerFechas (en conEscalaTL):  Width: 150
+ galTimeline (dentro de conTLCuerpo):
+     Width / X / Y: (borrar las fórmulas)
+     FillPortions: 1 · TemplateSize: 46
+ lblFechas (galTimeline > conFilaTL):
+     Width: 150
+     Text:
+Text(ThisItem.Inicio; "dd/mm") & " → " & Text(Coalesce(ThisItem.Fin; ThisItem.Inicio); "dd/mm") & " (" & (DateDiff(ThisItem.Inicio; Coalesce(ThisItem.Fin; ThisItem.Inicio); TimeUnit.Days) + 1) & " d)"
+ htmlBar (galTimeline > conFilaTL):
+     HtmlText:
+With(
+    {
+        _ini: Round(DateDiff(gloTLMin; ThisItem.Inicio; TimeUnit.Days) / Max(gloTLSpan; 1) * 100; 2);
+        _anc: Round(Max(1; DateDiff(ThisItem.Inicio; Coalesce(ThisItem.Fin; ThisItem.Inicio); TimeUnit.Days)) / Max(gloTLSpan; 1) * 100; 2);
+        _hoy: Round(DateDiff(gloTLMin; Today(); TimeUnit.Days) / Max(gloTLSpan; 1) * 100; 2);
+        _est: If(Coalesce(ThisItem.Fin; ThisItem.Inicio) < Today(); "fin"; ThisItem.Inicio > Today(); "pend"; "act")
+    };
+    "<div style='position:relative;height:24px;background:#EEF1EB;border-radius:6px;width:100%'>" &
+    "<div style='position:absolute;left:" & _ini & "%;width:" & Max(1; _anc) & "%;height:24px;border-radius:6px;background:" & ThisItem.Hex &
+    ";opacity:" & If(_est = "fin"; "0.55"; "1") & If(_est = "act"; ";box-shadow:0 0 0 2px #0E2018"; "") & "'></div>" &
+    If(_hoy >= 0 And _hoy <= 100; "<div style='position:absolute;left:" & _hoy & "%;top:-3px;width:2px;height:30px;background:#DC2626'></div>"; "") &
+    "</div>"
+)
+ btnEtapa (galTimeline):
+     Text:      ""
+     Visible:   true
+     HoverFill: RGBA(37; 99; 235; 0,06)
+     (OnSelect: está correcto)
+
+─────────────────────────────────────────────────────────────────
+ btnBuildTimeline  (Classic/Button, oculto)  ·  Personal (raíz)
+─────────────────────────────────────────────────────────────────
+ (Ya no elige el primer set de la lista: espera a que elijas uno.)
+ OnSelect:
+If(
+    IsBlank(gloSetTL);
+    Clear(colTimeline);;
+    Set(gloTLMin; Today());;
+    Set(gloTLMax; Today());;
+    Set(gloTLSpan; 1);
+    ClearCollect(
+        colTimeline;
+        Table(
+            {Orden: 1;  Etapa: "Siembra ♂";    Hex: "#2F9E44"; Inicio: Coalesce(gloSetTL.SowingMaleReal; gloSetTL.SowingMaleExp);       Fin: Coalesce(gloSetTL.SowingFemReal; gloSetTL.SowingFemExp; gloSetTL.SowingMaleExp)};
+            {Orden: 2;  Etapa: "Trasplante";   Hex: "#16A34A"; Inicio: Coalesce(gloSetTL.TransplantReal; gloSetTL.TransplantExp);        Fin: Coalesce(gloSetTL.TransplantDeliv; gloSetTL.TransplantExp)};
+            {Orden: 3;  Etapa: "Tejido pre";   Hex: "#7C5CFF"; Inicio: Coalesce(gloSetTL.TissuePreReal; gloSetTL.TissuePreExp);          Fin: Coalesce(gloSetTL.TissuePreDeliv; gloSetTL.TissuePreExp)};
+            {Orden: 4;  Etapa: "Polinización"; Hex: "#E8A93C"; Inicio: Coalesce(gloSetTL.PolStartReal; gloSetTL.PolStartExp);            Fin: Coalesce(gloSetTL.PolEndReal; gloSetTL.PolEndExp)};
+            {Orden: 5;  Etapa: "Tejido post";  Hex: "#A855F7"; Inicio: Coalesce(gloSetTL.TissuePostReal; gloSetTL.TissuePostExp);        Fin: Coalesce(gloSetTL.TissuePostDeliv; gloSetTL.TissuePostExp)};
+            {Orden: 6;  Etapa: "Cosecha";      Hex: "#DC2626"; Inicio: Coalesce(gloSetTL.HarvestFirstReal; gloSetTL.HarvestFirstExp);    Fin: Coalesce(gloSetTL.HarvestLastReal; gloSetTL.HarvestLastExp)};
+            {Orden: 7;  Etapa: "Procesos";     Hex: "#B45309"; Inicio: Coalesce(gloSetTL.ProcessingReal; gloSetTL.ProcessingExp);        Fin: Coalesce(gloSetTL.ProcessingDeliv; gloSetTL.ProcessingExp)};
+            {Orden: 8;  Etapa: "Fingerprint";  Hex: "#C026D3"; Inicio: Coalesce(gloSetTL.FingerprintSeedsReal; gloSetTL.FingerprintSeedsExp); Fin: Coalesce(gloSetTL.FingerprintSeedsDeliv; gloSetTL.FingerprintSeedsExp)};
+            {Orden: 9;  Etapa: "SPA";          Hex: "#2563EB"; Inicio: Coalesce(gloSetTL.SPAReal; gloSetTL.SPAExp);                      Fin: Coalesce(gloSetTL.SPADeliv; gloSetTL.SPAExp)};
+            {Orden: 10; Etapa: "Envío";        Hex: "#0F766E"; Inicio: Coalesce(gloSetTL.ShippingReal; gloSetTL.ShippingExp);            Fin: Coalesce(gloSetTL.ShippingDeliv; gloSetTL.ShippingExp)}
+        )
+    );;
+    ClearCollect(colTimeline; Filter(colTimeline; !IsBlank(Inicio)));;
+    Set(gloTLMin; Min(colTimeline; Inicio));;
+    Set(gloTLMax; Max(colTimeline; Coalesce(Fin; Inicio)));;
+    Set(gloTLSpan; Max(1; DateDiff(gloTLMin; gloTLMax; TimeUnit.Days)))
+)
+─────────────────────────────────────────────────────────────────
+ conPickSet  (GroupContainer ManualLayout)  ·  AGREGAR en Personal (raíz),
+             al final de la vista de árbol (encima de todo)
+─────────────────────────────────────────────────────────────────
+ Visible: varPickSet · X: 0 · Y: 0 · Width: Parent.Width · Height: Parent.Height
+ Fill: RGBA(16; 30; 44; 0,55)
+ Hijos:
+   btnPickSetScrim (Classic/Button)
+     X: 0 · Y: 0 · Width: Parent.Width · Height: Parent.Height · Text: ""
+     Fill / HoverFill / PressedFill: RGBA(0; 0; 0; 0) · BorderThickness: 0
+     OnSelect: Set(varPickSet; false)
+   conPickSetCard (GroupContainer AutoLayout VERTICAL)  — debe quedar ENCIMA del scrim
+     Width:  Min(860; Parent.Width - 40)
+     Height: Min(620; Parent.Height - 60)
+     X:      (Parent.Width - Self.Width) / 2
+     Y:      (Parent.Height - Self.Height) / 2
+     Fill: RGBA(255; 255; 255; 1) · LayoutGap: 6 · LayoutAlignItems: LayoutAlignItems.Stretch
+     Hijos de conPickSetCard:
+       conPickSetHead (GroupContainer horizontal)
+         Height: 48 · FillPortions: 0 · Fill: ColorValue(hexInk)
+         LayoutAlignItems: LayoutAlignItems.Center · PaddingLeft: 12 · PaddingRight: 8
+         • lblPickSetTit (Label)  Text: "📂 Seleccionar set"
+             Color: RGBA(255; 255; 255; 1) · FontWeight: FontWeight.Bold · Size: 14 · FillPortions: 1
+         • icoPickSetCerrar (ModernIcon)  Icon: "Dismiss" · IconColor: RGBA(255; 255; 255; 1)
+             OnSelect: Set(varPickSet; false)
+       conPickSetFiltros (GroupContainer horizontal)
+         Height: 48 · FillPortions: 0 · LayoutGap: 6 · LayoutAlignItems: LayoutAlignItems.Center
+         PaddingLeft: 10 · PaddingRight: 10
+         • txtPickSetBuscar (Classic/TextInput)  HintText: "Buscar set…" · DelayOutput: true · FillPortions: 1
+         • drpPickSetCultivo (ModernCombobox)
+             Items: Choices([@DATASUMMARY1].Crop) · ItemDisplayText: ThisItem.Value
+             SelectMultiple: false · Width: 180 · InputTextPlaceholder: "Cultivo"
+         • drpPickSetArea (ModernCombobox)
+             Items: Choices([@DATASUMMARY1].Area) · ItemDisplayText: ThisItem.Value
+             SelectMultiple: false · Width: 180 · InputTextPlaceholder: "Área"
+         • icoPickSetLimpiar (ModernIcon)  Icon: "Dismiss" · IconColor: ColorValue(hexDanger)
+             OnSelect: Reset(txtPickSetBuscar);; Reset(drpPickSetCultivo);; Reset(drpPickSetArea)
+       galPickSet (Gallery vertical)
+         FillPortions: 1 · TemplateSize: 60 · TemplatePadding: 4
+         WrapCount: If(Parent.Width >= 760; 2; 1)
+         Items:
+Sort(
+    Filter(
+        DATASUMMARY1;
+        IsBlank(Trim(txtPickSetBuscar.Text)) Or StartsWith(SetName; Trim(txtPickSetBuscar.Text));
+        IsBlank(drpPickSetCultivo.Selected.Value) Or Crop.Value = drpPickSetCultivo.Selected.Value;
+        IsBlank(drpPickSetArea.Selected.Value) Or Area.Value = drpPickSetArea.Selected.Value
+    );
+    SetName;
+    SortOrder.Ascending
+)
+         Plantilla de galPickSet:
+         • conFilaPickSet (GroupContainer vertical)
+             Width: Parent.TemplateWidth · Height: Parent.TemplateHeight
+             PaddingLeft: 10 · PaddingTop: 4
+             Fill: If(ThisItem.ID = gloSetTL.ID; ColorValue(hexLeafSoft); ColorValue(hexSurface2))
+             - lblPickSetNombre (Label)  Text: ThisItem.SetName · FontWeight: FontWeight.Bold · Size: 12
+             - lblPickSetDet (Label)     Size: 10 · Color: ColorValue(hexMuted)
+                 Text: ThisItem.Area.Value & " · " & ThisItem.Crop.Value & " · " & ThisItem.Program.Value & " · " & ThisItem.Generation.Value & " · GH " & Coalesce(ThisItem.Greenhouse; "—")
+         • btnPickSetSel (Classic/Button)  — encima de conFilaPickSet
+             X: 0 · Y: 0 · Width: Parent.TemplateWidth · Height: Parent.TemplateHeight · Text: ""
+             Fill / PressedFill: RGBA(0; 0; 0; 0) · HoverFill: RGBA(37; 99; 235; 0,06) · BorderThickness: 0
+             OnSelect:
+Switch(gPickSetOrigen; "tl"; Set(gloSetTL; ThisItem);; Select(btnBuildTimeline));;
+Set(varPickSet; false)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. PERSONAL · GANTT DE PERSONAL
+═══════════════════════════════════════════════════════════════════════════════
+ Antes cargaba TODA la lista PROGRAMACION_PERSONAS, el color de las barras
+ estaba comentado (HTML roto) y el panel de detalle estaba dentro del
+ contenedor AutoLayout. Ahora: rango 7/14/30 días con ◀ ▶, búsqueda, filtro de
+ área, escala por día, línea de hoy y panel lateral de detalle.
+
+─────────────────────────────────────────────────────────────────
+ btnBuildGanttPers  (Classic/Button, oculto)  ·  Personal (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Set(gGPDias; Coalesce(gGPDias; 14));;
+Set(gGPDesde; Coalesce(gGPDesde; DateAdd(Today(); -(Weekday(Today(); StartOfWeek.Monday) - 1); TimeUnit.Days)));;
+Set(gGPHasta; DateAdd(gGPDesde; gGPDias - 1; TimeUnit.Days));;
+ClearCollect(colGP; Filter(PROGRAMACION_PERSONAS; FechaInicio <= gGPHasta; FechaFin >= gGPDesde));;
+ClearCollect(
+    colAreas;
+    ForAll(
+        Filter(AREAS; Activa = true) As a;
+        {
+            Area: a.Area;
+            Hex:  Coalesce(
+                      If(IsBlank(Trim(Coalesce(a.Hex; ""))); Blank(); a.Hex);
+                      Switch(
+                          Coalesce(a.Tipos.Value; "");
+                          "Greenhouse"; "#2F9E44";
+                          "Produccion"; "#0E7C86";
+                          "Nursery";    "#E8A93C";
+                          "Semilleros"; "#B45309";
+                          "SPA";        "#2563EB";
+                          "Procesos";   "#7C3AED";
+                          "Crop";       "#1E7A33";
+                          "#0D323D"
+                      )
+                  )
+        }
+    )
+);;
+Set(gloGPMin; gGPDesde);;
+Set(gloGPMax; gGPHasta);;
+Set(gloGPSpan; gGPDias);;
+ClearCollect(colGPPersonas; ForAll(Distinct(colGP; Persona) As p; { Value: p.Value }))
+─────────────────────────────────────────────────────────────────
+ conGanttPers  (GroupContainer AutoLayout)  ·  Principal
+─────────────────────────────────────────────────────────────────
+ Width:             Parent.Width - conMens.Width
+ LayoutAlignItems:  LayoutAlignItems.Stretch
+ LayoutGap:         6
+ Fill:              clrSurface3
+ (Visible, Height, Padding: están correctos)
+
+ ELIMINAR dentro de conGanttPers:
+   • galEscalaGP1 (con lblTickGP)
+   • conDrawerGP1 (con galGPDetalle)  → se recrea afuera (conDrawerGPDet)
+   • btnGPScrim
+   • conEscalaGP > lblEscalaSpacerGP
+   • galGanttPers > galBarrasPer
+   • galGanttPers > filaGP > lblGPPer
+ ELIMINAR en Personal (raíz):
+   • conDrawerGP (no se usa)
+
+─────────────────────────────────────────────────────────────────
+ conGPHeader  (GroupContainer AutoLayout HORIZONTAL)
+              ·  AGREGAR como PRIMER hijo de conGanttPers
+─────────────────────────────────────────────────────────────────
+ Height: 52 · FillPortions: 0 · Fill: ColorValue(hexInk)
+ LayoutAlignItems: LayoutAlignItems.Center · LayoutGap: 6 · PaddingLeft: 10 · PaddingRight: 10
+ Hijos (en este orden):
+   icoGPPrev (ModernIcon)  Icon: "ChevronLeft" · IconColor: RGBA(255; 255; 255; 1)
+     OnSelect: Set(gGPDesde; DateAdd(gGPDesde; -gGPDias; TimeUnit.Days));; Select(btnBuildGanttPers)
+   lblGPRango (Label)
+     Text: Text(gGPDesde; "dd/mm/yyyy") & " – " & Text(gGPHasta; "dd/mm/yyyy")
+     Color: RGBA(255; 255; 255; 1) · FontWeight: FontWeight.Bold · Width: 220 · Align: Align.Center
+   icoGPNext (ModernIcon)  Icon: "ChevronRight" · IconColor: RGBA(255; 255; 255; 1)
+     OnSelect: Set(gGPDesde; DateAdd(gGPDesde; gGPDias; TimeUnit.Days));; Select(btnBuildGanttPers)
+   btnGPHoy (Classic/Button)  Text: "Esta semana" · Width: 110 · Fill: colGreen · Color: ColorValue(hexInk)
+     OnSelect:
+Set(gGPDesde; DateAdd(Today(); -(Weekday(Today(); StartOfWeek.Monday) - 1); TimeUnit.Days));;
+Select(btnBuildGanttPers)
+   btnGP7 (Classic/Button)   Text: "7 d" · Width: 60
+     Fill:  If(gGPDias = 7; colGreen; RGBA(255; 255; 255; 0,15))
+     Color: If(gGPDias = 7; ColorValue(hexInk); RGBA(255; 255; 255; 1))
+     OnSelect: Set(gGPDias; 7);; Select(btnBuildGanttPers)
+   btnGP14 (Classic/Button)  Text: "14 d" · Width: 60
+     Fill:  If(gGPDias = 14; colGreen; RGBA(255; 255; 255; 0,15))
+     Color: If(gGPDias = 14; ColorValue(hexInk); RGBA(255; 255; 255; 1))
+     OnSelect: Set(gGPDias; 14);; Select(btnBuildGanttPers)
+   btnGP30 (Classic/Button)  Text: "30 d" · Width: 60
+     Fill:  If(gGPDias = 30; colGreen; RGBA(255; 255; 255; 0,15))
+     Color: If(gGPDias = 30; ColorValue(hexInk); RGBA(255; 255; 255; 1))
+     OnSelect: Set(gGPDias; 30);; Select(btnBuildGanttPers)
+   txtGPBuscar (Classic/TextInput)  HintText: "Buscar persona…" · FillPortions: 1 · DelayOutput: true
+   drpGPArea (ModernCombobox)
+     Items: Sort(Distinct(colGP; Area); Value; SortOrder.Ascending)
+     ItemDisplayText: ThisItem.Value · SelectMultiple: false · Width: 180 · InputTextPlaceholder: "Área"
+   lblGPTotal (Label)
+     Text: CountRows(galGanttPers.AllItems) & " pers. · " & CountRows(colGP) & " asign."
+     Color: RGBA(255; 255; 255; 1) · Width: 150
+
+─────────────────────────────────────────────────────────────────
+ conEscalaGP  (GroupContainer)  ·  conGanttPers (2.º hijo)
+─────────────────────────────────────────────────────────────────
+ Height: 40 · FillPortions: 0 · Width: (borrar la fórmula)
+ HtmlText2 (HtmlViewer, dentro de conEscalaGP):
+   Width: (borrar la fórmula) · FillPortions: 1
+   HtmlText:
+"<div style='display:flex;font-family:Segoe UI;height:36px'>" &
+"<div style='width:180px;flex:0 0 180px;font-size:12px;font-weight:700;color:#0E2018;display:flex;align-items:center;padding-left:6px'>Persona</div>" &
+"<div style='flex:1;display:flex'>" &
+Concat(
+    Sequence(gGPDias; 0) As i;
+    With(
+        { f: DateAdd(gGPDesde; i.Value; TimeUnit.Days) };
+        "<div style='flex:1;text-align:center;border-left:1px solid #E3E8DD;font-size:10px;line-height:14px;padding-top:3px;background:" &
+        If(f = Today(); "#FCE9E9"; Weekday(f; StartOfWeek.Monday) >= 6; "#F2F4EE"; "#FFFFFF") &
+        ";color:" & If(f = Today(); "#DC2626"; "#5c6b79") & "'>" &
+        Switch(Weekday(f; StartOfWeek.Monday); 1; "L"; 2; "M"; 3; "X"; 4; "J"; 5; "V"; 6; "S"; "D") &
+        If(gGPDias <= 14; "<br><b>" & Text(f; "dd/mm") & "</b>"; "<br>" & Day(f)) & "</div>"
+    )
+) &
+"</div></div>"
+
+─────────────────────────────────────────────────────────────────
+ galGanttPers  (Gallery)  ·  conGanttPers (3.º hijo)
+─────────────────────────────────────────────────────────────────
+ Height: (borrar la fórmula) · FillPortions: 1 · TemplateSize: 44
+ Items:
+Sort(
+    Filter(
+        colGPPersonas As p;
+        IsBlank(Trim(txtGPBuscar.Text)) Or (Trim(txtGPBuscar.Text) in p.Value);
+        IsBlank(drpGPArea.Selected.Value) Or CountRows(Filter(colGP; Persona = p.Value And Area = drpGPArea.Selected.Value)) > 0
+    );
+    Value;
+    SortOrder.Ascending
+)
+ filaGP (dentro de galGanttPers):
+   Width: Parent.TemplateWidth · Height: Parent.TemplateHeight
+ htmlBarPer (dentro de filaGP):
+   Width / X / Y: (borrar) · Height: Parent.Height · AlignInContainer: AlignInContainer.Stretch
+   HtmlText:
+With(
+    { _asig: Filter(colGP; Persona = ThisItem.Value) };
+    "<div style='display:flex;align-items:center;height:42px;border-bottom:1px solid #eef1eb;background:#fff;font-family:Segoe UI'>" &
+    "<div style='width:180px;flex:0 0 180px;box-sizing:border-box;padding-left:6px;overflow:hidden'>" &
+        "<div style='font-size:12px;color:#16273a;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & EncodeHTML(ThisItem.Value) & "</div>" &
+        "<div style='font-size:10px;color:#6B7A6F'>" & CountRows(_asig) & " asignación(es)</div>" &
+    "</div>" &
+    "<div style='flex:1;position:relative;height:30px;background:#F2F4EE;border-radius:4px'>" &
+    If(
+        Today() >= gGPDesde And Today() <= gGPHasta;
+        "<div style='position:absolute;left:" & Round((DateDiff(gGPDesde; Today(); TimeUnit.Days) + 0,5) / gGPDias * 100; 2) & "%;top:0;width:2px;height:30px;background:#DC2626;z-index:5'></div>";
+        ""
+    ) &
+    Concat(
+        _asig As b;
+        With(
+            {
+                _i: If(b.FechaInicio < gGPDesde; gGPDesde; b.FechaInicio);
+                _f: If(Coalesce(b.FechaFin; b.FechaInicio) > gGPHasta; gGPHasta; Coalesce(b.FechaFin; b.FechaInicio))
+            };
+            "<div title='" & EncodeHTML(b.Actividad & " · " & b.Area & " · " & b.Jornada) & "' style='position:absolute;top:3px;left:" &
+            Round(DateDiff(gGPDesde; _i; TimeUnit.Days) / gGPDias * 100; 2) & "%;width:" &
+            Round((DateDiff(_i; _f; TimeUnit.Days) + 1) / gGPDias * 100 - 0,4; 2) &
+            "%;height:24px;border-radius:5px;padding:0 6px;box-sizing:border-box;display:flex;align-items:center;overflow:hidden;background:" &
+            Coalesce(LookUp(colAreas; Area = b.Area; Hex); "#2F9E44") & If(b.Jornada = "Media jornada"; ";opacity:0.7"; "") & "'>" &
+            "<span style='color:#fff;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis'>" & EncodeHTML(b.Actividad) & "</span></div>"
+        )
+    ) &
+    "</div></div>"
+)
+ btnGPDetalle (dentro de galGanttPers):
+   X: 0 · Width: Parent.TemplateWidth · Height: Parent.TemplateHeight · Text: ""
+   OnSelect:
+Set(gloGPSel; ThisItem.Value);;
+ClearCollect(colGPDetalle; Sort(Filter(colGP; Persona = ThisItem.Value); FechaInicio; SortOrder.Ascending));;
+Set(varDrawerGP; true)
+
+─────────────────────────────────────────────────────────────────
+ lblGPVacio  (Label)  ·  AGREGAR al final de conGanttPers
+─────────────────────────────────────────────────────────────────
+ Text:    "No hay personal programado en este rango."
+ Visible: IsEmpty(colGP)
+ Align: Align.Center · Color: ColorValue(hexMuted) · Height: 60
+
+─────────────────────────────────────────────────────────────────
+ conDrawerGPDet  (GroupContainer ManualLayout)  ·  AGREGAR en Personal (raíz),
+                 al final de la vista de árbol
+─────────────────────────────────────────────────────────────────
+ Visible: varDrawerGP · X: 0 · Y: 0 · Width: Parent.Width · Height: Parent.Height
+ Fill: RGBA(16; 30; 44; 0,45)
+ Hijos:
+   btnGPDetScrim (Classic/Button)
+     X: 0 · Y: 0 · Width: Parent.Width · Height: Parent.Height · Text: ""
+     Fill / HoverFill / PressedFill: RGBA(0; 0; 0; 0) · BorderThickness: 0
+     OnSelect: Set(varDrawerGP; false)
+   conGPDetCard (GroupContainer AutoLayout VERTICAL) — encima del scrim
+     Width: Min(440; Parent.Width) · Height: Parent.Height
+     X: Parent.Width - Self.Width · Y: 0 · Fill: RGBA(255; 255; 255; 1)
+     LayoutAlignItems: LayoutAlignItems.Stretch
+     Hijos:
+       conGPDetHead (GroupContainer horizontal)
+         Height: 52 · FillPortions: 0 · Fill: ColorValue(hexInk)
+         LayoutAlignItems: LayoutAlignItems.Center · PaddingLeft: 12 · PaddingRight: 8
+         • lblGPDetTit (Label)
+             Text: "👤 " & gloGPSel & " · " & CountRows(colGPDetalle) & " asignación(es)"
+             Color: RGBA(255; 255; 255; 1) · FontWeight: FontWeight.Bold · FillPortions: 1
+         • icoGPDetCerrar (ModernIcon)  Icon: "Dismiss" · IconColor: RGBA(255; 255; 255; 1)
+             OnSelect: Set(varDrawerGP; false)
+       galGPDetalle2 (Gallery vertical)
+         Items: colGPDetalle · TemplateSize: 70 · FillPortions: 1
+         • htmlGPDetFila (HtmlViewer)  Width: Parent.TemplateWidth · Height: Parent.TemplateHeight
+             HtmlText:
+"<div style='font-family:Segoe UI;padding:6px 12px;border-bottom:1px solid #eef1eb;border-left:5px solid " & Coalesce(LookUp(colAreas; Area = ThisItem.Area; Hex); "#2F9E44") & "'>" &
+"<div style='font-size:12px;font-weight:700;color:#0E2018'>" & EncodeHTML(ThisItem.Actividad) & "</div>" &
+"<div style='font-size:11px;color:#5c6b79'>" & Text(ThisItem.FechaInicio; "dd/mm/yyyy") & " → " & Text(Coalesce(ThisItem.FechaFin; ThisItem.FechaInicio); "dd/mm/yyyy") &
+" · " & EncodeHTML(ThisItem.Area) & " · " & EncodeHTML(Coalesce(ThisItem.Jornada; "Jornada")) & "</div>" &
+"<div style='font-size:10px;color:#6B7A6F'>Meta " & Text(Coalesce(ThisItem.MetaOpHora; ThisItem.OpHora; 0); "[$-es]0,0") & " op/h · eval. " & Coalesce(ThisItem.NivelEval; 0) & "/4</div></div>"
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. REGISTROS · HORAS DE PLANILLA Y MOTIVO DE SALIDA
+═══════════════════════════════════════════════════════════════════════════════
+ Regla de redondeo (a la hora completa más cercana; la media hora sube):
+   06:55 → 07:00 · 07:05 → 07:00 · 07:29 → 07:00 · 07:30 → 08:00
+   16:55 → 17:00 · 18:30 → 19:00
+ INGRESO y SALIDA (reales) se siguen guardando igual. Las horas de planilla se
+ guardan en INGRESO_PLANILLA y SALIDA_PLANILLA (texto "hh:mm").
+ Si la persona tiene un permiso autorizado hoy, al marcar su salida se guarda
+ en MOTIVO_SALIDA (ej. "Permiso Médico 10:00-12:00 · cita IGSS"), se muestra en
+ conUltimoScan con fondo morado y aparece en el Historial y en el Excel.
+
+─────────────────────────────────────────────────────────────────
+ btnEjecutarScan  (Classic/Button, oculto)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO; misma lógica + planilla + motivo):
+Set(gAhoraScan; Now());;
+Set(gHoraPlanilla; Text(Time(RoundDown((Hour(gAhoraScan) * 60 + Minute(gAhoraScan) + 30) / 60; 0); 0; 0); "hh:mm"));;
+Set(
+    gMotivoSalida;
+    If(
+        IsBlank(gPermisoHoy);
+        "";
+        "Permiso " & gPermisoHoy.TipoPermiso &
+        If(gPermisoHoy.DiaCompleto; " (día completo)"; " " & Text(gPermisoHoy.FechaInicio; "hh:mm") & "-" & Text(gPermisoHoy.FechaFin; "hh:mm")) &
+        If(IsBlank(Trim(gPermisoHoy.Motivo)); ""; " · " & Trim(gPermisoHoy.Motivo))
+    )
+);;
+Set(gRegNuevo; Blank());;
+If(
+    gAccionScan = "CIERRE_E_INGRESO";
+    Concurrent(
+        Patch(REGIST; {ID: gRegAbierto.ID}; { ESTADO: {Value: "SIN SALIDA"}; DIA_LABORADO: true; OBSERVACION: "Salida no marcada. Cerrado automáticamente al registrar ingreso del " & Text(Now(); "dd/mm/yyyy hh:mm") });
+        Set(
+            gResNuevo;
+            Patch(
+                ASISTENCIA_RESUMEN;
+                Coalesce(LookUp(ASISTENCIA_RESUMEN; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                {
+                    Title:             gCodScan;
+                    Nombre:            gPersonaScan.Nombre;
+                    UltimoDiaLaborado: gUltEf;
+                    DiasConsecutivos:  gConsEf;
+                    DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(IsBlank(gResumenScan.UltimoDiaLaborado) Or gUltEf <> gResumenScan.UltimoDiaLaborado; 1; 0)
+                }
+            )
+        )
+    );;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    RemoveIf(colResGar; Title = gCodScan);;
+    Collect(colResGar; gResNuevo);;
+    Set(gResumenScan; gResNuevo);;
+    Set(gAccionScan; "INGRESO")
+);;
+If(
+    gAccionScan = "INGRESO";
+    IfError(
+        Concurrent(
+            Set(
+                gRegNuevo;
+                Patch(
+                    REGIST;
+                    Defaults(REGIST);
+                    {
+                        Title:              gCodScan & " - " & Text(Today(); "yyyymmdd");
+                        FECHA:              Today();
+                        CODIGO:             gCodScan;
+                        NOMBRE:             gPersonaScan.Nombre;
+                        TIPO:               "Empleado";
+                        AREA:               {Value: If(IsBlank(gPersonaScan.SEDE); gSedeGarita; gPersonaScan.SEDE)};
+                        DEPARTAMENTO:       gPersonaScan.DEPARTAMENTO;
+                        CATEGORIA:          {Value: gPersonaScan.Categoria.Value};
+                        GRUPO_JORNADA:      If(IsBlank(gPersonaScan.GrupoJornada); "L-V"; gPersonaScan.GrupoJornada);
+                        INGRESO:            gAhoraScan;
+                        INGRESO_PLANILLA:   gHoraPlanilla;
+                        ESTADO:             {Value: "ADENTRO"};
+                        DIA_LABORADO:       false;
+                        DIA_CONSECUTIVO:    gRachaScan;
+                        DIA_DESCANSO:       Not(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()));
+                        EXCEPCION:          gExcepcion;
+                        JUSTIFICACION:      gJustifExc;
+                        AUTORIZA_EXCEPCION: gAutorizaExc;
+                        REGISTRA_INGRESO:   gCorreoUsuario
+                    }
+                )
+            );
+            Set(
+                gResNuevo;
+                Patch(
+                    ASISTENCIA_RESUMEN;
+                    Coalesce(LookUp(ASISTENCIA_RESUMEN; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                    { Title: gCodScan; Nombre: gPersonaScan.Nombre; EstadoSitio: "ADENTRO"; UltimoIngreso: Now() }
+                )
+            )
+        );
+        Set(gRegNuevo; Blank())
+    );;
+    If(
+        IsBlank(gRegNuevo.ID);
+        Set(gAccionScan; "ERROR");;
+        Set(gMsgScan; "No se pudo guardar el ingreso de " & gPersonaScan.Nombre & ". Revise la conexión y escanee de nuevo.");
+        Collect(colAdentro; gRegNuevo);;
+        Collect(colHoyGar; gRegNuevo);;
+        RemoveIf(colResGar; Title = gCodScan);;
+        Collect(colResGar; gResNuevo);;
+        If(
+            gExcepcion And gCorreoAlertaScan <> "";
+            IfError(
+                Office365Outlook.SendEmailV2(
+                    gCorreoAlertaScan;
+                    "⛔ Ingreso por excepción: " & gPersonaScan.Nombre;
+                    "<div style='font-family:Segoe UI'><p><b>" & EncodeHTML(gPersonaScan.Nombre) & "</b> (" & gCodScan & ") ingresó el " & Text(Now(); "dd/mm/yyyy hh:mm") & " superando el límite de días laborados.</p>" &
+                    "<p>Día consecutivo: <b>" & gRachaScan & "</b> · Días en 7: <b>" & gDias7Scan & "</b></p>" &
+                    "<p>Justificación: <i>" & EncodeHTML(gJustifExc) & "</i><br>Autorizó: <b>" & EncodeHTML(gAutorizaExc) & "</b><br>Registró: " & gCorreoUsuario & "</p></div>";
+                    { Importance: "High" }
+                );
+                Notify("No se pudo enviar el aviso al supervisor."; NotificationType.Warning)
+            )
+        );;
+        Set(
+            gUltimoScan;
+            {
+                Nombre:  gPersonaScan.Nombre;
+                Tipo:    "INGRESO";
+                Hora:    Now();
+                Hex:     If(gExcepcion; "#E8A93C"; "#2F9E44");
+                Mensaje: gPersonaScan.DEPARTAMENTO & " · día " & gRachaScan & " consecutivo" &
+                         If(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()); ""; " · DÍA DE DESCANSO según su jornada") &
+                         If(gExcepcion; " · INGRESO POR EXCEPCIÓN"; "") &
+                         If(IsBlank(gPermisoHoy); ""; " · 📝 permiso " & gPermisoHoy.TipoPermiso & " " & Text(gPermisoHoy.FechaInicio; "hh:mm") & "-" & Text(gPermisoHoy.FechaFin; "hh:mm"))
+            }
+        )
+    )
+);;
+If(
+    gAccionScan = "SALIDA";
+    With(
+        {
+            _h:     Round(DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) / 60; 2);
+            _hPrev: Sum(Filter(colDiaScan; ID <> gRegAbierto.ID And ESTADO.Value = "AFUERA"); Coalesce(HORAS; 0));
+            _esp:   fxHorasEsperadas(gGrupoScan.DiasLaborales; gGrupoScan.HorasDia; gGrupoScan.HorasUltimoDia; gRegAbierto.FECHA)
+        };
+        With(
+            {
+                _hDia:      _hPrev + _h;
+                _yaContado: gResumenScan.UltimoDiaLaborado = gRegAbierto.FECHA
+            };
+            With(
+                { _heSeg: Round(Max(0; _hDia - _esp) - Max(0; _hPrev - _esp); 2) };
+                Set(gRegSal; Blank());;
+                IfError(
+                    Concurrent(
+                        Set(
+                            gRegSal;
+                            Patch(
+                                REGIST;
+                                {ID: gRegAbierto.ID};
+                                {
+                                    SALIDA:          gAhoraScan;
+                                    SALIDA_PLANILLA: gHoraPlanilla;
+                                    MOTIVO_SALIDA:   gMotivoSalida;
+                                    ESTADO:          {Value: "AFUERA"};
+                                    HORAS:           _h;
+                                    DIA_LABORADO:    _hDia >= HorasMinDiaLaborado;
+                                    HE_REALES:       _heSeg;
+                                    REGISTRA_SALIDA: gCorreoUsuario
+                                }
+                            )
+                        );
+                        Set(
+                            gResNuevo;
+                            Patch(
+                                ASISTENCIA_RESUMEN;
+                                Coalesce(LookUp(ASISTENCIA_RESUMEN; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                                {
+                                    Title:             gCodScan;
+                                    Nombre:            gPersonaScan.Nombre;
+                                    EstadoSitio:       "AFUERA";
+                                    UltimaSalida:      Now();
+                                    HorasSitioAcum:    Coalesce(gResumenScan.HorasSitioAcum; 0) + _h;
+                                    HEDetectadasAcum:  Coalesce(gResumenScan.HEDetectadasAcum; 0) + _heSeg;
+                                    DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(_hDia >= HorasMinDiaLaborado And Not(_yaContado); 1; 0);
+                                    DiasConsecutivos:  If(
+                                                           _hDia >= HorasMinDiaLaborado And Not(_yaContado);
+                                                           If(gResumenScan.UltimoDiaLaborado = DateAdd(gRegAbierto.FECHA; -1; TimeUnit.Days); Coalesce(gResumenScan.DiasConsecutivos; 0) + 1; 1);
+                                                           Coalesce(gResumenScan.DiasConsecutivos; 0)
+                                                       );
+                                    UltimoDiaLaborado: If(_hDia >= HorasMinDiaLaborado; gRegAbierto.FECHA; gResumenScan.UltimoDiaLaborado)
+                                }
+                            )
+                        )
+                    );
+                    Set(gRegSal; Blank())
+                );;
+                If(
+                    IsBlank(gRegSal.ID);
+                    Set(gAccionScan; "ERROR");;
+                    Set(gMsgScan; "No se pudo guardar la salida de " & gPersonaScan.Nombre & ". Escanee de nuevo.");
+                    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+                    RemoveIf(colHoyGar; ID = gRegAbierto.ID);;
+                    Collect(colHoyGar; gRegSal);;
+                    RemoveIf(colResGar; Title = gCodScan);;
+                    Collect(colResGar; gResNuevo);;
+                    Set(
+                        gUltimoScan;
+                        {
+                            Nombre:  gPersonaScan.Nombre;
+                            Tipo:    "SALIDA";
+                            Hora:    Now();
+                            Hex:     If(gMotivoSalida = ""; "#2563EB"; "#7C3AED");
+                            Mensaje: If(gMotivoSalida = ""; ""; "📝 " & gMotivoSalida & " · ") &
+                                     Text(_h; "[$-es]0,0") & " h en este tramo · día: " & Text(_hDia; "[$-es]0,0") & " h" &
+                                     If(_hDia >= HorasMinDiaLaborado; " · ✔ día laborado"; " · ✖ aún no completa " & HorasMinDiaLaborado & " h") &
+                                     If(_heSeg > 0; " · HE detectadas: " & Text(_heSeg; "[$-es]0,0") & " h"; "")
+                        }
+                    )
+                )
+            )
+        )
+    )
+);;
+If(
+    gAccionScan = "VISITA_CIERRE_NUEVA";
+    Patch(REGIST; {ID: gRegAbierto.ID}; { ESTADO: {Value: "SIN SALIDA"}; OBSERVACION: "Carnet no devuelto. Cerrado al reasignar el " & Text(Now(); "dd/mm/yyyy hh:mm") });;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    Set(gAccionScan; "VISITA_NUEVA")
+);;
+If(
+    gAccionScan = "VISITA_NUEVA";
+    Set(gVisManual; false);;
+    Set(gCodVisita; gCodScan);;
+    Reset(txtVisNombre);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);;
+    Set(varPopVisita; true)
+);;
+If(
+    gAccionScan = "VISITA_SALIDA";
+    Set(gRegSal; Patch(REGIST; {ID: gRegAbierto.ID}; { SALIDA: Now(); ESTADO: {Value: "AFUERA"}; HORAS: Round(DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) / 60; 2); REGISTRA_SALIDA: gCorreoUsuario }));;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    RemoveIf(colHoyGar; ID = gRegAbierto.ID);;
+    Collect(colHoyGar; gRegSal);;
+    Set(gUltimoScan; { Nombre: gRegAbierto.NOMBRE; Tipo: "SALIDA"; Hora: Now(); Hex: "#2563EB"; Mensaje: "Visitante · carnet " & gCodScan & " devuelto" })
+);;
+If(gAccionScan = "BLOQUEO"; Set(varPopExcepcion; true));;
+If(gAccionScan = "AVISO"; Set(gUltimoScan; { Nombre: If(IsBlank(gPersonaScan.Nombre); gCodScan; gPersonaScan.Nombre); Tipo: "AVISO"; Hora: Now(); Hex: "#E8A93C"; Mensaje: gMsgScan }));;
+If(gAccionScan = "ERROR"; Set(gUltimoScan; { Nombre: gCodScan; Tipo: "ERROR"; Hora: Now(); Hex: "#DC2626"; Mensaje: gMsgScan }));;
+Set(gBusyScan; varPopVisita Or varPopExcepcion);;
+If(Not(gBusyScan); SetFocus(txtScan); varPopVisita; SetFocus(txtVisNombre); SetFocus(txtExcJustif))
+─────────────────────────────────────────────────────────────────
+ tmrSyncGarita  (Timer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ (Ahora también actualiza los permisos del día cada 30 s, para que un permiso
+  autorizado en la mañana aparezca en garita sin recargar.)
+ OnTimerEnd:
+If(
+    Not(gBusyScan) And (fxPuede("garita") Or fxPuede("garita_evacuacion"));
+    If(
+        gFechaCarga <> Today();
+        Select(btnCargarGarita);
+        Concurrent(
+            ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));
+            ClearCollect(colHoyGar; Filter(REGIST; FECHA = Today()));
+            ClearCollect(colPermHoy; Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; FechaInicio < DateAdd(Today(); 1; TimeUnit.Days); FechaFin >= Today()))
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ lblHNota  (Label)  ·  Historial > Detalle > galHist > conFilaHist
+─────────────────────────────────────────────────────────────────
+ Text:
+If(ThisItem.EXCEPCION; "⚠️ " & ThisItem.JUSTIFICACION & " (" & ThisItem.AUTORIZA_EXCEPCION & ")  "; "") &
+If(IsBlank(ThisItem.MOTIVO_SALIDA); ""; "🚪 " & ThisItem.MOTIVO_SALIDA & "  ") &
+If(ThisItem.EXCEPCION Or Not(IsBlank(ThisItem.MOTIVO_SALIDA)); ""; Coalesce(ThisItem.OBSERVACION; ""))
+
+ hdrHNota (Label) · Historial > Detalle > hdrHist
+   Text: "NOTA / MOTIVO SALIDA"
+
+─────────────────────────────────────────────────────────────────
+ btnArmarExpHist  (Classic/Button, oculto)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ (Agrega al Excel: IngresoPlanilla, SalidaPlanilla, HorasPlanilla y
+  MotivoSalida, justo después de Ingreso/Salida reales.)
+ OnSelect:
+Set(gNombreExp; "Asistencia_" & gHistVista & "_" & Text(gHistDesde; "yyyymmdd") & "_" & Text(gHistHasta; "yyyymmdd"));;
+Set(gHojaExp; gHistVista);;
+If(
+    gHistVista = "Detalle";
+    Set(gColsExp; "Fecha;Codigo;Nombre;Tipo;Departamento;Sede;Grupo;Ingreso;Salida;IngresoPlanilla;SalidaPlanilla;HorasPlanilla;MotivoSalida;Horas;DiaLaborado;HEReales;Estado;DiaDescanso;Excepcion;Justificacion;Autorizo;VisitaEmpresa;VisitaA;Observacion");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistFiltrado; FECHA & NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Fecha:         Text(r.FECHA; "dd/mm/yyyy");
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Tipo:          If(IsBlank(r.TIPO); If(r.CATEGORIA.Value = "V"; "Visitante"; "Empleado"); r.TIPO);
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    Sede:          "" & r.AREA.Value;
+                    Grupo:         "" & r.GRUPO_JORNADA;
+                    Ingreso:       Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                    Salida:        If(IsBlank(r.SALIDA); ""; Text(r.SALIDA; "dd/mm/yyyy hh:mm"));
+                    IngresoPlanilla: "" & r.INGRESO_PLANILLA;
+                    SalidaPlanilla:  "" & r.SALIDA_PLANILLA;
+                    HorasPlanilla:   If(
+                                         IsBlank(r.INGRESO_PLANILLA) Or IsBlank(r.SALIDA_PLANILLA);
+                                         Blank();
+                                         Mod(Value(Left(r.SALIDA_PLANILLA; 2)) - Value(Left(r.INGRESO_PLANILLA; 2)) + 24; 24)
+                                     );
+                    MotivoSalida:    "" & r.MOTIVO_SALIDA;
+                    Horas:         Coalesce(r.HORAS; 0);
+                    DiaLaborado:   If(r.DIA_LABORADO; "Sí"; "No");
+                    HEReales:      Coalesce(r.HE_REALES; 0);
+                    Estado:        "" & r.ESTADO.Value;
+                    DiaDescanso:   If(r.DIA_DESCANSO; "Sí"; "No");
+                    Excepcion:     If(r.EXCEPCION; "Sí"; "No");
+                    Justificacion: "" & r.JUSTIFICACION;
+                    Autorizo:      "" & r.AUTORIZA_EXCEPCION;
+                    VisitaEmpresa: "" & r.VISITA_EMPRESA;
+                    VisitaA:       "" & r.VISITA_A;
+                    Observacion:   "" & r.OBSERVACION
+                }
+            );
+            JSONFormat.Compact
+        )
+    );
+    Set(gColsExp; "Codigo;Nombre;Departamento;DiasLaborados;Horas;HEReales;HEAutorizadas;Diferencia;SinSalida;Excepciones;Denegados");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistResumen; NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    DiasLaborados: r.Dias;
+                    Horas:         r.Horas;
+                    HEReales:      r.HEReales;
+                    HEAutorizadas: r.HEAutorizadas;
+                    Diferencia:    r.Diferencia;
+                    SinSalida:     r.SinSalida;
+                    Excepciones:   r.Excepciones;
+                    Denegados:     r.Denegados
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportG)
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. REGISTROS · PESTAÑA "PERMISOS" PARA GARITA
+═══════════════════════════════════════════════════════════════════════════════
+ Garita ve SOLO los permisos AUTORIZADOS (persona, tipo, desde, hasta, horas,
+ quién autorizó) y si la persona ya salió hoy. No puede autorizar ni rechazar.
+ Las descargas quedan ocultas y deshabilitadas, listas para activarse después.
+
+ PASO A · Copiar el contenedor
+   1. Pantalla Personal → Vista de árbol → conVista_Permisos → conPermLista →
+      clic derecho → Copiar.
+   2. Pantalla REGISTROS → Vista de árbol → clic en conGarita → Ctrl+V.
+   3. Power Apps le pone "_1" al final a cada control copiado (conPermLista_1,
+      galPermisos_1, etc.). Si te pone otro número, usa ese nombre.
+   4. Arrastra conPermLista_1 para que quede DENTRO de conGarita, debajo de
+      Historial.
+   Los errores que aparezcan al pegar se quitan con los cambios del Paso B.
+
+ PASO B · Cambios en la copia
+
+ conPermLista_1 (GroupContainer) · conGarita
+   Visible:      gGarTab = "Perm"
+   FillPortions: 1
+
+ dpPermFDesde_1 (ModernDatePicker) · conPermLista_1 > conPermFiltros_1
+   DefaultDate: Today()
+   OnChange:    Select(btnPermFCargar_1)
+ dpPermFHasta_1 (ModernDatePicker) · conPermFiltros_1
+   DefaultDate: Today()
+   OnChange:    Select(btnPermFCargar_1)
+ drpPermFEstado_1 (ModernCombobox) · conPermFiltros_1
+   Visible: false            (garita solo ve autorizados)
+ txtPermFBuscar_1 (Classic/TextInput) · conPermFiltros_1
+   (está correcto)
+ btnPermFCargar_1 (Classic/Button) · conPermFiltros_1
+   OnSelect:
+Set(gPermGarDesde; Coalesce(dpPermFDesde_1.SelectedDate; Today()));;
+Set(gPermGarHasta; DateAdd(Coalesce(dpPermFHasta_1.SelectedDate; Today()); 1; TimeUnit.Days));;
+ClearCollect(
+    colPermGar;
+    Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; FechaFin >= gPermGarDesde; FechaInicio < gPermGarHasta)
+)
+ btnPermExcel_1 (Classic/Button) · conPermFiltros_1   (deshabilitado para después)
+   OnSelect:    Notify("Descarga no habilitada en garita."; NotificationType.Information)
+   DisplayMode: DisplayMode.Disabled
+   Visible:     false
+ btnPermPDF_1 (Classic/Button) · conPermFiltros_1     (deshabilitado para después)
+   OnSelect:    Notify("Descarga no habilitada en garita."; NotificationType.Information)
+   DisplayMode: DisplayMode.Disabled
+   Visible:     false
+
+ Label189_1 (Label) · conPermLista_1 > hdrPerm_1
+   Text: "AUTORIZÓ"
+ Label191_1 (Label) · hdrPerm_1
+   Text: "SALIDA HOY"
+
+ galPermisos_1 (Gallery) · conPermLista_1
+   Items:
+Sort(
+    Filter(
+        colPermGar;
+        IsBlank(Trim(txtPermFBuscar_1.Text)) Or StartsWith(NombrePersona; Trim(txtPermFBuscar_1.Text)) Or StartsWith(Codigo; Trim(txtPermFBuscar_1.Text))
+    );
+    FechaInicio;
+    SortOrder.Ascending
+)
+
+ lblPerQuien_1 (Label) · galPermisos_1 > conFilaPerm01_1
+   Text: Coalesce(ThisItem.AutorizadoPor; "—")
+
+ conPerAcc_1 (GroupContainer, con btnPermAutorizar_1 y btnPermRechazar_1)
+   · galPermisos_1 > conFilaPerm01_1
+   ELIMINAR (garita no autoriza ni rechaza).
+
+ lblPerSalidaGar (Label) · AGREGAR como último hijo de conFilaPerm01_1
+   FillPortions: 1,3 · Align: Align.Center · Size: 10 · FontWeight: FontWeight.Semibold
+   Text:
+With(
+    { _r: First(Sort(Filter(colHoyGar; Upper(Trim(CODIGO)) = Upper(Trim(ThisItem.Codigo))); INGRESO; SortOrder.Descending)) };
+    If(
+        IsBlank(_r); "Sin ingreso hoy";
+        _r.ESTADO.Value = "ADENTRO"; "🟢 Adentro desde " & Text(_r.INGRESO; "hh:mm");
+        "🚪 Salió " & Text(_r.SALIDA; "hh:mm")
+    )
+)
+   Color:
+With(
+    { _r: First(Sort(Filter(colHoyGar; Upper(Trim(CODIGO)) = Upper(Trim(ThisItem.Codigo))); INGRESO; SortOrder.Descending)) };
+    If(IsBlank(_r); ColorValue(hexMuted); _r.ESTADO.Value = "ADENTRO"; ColorValue(hexLeafDark); ColorValue(hexInfo))
+)
+
+ lblPerPersona_1, lblPerTipo_1, lblPerDesde_1, lblPerHasta_1, lblPerHoras_1,
+ lblPerEstado_1: están correctos (vienen de la copia).
+
+ PASO C · Botón de la pestaña
+
+ btnGarTabPerm (Classic/Button) · AGREGAR en conGarita > conGarHeader,
+   después de btnGarTabHist (copia btnGarTabHist y pégalo en conGarHeader)
+   Text:     "📝 Permisos"
+   Width:    140
+   Fill:     If(gGarTab = "Perm"; ColorValue(hexInfo); ColorValue("#10384F"))
+   Visible:  fxPuede("garita") Or fxPuede("garita_historial")
+   OnSelect: Set(gGarTab; "Perm");; Select(btnPermFCargar_1)
+   (Color, Height, AlignInContainer: los mismos de la copia)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. RENDIMIENTOS · CORRECCIONES
+═══════════════════════════════════════════════════════════════════════════════
+
+ 7.1 btnMantCalcular  (Classic/Button, oculto)  ·  scrRendimientos (raíz)
+ ────────────────────────────────────────────────────────────────────────
+   El código está pegado en Visible. Corrígelo así:
+     1. Selecciona btnMantCalcular → propiedad Visible → clic en la barra de
+        fórmulas → Ctrl+A → Ctrl+X (cortar).
+     2. Escribe en Visible:   false
+     3. Cambia a la propiedad OnSelect → Ctrl+V (pegar).
+   Con eso desaparecen todos los errores "función de comportamiento".
+
+ 7.2 Actividades solo de NURSERY
+ ────────────────────────────────
+   En Personal (programación y permisos) se dejan TODAS las actividades.
+   En Rendimientos se filtran por el área NURSERY.
+   Nota: escribí la columna como AREA (texto). Si en ListaActividades es una
+   columna de opción, cambia  AREA = "NURSERY"  por  AREA.Value = "NURSERY".
+   Si la columna se llama distinto (por ejemplo Area), usa ese nombre.
+
+ galActividad (Gallery) · conVista_Detalle > conTab_Grupal > Container29
+   Items:
+Sort(
+    Filter(
+        ListaActividades;
+        AREA = "NURSERY";
+        txtBuscarPersonal.Text = "" Or StartsWith(Actividad; txtBuscarPersonal.Text);
+        !gVerSoloSeleccionados Or Actividad = gActividad
+    );
+    Actividad;
+    SortOrder.Ascending
+)
+
+ galActInd (Gallery) · conVista_Detalle > conTab_Individual > conIndCard
+   Items:
+If(
+    !IsBlank(gRegIndActivo);
+    Table({ Value: gRegIndActivo.Job });
+    RenameColumns(Filter(ListaActividades; AREA = "NURSERY"); Actividad; Value)
+)
+
+ 7.3 🧪 Procesos: solo la actividad "Proceso de semilla"
+ ────────────────────────────────────────────────────────
+   Uso el nombre "Proceso de semilla", que es como está escrito en el resto de
+   la app (frutos, metas). Si en ListaActividades está con otro nombre exacto,
+   cámbialo en la línea  Job = "Proceso de semilla".
+
+ btnCargarProc (Classic/Button, oculto) · scrRendimientos (raíz)
+   OnSelect:
+Set(gProcDesde; Coalesce(gProcDesde; Today()));;
+Set(gProcHasta; Coalesce(gProcHasta; gProcDesde));;
+If(gProcHasta < gProcDesde; Set(gProcHasta; gProcDesde));;
+If(
+    DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) > 62;
+    Notify("⚠️ Elige un rango de máximo 2 meses."; NotificationType.Warning);
+    Clear(colProc);;
+    ForAll(
+        Sequence(DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) + 1; 0) As _dia;
+        With(
+            { _f: DateAdd(gProcDesde; _dia.Value; TimeUnit.Days) };
+            Collect(
+                colProc;
+                ForAll(
+                    Filter(
+                        REGISTRO_PERSONAL1;
+                        FechaInicio >= _f;
+                        FechaInicio < DateAdd(_f; 1; TimeUnit.Days);
+                        Job = "Proceso de semilla"
+                    ) As _r;
+                    {
+                        ID:          _r.ID;
+                        Fecha:       _r.FechaInicio;
+                        FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm");
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "—");
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        Generacion:  fxTxt(_r.Generation);
+                        Mct:         fxMct(_r.MTC);
+                        Invernadero: Coalesce(_r.Greenhouse; "—");
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Mat:         IfError(Value(Coalesce(_r.CantidadMateriales; "0")); 0);
+                        HoraIni:     Coalesce(_r.HoraInicio; Text(_r.FechaInicio; "[$-es]hh:mm"));
+                        HoraFin:     If(IsBlank(_r.FechaFin); "—"; Coalesce(_r.HoraFin; Text(_r.FechaFin; "[$-es]hh:mm")));
+                        Horas:       If(IsBlank(_r.FechaFin); 0; Coalesce(_r.HorasTotales; 0));
+                        Estado:      Coalesce(_r.Estado.Value; "—")
+                    }
+                )
+            )
+        )
+    )
+)
+ drpProcAct (ModernCombobox) · conVista_Procesos > conProcHead
+   Visible: false
+ lblProcTit (Label) · conProcHead
+   Text: "🧪 Procesos de semilla · registro diario"
+ galProc, galProcKpi, galProcCult: están correctos.
+
+ 7.4 btnCalcMetasRef  (Classic/Button)  ·  conVista_AnaGlobal > conModoGlobal
+ ─────────────────────────────────────────────────────────────────────────────
+   Ahora guarda los niveles 1–8 (5–8 = actividad sin subactividad, para la
+   programación) y carga el catálogo por nivel.
+   OnSelect (REEMPLAZAR COMPLETO):
+Notify("⏳ Recalculando metas: se leen los registros día por día, puede tardar 1–2 minutos…"; NotificationType.Information);;
+Set(gMetaDesde; Coalesce(dpMetaDesde.SelectedDate; DateAdd(Today(); -180; TimeUnit.Days)));;
+Set(gMetaHasta; DateAdd(Coalesce(dpMetaHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+
+Clear(colMetaBruto);;
+ForAll(
+    Sequence(DateDiff(gMetaDesde; gMetaHasta; TimeUnit.Days); 0) As _dia;
+    With(
+        { _f: DateAdd(gMetaDesde; _dia.Value; TimeUnit.Days) };
+        Collect(
+            colMetaBruto;
+            ForAll(
+                Filter(
+                    REGISTRO_PERSONAL1;
+                    Estado.Value = "Finalizado";
+                    HorasTotales > 0;
+                    HorasTotales <= MaxHorasRegistro;
+                    FechaInicio >= _f;
+                    FechaInicio < DateAdd(_f; 1; TimeUnit.Days)
+                ) As _r;
+                With(
+                    {
+                        _h: Coalesce(_r.HorasTotales; 0);
+                        _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                        _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                        _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+                    };
+                    {
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Gen:         fxTxt(_r.Generation);
+                        Mct:         fxMct(_r.MTC);
+                        Prog:        fxTxt(_r.Program);
+                        TipoOp:      fxTxt(_r.TypeOperation.Value);
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        FechaRaw:    _fi;
+                        MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                        Horas:       _h;
+                        Mat:         _m;
+                        Rend:        If(_h > 0; _m / _h; 0)
+                    }
+                )
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colMetaDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colMetaBruto; FechaRaw; Codigo; _d) As _g;
+                {
+                    ClaveDia: Text(_g.FechaRaw; "[$-es]yyyymmdd") & "|" & _g.Codigo;
+                    HorasDia: Sum(_g._d; Horas)
+                }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colMetaRaw;
+    Filter(
+        ForAll(
+            colMetaBruto As _b;
+            {
+                Codigo: _b.Codigo; Persona: _b.Persona; SetName: _b.SetName;
+                Actividad: _b.Actividad; SubAct: _b.SubAct;
+                Gen: _b.Gen; Mct: _b.Mct; Prog: _b.Prog; TipoOp: _b.TipoOp;
+                Horas: _b.Horas; Mat: _b.Mat; Rend: _b.Rend;
+                MismoDia: _b.MismoDia;
+                DiaOk: Not(
+                    (Text(_b.FechaRaw; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colMetaDiaExcl.ClaveDia
+                );
+                MatOk: _b.Mat > 0
+                       Or _b.SetName in SetsSinMaterialOK
+                       Or _b.Actividad in ActividadesSinMaterialOK
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk;
+        Rend > 0
+    )
+);;
+
+ClearCollect(
+    colMetaLargo;
+    Ungroup(
+        Table(
+            { _t: ForAll(colMetaRaw As r; { Nivel: 1; Clave: fxClave(1; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen; Mct: r.Mct; Prog: r.Prog; TipoOp: r.TipoOp; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 2; Clave: fxClave(2; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen; Mct: r.Mct; Prog: r.Prog; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 3; Clave: fxClave(3; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen; Mct: r.Mct; Prog: "*"; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 4; Clave: fxClave(4; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: "*"; Mct: "*"; Prog: "*"; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 5; Clave: fxClave(5; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: "*"; Gen: r.Gen; Mct: r.Mct; Prog: r.Prog; TipoOp: r.TipoOp; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 6; Clave: fxClave(6; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: "*"; Gen: r.Gen; Mct: r.Mct; Prog: r.Prog; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 7; Clave: fxClave(7; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: "*"; Gen: r.Gen; Mct: r.Mct; Prog: "*"; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };
+            { _t: ForAll(colMetaRaw As r; { Nivel: 8; Clave: fxClave(8; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: "*"; Gen: "*"; Mct: "*"; Prog: "*"; TipoOp: "*"; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) }
+        );
+        _t
+    )
+);;
+
+ClearCollect(
+    colMetasCalc;
+    Filter(
+        ForAll(
+            GroupBy(colMetaLargo; Nivel; Clave; Actividad; SubAct; Gen; Mct; Prog; TipoOp; _d) As g;
+            With(
+                {
+                    _o: Sort(g._d; Rend; SortOrder.Ascending);
+                    _n: CountRows(g._d)
+                };
+                With(
+                    {
+                        _l25: RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _f25: 1 + (_n - 1) * 0,25 - RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _l50: RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _f50: 1 + (_n - 1) * 0,50 - RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _l75: RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _f75: 1 + (_n - 1) * 0,75 - RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _l90: RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _f90: 1 + (_n - 1) * 0,90 - RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _nn: _n
+                    };
+                    With(
+                        {
+                            _p25: Last(FirstN(_o; _l25)).Rend + (Last(FirstN(_o; Min(_l25 + 1; _nn))).Rend - Last(FirstN(_o; _l25)).Rend) * _f25;
+                            _p50: Last(FirstN(_o; _l50)).Rend + (Last(FirstN(_o; Min(_l50 + 1; _nn))).Rend - Last(FirstN(_o; _l50)).Rend) * _f50;
+                            _p75: Last(FirstN(_o; _l75)).Rend + (Last(FirstN(_o; Min(_l75 + 1; _nn))).Rend - Last(FirstN(_o; _l75)).Rend) * _f75;
+                            _p90: Last(FirstN(_o; _l90)).Rend + (Last(FirstN(_o; Min(_l90 + 1; _nn))).Rend - Last(FirstN(_o; _l90)).Rend) * _f90;
+                            _hs: Sum(g._d; Horas);
+                            _ms: Sum(g._d; Mat);
+                            _np: CountRows(Distinct(g._d; Codigo))
+                        };
+                        {
+                            Clave:         g.Clave;
+                            Nivel:         g.Nivel;
+                            Actividad:     g.Actividad;
+                            SubActividad:  g.SubAct;
+                            Generation:    g.Gen;
+                            MCT:           g.Mct;
+                            Program:       g.Prog;
+                            OperationType: g.TipoOp;
+                            RendP25:       Round(_p25; 1);
+                            RendMediana:   Round(_p50; 1);
+                            RendMeta:      Round(_p75; 1);
+                            RendP90:       Round(_p90; 1);
+                            RendPromedio:  If(_hs > 0; Round(_ms / _hs; 1); 0);
+                            NumRegistros:  _nn;
+                            NumPersonas:   _np;
+                            Confiabilidad: fxConfiab(_nn; _np)
+                        }
+                    )
+                )
+            )
+        );
+        NumRegistros >= MinRegMeta
+    )
+);;
+
+ForAll(
+    colMetasCalc As mc;
+    Patch(
+        RENDIMIENTOS_CATALOGO;
+        Coalesce(LookUp(RENDIMIENTOS_CATALOGO; Title = mc.Clave); Defaults(RENDIMIENTOS_CATALOGO));
+        {
+            Title:         mc.Clave;
+            Nivel:         mc.Nivel;
+            Actividad:     mc.Actividad;
+            SubActividad:  mc.SubActividad;
+            Generation:    mc.Generation;
+            MCT:           mc.MCT;
+            Program:       mc.Program;
+            OperationType: mc.OperationType;
+            RendP25:       mc.RendP25;
+            RendMeta:      mc.RendMeta;
+            RendP90:       mc.RendP90;
+            RendPromedio:  mc.RendPromedio;
+            RendMediana:   mc.RendMediana;
+            NumRegistros:  mc.NumRegistros;
+            NumPersonas:   mc.NumPersonas;
+            Confiabilidad: mc.Confiabilidad;
+            FechaCalculo:  Now()
+        }
+    )
+);;
+
+Refresh(RENDIMIENTOS_CATALOGO);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)));;
+Notify(
+    "✅ Metas recalculadas: " & CountRows(colMetasCalc) & " combinaciones | " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Alta")) & " Alta · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Media")) & " Media · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Baja")) & " Baja. Registros válidos: " &
+    CountRows(colMetaRaw) & " de " & CountRows(colMetaBruto);
+    NotificationType.Success
+);;
+Select(btnCargarGlobal)
+ 7.5 btnCargarGlobal  (Classic/Button, oculto)  ·  conVista_AnaGlobal
+ ─────────────────────────────────────────────────────────────────────
+   Solo cambia la carga del catálogo (por nivel). Lo demás es igual.
+   OnSelect (REEMPLAZAR COMPLETO):
+Set(gGDesde; Coalesce(dpGDesde.SelectedDate; DateAdd(Today(); -30; TimeUnit.Days)));;
+Set(gGHasta; DateAdd(Coalesce(dpGHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)));;
+
+Clear(colGlobalBruto);;
+ForAll(
+    Sequence(DateDiff(gGDesde; gGHasta; TimeUnit.Days); 0) As _dia;
+    With(
+        { _f: DateAdd(gGDesde; _dia.Value; TimeUnit.Days) };
+        Collect(
+            colGlobalBruto;
+            ForAll(
+                Filter(
+                    REGISTRO_PERSONAL1;
+                    Estado.Value = "Finalizado";
+                    HorasTotales > 0;
+                    HorasTotales <= MaxHorasRegistro;
+                    FechaInicio >= _f;
+                    FechaInicio < DateAdd(_f; 1; TimeUnit.Days)
+                ) As _r;
+                With(
+                    {
+                        _h: Coalesce(_r.HorasTotales; 0);
+                        _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                        _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                        _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+                    };
+                    {
+                        IDReg:       _r.ID;
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Program:     fxTxt(_r.Program);
+                        Generacion:  fxTxt(_r.Generation);
+                        Trial:       fxTxt(_r.TrialIntent);
+                        Mct:         fxMct(_r.MTC);
+                        TipoOp:      fxTxt(_r.TypeOperation.Value);
+                        Field:       Coalesce(_r.Field; "—");
+                        Greenhouse:  Coalesce(_r.Greenhouse; "—");
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                        Responsable: Coalesce(_r.Responsable; "—");
+                        EstadoTxt:   Coalesce(_r.Estado.Value; "Finalizado");
+                        Comentarios: Coalesce(_r.Comentarios; "Sin comentarios");
+                        Fecha:       _fi;
+                        FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm/yyyy");
+                        HoraIni:     Coalesce(_r.HoraInicio; "—");
+                        HoraFin:     Coalesce(_r.HoraFin; "—");
+                        Horas:       _h;
+                        Mat:         _m;
+                        Frutos:      Coalesce(_r.NumeroFrutos; 0);
+                        Rend:        If(_h > 0; _m / _h; 0);
+                        MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                        MatOk:       _m > 0
+                                     Or Coalesce(_r.SetName; "") in SetsSinMaterialOK
+                                     Or fxTxt(_r.Job) in ActividadesSinMaterialOK
+                    }
+                )
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colGlobalDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colGlobalBruto; Fecha; Codigo; _d) As _g;
+                { ClaveDia: Text(_g.Fecha; "[$-es]yyyymmdd") & "|" & _g.Codigo; HorasDia: Sum(_g._d; Horas) }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colGlobalRaw;
+    Filter(
+        ForAll(
+            colGlobalBruto As _b;
+            {
+                IDReg: _b.IDReg; SetName: _b.SetName; Cultivo: _b.Cultivo;
+                Actividad: _b.Actividad; SubAct: _b.SubAct; Program: _b.Program;
+                Generacion: _b.Generacion; Trial: _b.Trial; Mct: _b.Mct; TipoOp: _b.TipoOp;
+                Field: _b.Field; Greenhouse: _b.Greenhouse; Codigo: _b.Codigo;
+                Persona: _b.Persona; Responsable: _b.Responsable; EstadoTxt: _b.EstadoTxt;
+                Comentarios: _b.Comentarios; Fecha: _b.Fecha; FechaTxt: _b.FechaTxt;
+                HoraIni: _b.HoraIni; HoraFin: _b.HoraFin; Horas: _b.Horas; Mat: _b.Mat;
+                Frutos: _b.Frutos; Rend: _b.Rend;
+                MismoDia: _b.MismoDia; MatOk: _b.MatOk;
+                DiaOk: Not((Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colGlobalDiaExcl.ClaveDia);
+                ClaveM1: fxClave(1; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM2: fxClave(2; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM3: fxClave(3; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM4: fxClave(4; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveGF: Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad & "|" & _b.SubAct;
+                ClaveGA: _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk
+    )
+);;
+
+Set(gGlobalTrunc; false);;
+Clear(colExclGF);;
+Clear(colExclGA);;
+Clear(colExclGM);;
+Select(btnRecalcGlobal)
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. DESCARGAS EXCEL / PDF
+═══════════════════════════════════════════════════════════════════════════════
+ Los botones de descarga de las 3 pantallas (btnArmarExp…) están correctos.
+ Lo que falla es el envío al flujo y el flujo mismo.
+
+ 8.1 Botón de envío (el MISMO OnSelect en las tres pantallas)
+ ─────────────────────────────────────────────────────────────
+   • btnEnviarExport   (Classic/Button, oculto) · Personal (raíz)
+   • btnEnviarExportG  (Classic/Button, oculto) · REGISTROS (raíz)
+   • btnEnviarExportR  (Classic/Button, oculto) · scrRendimientos (raíz)
+
+   VERSIÓN A — cuando YA tengas los DOS flujos agregados a la app
+   (ExportarExcelGenerico y ExportarPDFGenerico). OnSelect:
+If(
+    IsBlank(gJsonExp) Or gJsonExp = "[]";
+    Notify("⚠️ No hay datos para exportar con los filtros actuales."; NotificationType.Warning);
+    Notify("⏳ Generando " & If(gFormatoExp = "pdf"; "PDF"; "Excel") & "… espera unos segundos."; NotificationType.Information);;
+    Set(gUrlExp; "");;
+    Set(gErrExp; "");;
+    IfError(
+        If(
+            gFormatoExp = "pdf";
+            Set(gUrlExp; ExportarPDFGenerico.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp).fileurl);
+            Set(gUrlExp; ExportarExcelGenerico.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp).fileurl)
+        );
+        Set(gErrExp; FirstError.Message);;
+        Set(gUrlExp; "")
+    );;
+    If(
+        IsBlank(gUrlExp);
+        Notify("❌ No se pudo generar el archivo. " & gErrExp & " · Revisa el historial de ejecuciones del flujo."; NotificationType.Error);
+        Launch(gUrlExp);;
+        Notify("📄 Archivo listo."; NotificationType.Success)
+    )
+)
+
+   VERSIÓN B — TEMPORAL, mientras el flujo PDF no exista (todo sale en Excel).
+   Úsala si al pegar la versión A te marca error en ".fileurl" de la línea
+   del PDF. OnSelect:
+If(
+    IsBlank(gJsonExp) Or gJsonExp = "[]";
+    Notify("⚠️ No hay datos para exportar con los filtros actuales."; NotificationType.Warning);
+    Notify(If(gFormatoExp = "pdf"; "ℹ️ El PDF aún no está activo: se genera en Excel."; "⏳ Generando Excel… espera unos segundos."); NotificationType.Information);;
+    Set(gUrlExp; "");;
+    Set(gErrExp; "");;
+    IfError(
+        Set(gUrlExp; ExportarExcelGenerico.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp).fileurl);
+        Set(gErrExp; FirstError.Message);;
+        Set(gUrlExp; "")
+    );;
+    If(
+        IsBlank(gUrlExp);
+        Notify("❌ No se pudo generar el archivo. " & gErrExp & " · Revisa el historial de ejecuciones del flujo."; NotificationType.Error);
+        Launch(gUrlExp);;
+        Notify("📄 Archivo listo."; NotificationType.Success)
+    )
+)
+
+ 8.2 Error de diseño en ".fileurl"
+ ──────────────────────────────────
+   Power Apps marca ".fileurl" cuando NO encuentra esa salida en el flujo:
+     a) El flujo no está agregado a la app (o se agregó antes de terminarlo).
+     b) La última acción del flujo no es "Responder a una aplicación o flujo
+        de Power Apps", o la salida no se llama exactamente  fileurl.
+   Solución:
+     1. En el flujo, la ÚLTIMA acción debe ser
+        "Responder a una aplicación o flujo de Power Apps" →
+        + Agregar una salida → Texto → Nombre: fileurl → Valor: el vínculo.
+        Debe estar fuera de cualquier Condición o Ámbito. Guarda.
+     2. En Power Apps Studio → icono Power Automate (barra izquierda) →
+        en el flujo ⋯ → Quitar de la aplicación.
+     3. + Agregar flujo → elige el flujo otra vez.
+     4. Vuelve a pegar el OnSelect de 8.1. Repite esto cada vez que cambies
+        entradas o salidas del flujo.
+
+ 8.3 Mensaje "❌ No se pudo generar el archivo" (sitio Proyectos-usuarios)
+ ──────────────────────────────────────────────────────────────────────────
+   Primero mira el motivo: make.powerautomate.com → Mis flujos →
+   ExportarExcelGenerico → "Historial de ejecuciones de 28 días" → abre la
+   ejecución con error → el paso en ROJO dice qué falta. Con la versión de
+   8.1 también verás el mensaje del error en la app.
+
+   Revisa estos puntos del flujo ExportarExcelGenerico:
+   Paso 1 · Power Apps (V2): 4 entradas de TEXTO en este orden exacto:
+            nombreArchivo, nombreHoja, columnas, datosJson.
+   Paso 2 · Componer "NombreBase" · Entradas > Expresión:
+            concat(triggerBody()?['text'], '_', formatDateTime(convertFromUtc(utcNow(), 'Central America Standard Time'), 'yyyyMMdd_HHmmss'))
+            triggerBody()?['text'] es la PRIMERA entrada. Si el archivo sale
+            sin nombre, cambia esa parte por el contenido dinámico
+            "nombreArchivo".
+   Paso 3 · SharePoint · Obtener contenido de archivo mediante ruta de acceso
+            Dirección del sitio: Proyectos-usuarios
+            Ruta: elígela con el ícono de carpeta (no la escribas). Aunque la
+            biblioteca se vea como "Documentos", la ruta real es
+            /Shared Documents/Exportaciones/PlantillaVacia.xlsx
+   Paso 4 · SharePoint · Crear archivo
+            Sitio: Proyectos-usuarios · Carpeta: /Shared Documents/Exportaciones
+            Nombre: salida de NombreBase + .xlsx · Contenido: paso 3
+   Paso 5 · Retraso: súbelo a 5 segundos.
+   Paso 6 · Excel Online (Business) · Ejecutar script
+            Ubicación: Proyectos-usuarios · Biblioteca: Documentos
+            Archivo: "Id" del paso 4 · Script: ExportarExcelGenerico
+            (el script debe estar guardado en el OneDrive de la MISMA cuenta
+            dueña del flujo, en Documentos > Office Scripts).
+   Paso 7 · SharePoint · Crear vínculo para compartir: Sitio Proyectos-usuarios,
+            Biblioteca Documentos, Id = "ItemId" del paso 4, Tipo Ver,
+            Ámbito Organización.
+            Si este paso falla por política de uso compartido, bórralo y en el
+            paso 8 usa como valor esta expresión (cambia TUEMPRESA por el
+            nombre de tu tenant, el que aparece en la dirección del sitio):
+            concat('https://TUEMPRESA.sharepoint.com/sites/Proyectos-usuarios', outputs('Crear_archivo')?['body/Path'], '?web=1')
+   Paso 8 · Responder a una aplicación o flujo de Power Apps
+            Salida Texto  fileurl  = vínculo del paso 7 (o la expresión).
+
+   Para que funcione a TODOS los usuarios (no solo a ti):
+     Flujo → Detalles → "Usuarios con permisos de solo ejecución" → Editar →
+     en SharePoint, Excel Online y OneDrive elige
+     "Usar esta conexión (tu cuenta)" → Guardar.
+     Los usuarios deben tener al menos permiso de LECTURA en la carpeta
+     Exportaciones del sitio Proyectos-usuarios para abrir el archivo.
+
+   El flujo ExportarPDFGenerico es igual hasta el paso 6 (en OneDrive) y
+   agrega: Retraso 5 s → OneDrive "Convertir archivo" (PDF) → SharePoint
+   "Crear archivo" en Proyectos-usuarios /Shared Documents/Exportaciones →
+   OneDrive "Eliminar archivo" → Crear vínculo → Responder con fileurl.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. ORDEN DE IMPLEMENTACIÓN Y PRUEBAS
+═══════════════════════════════════════════════════════════════════════════════
+  1. SharePoint: columnas de REGIST (1.1) y zona horaria de los sitios (1.2).
+     Power Apps → Datos → REGIST → Actualizar.
+  2. Fórmulas de App: fxClave (1.3). OnStart: línea del catálogo (1.4).
+  3. Rendimientos: btnMantCalcular (7.1), btnCalcMetasRef (7.4),
+     btnCargarGlobal (7.5), actividades NURSERY (7.2), Procesos (7.3).
+  4. Rendimientos → 📊 Análisis → Recalcular metas. Espera el aviso verde
+     con el número de combinaciones.
+  5. Personal: elimina btnRecalcCatalogo, cambia OnVisible, btnRecargarMetas
+     y btnInitProg (2). Programación → 🔄 Recargar metas → elige área, sets y
+     actividad: debe aparecer la META (P75) y el nivel usado.
+  6. Personal: Línea de tiempo (3) y Gantt (4).
+     Prueba: 📂 Elegir set → buscar → elegir → resumen y línea roja de hoy.
+     Gantt: ◀ ▶, 7/14/30 d, buscar persona, tocar una fila → panel lateral.
+  7. REGISTROS: btnEjecutarScan, tmrSyncGarita, lblHNota, btnArmarExpHist (5).
+     Prueba: escanea un ingreso a las 7:05 → en REGIST, INGRESO real 07:05 e
+     INGRESO_PLANILLA "07:00". Autoriza un permiso para esa persona en
+     Personal → espera 30 s → escanea su salida → conUltimoScan morado con el
+     motivo; en REGIST queda SALIDA_PLANILLA y MOTIVO_SALIDA.
+  8. REGISTROS: pestaña 📝 Permisos (6). Prueba con un usuario de rol Garita:
+     ve los autorizados de hoy y la columna "SALIDA HOY"; no ve ✔/✖ ni descargas.
+  9. Descargas (8): pega la versión A o B en los tres botones de envío y prueba
+     el Excel del Historial: deben salir IngresoPlanilla, SalidaPlanilla,
+     HorasPlanilla y MotivoSalida.
