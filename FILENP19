@@ -1,0 +1,151 @@
+Te dejo cómo agregar la aceptación de términos y condiciones en Personal. La app busca si el usuario ya aceptó la versión vigente y, si no, muestra un popup que no se puede cerrar sin responder. Al aceptar se guarda un registro en SharePoint, y las siguientes veces la app reconoce que ya aceptó y no vuelve a mostrar el popup.
+
+1. SharePoint: lista nueva TERMINOS_ACEPTACION
+
+En el sitio de la app, crea la lista con estas columnas:
+
+Columna	Tipo
+Title (renómbrala “Correo”)	Una línea de texto
+NombreUsuario	Una línea de texto
+VersionTerminos	Una línea de texto
+FechaAceptacion	Fecha y hora (con hora)
+Aceptado	Sí/No
+Origen	Una línea de texto
+Permisos: todos los usuarios de la app deben poder agregar elementos en esta lista.
+Recomendado: en Configuración de la lista → Configuración avanzada → Permisos de nivel de elemento, elige “Leer: solo elementos propios” y “Crear y editar: solo elementos propios”. Así nadie puede ver ni modificar la aceptación de otra persona.
+En la app: Datos → Agregar datos → SharePoint → tu sitio → TERMINOS_ACEPTACION.
+2. Fórmulas de App: AGREGAR
+powerfx
+TerminosVersion = "1.0";;
+
+Si algún día cambias el texto de los términos, sube la versión a “1.1”. Todos tendrán que aceptarlos otra vez y el registro anterior se conserva.
+
+3. Personal → OnVisible: REEMPLAZAR
+powerfx
+Set(gloVista; "home");;
+Set(gloVistaPedida; "home");;
+Set(gloPaso; 1);;
+Set(gTermRegistro; LookUp(TERMINOS_ACEPTACION; Title = gCorreoUsuario And VersionTerminos = TerminosVersion));;
+Set(varPopTerminos; IsBlank(gTermRegistro));;
+ClearCollect(colActividades; ListaActividades);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)))
+4. Popup conTerminos: AGREGAR
+
+Tipo: GroupContainer ManualLayout · Ubicación: hijo directo de Personal. Arrástralo hasta arriba de la Vista de árbol para que quede encima de todo.
+
+Propiedad	Valor
+Visible	varPopTerminos
+X / Y	0 / 0
+Width / Height	Parent.Width / Parent.Height
+Fill	RGBA(16; 30; 44; 0,7)
+
+Hijos de conTerminos, en este orden de la vista de árbol (de abajo hacia arriba):
+
+btnTermScrim (Classic/Button). Bloquea los clics a la pantalla de atrás.
+
+Propiedad	Valor
+X / Y	0 / 0
+Width / Height	Parent.Width / Parent.Height
+Text	""
+Fill / HoverFill / PressedFill	RGBA(0; 0; 0; 0)
+BorderThickness	0
+OnSelect	false
+
+conTermCard (GroupContainer AutoLayout vertical). Debe quedar encima de btnTermScrim.
+
+Propiedad	Valor
+Width	Min(720; Parent.Width - 40)
+Height	Min(640; Parent.Height - 40)
+X	(Parent.Width - Self.Width) / 2
+Y	(Parent.Height - Self.Height) / 2
+Fill	RGBA(255; 255; 255; 1)
+LayoutAlignItems	LayoutAlignItems.Stretch
+LayoutGap	10
+PaddingTop / PaddingBottom / PaddingLeft / PaddingRight	16
+RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight	12
+
+Hijos de conTermCard:
+
+Control	Tipo	Propiedad	Valor
+lblTermTit	Label	Text	"🔒 Términos y condiciones de uso"
+		Size / FontWeight / Height	16 / FontWeight.Bold / 32
+lblTermSub	Label	Text	"Versión " & TerminosVersion & " · Lee con atención antes de continuar."
+		Size / Color / Height	10 / ColorValue(hexMuted) / 22
+conTermTexto	GroupContainer AutoLayout vertical	FillPortions	1
+		LayoutOverflowY	LayoutOverflow.Scroll
+		Fill	ColorValue(hexSurface2)
+		LayoutAlignItems	LayoutAlignItems.Stretch
+		PaddingTop / PaddingBottom / PaddingLeft / PaddingRight	12
+htmlTerminos (dentro de conTermTexto)	HtmlViewer	AutoHeight	true
+		HtmlText	ver abajo
+chkTerminos	Classic/Checkbox	Text	"He leído y acepto los términos y condiciones"
+		Default / Height / FontWeight	false / 36 / FontWeight.Semibold
+conTermBtns	GroupContainer AutoLayout horizontal	Height / FillPortions / LayoutGap	44 / 0 / 8
+		LayoutJustifyContent	LayoutJustifyContent.End
+btnTermRechazar (dentro de conTermBtns)	Classic/Button · Estilo B (contorno lima)	Text / Width	"No acepto" / 140
+		OnSelect	ver abajo
+btnTermAceptar (dentro de conTermBtns)	Classic/Button · Estilo A (lima)	Text / Width	"✅ Aceptar y continuar" / 220
+		DisplayMode	If(chkTerminos.Value; DisplayMode.Edit; DisplayMode.Disabled)
+		OnSelect	ver abajo
+
+htmlTerminos.HtmlText. Es un texto base: pídele a RR. HH. o al área legal que lo revise y ajusta lo que necesites.
+
+powerfx
+"<div style='font-family:Segoe UI;font-size:13px;color:#27322B;line-height:1.5'>" &
+"<p>Esta aplicación contiene <b>información personal y laboral</b> de los colaboradores (datos de identificación, asistencia, horarios, permisos, horas extras, evaluaciones y rendimientos). Al usarla aceptas lo siguiente:</p>" &
+"<ol style='padding-left:18px'>" &
+"<li><b>Uso autorizado:</b> usaré la información solo para las funciones de mi puesto y dentro de los accesos que me fueron asignados.</li>" &
+"<li><b>Confidencialidad:</b> no compartiré, copiaré, fotografiaré ni divulgaré datos de otras personas a terceros dentro o fuera de la empresa.</li>" &
+"<li><b>Descargas:</b> los archivos Excel o PDF que descargue son confidenciales; los guardaré solo en ubicaciones de la empresa y los eliminaré cuando ya no sean necesarios.</li>" &
+"<li><b>Exactitud:</b> registraré información verdadera y completa. No registraré ingresos, salidas, actividades ni permisos a nombre de otra persona sin autorización.</li>" &
+"<li><b>Cuenta personal:</b> mi acceso es personal e intransferible; no dejaré la sesión abierta en equipos compartidos.</li>" &
+"<li><b>Registro de actividad:</b> entiendo que la aplicación guarda quién y cuándo crea o modifica cada registro.</li>" &
+"<li><b>Incidentes:</b> reportaré de inmediato cualquier uso indebido, error o pérdida de información a mi jefe inmediato o a Recursos Humanos.</li>" &
+"<li><b>Incumplimiento:</b> el mal uso de la información puede dar lugar a la suspensión del acceso y a las medidas que establezca el reglamento interno.</li>" &
+"</ol>" &
+"<p style='font-size:12px;color:#6B7A6F'>Usuario: <b>" & EncodeHTML(User().FullName) & "</b> · " & EncodeHTML(gCorreoUsuario) & "</p>" &
+"</div>"
+
+btnTermAceptar.OnSelect:
+
+powerfx
+Set(
+    gTermRegistro;
+    IfError(
+        Patch(
+            TERMINOS_ACEPTACION;
+            Defaults(TERMINOS_ACEPTACION);
+            {
+                Title:           gCorreoUsuario;
+                NombreUsuario:   User().FullName;
+                VersionTerminos: TerminosVersion;
+                FechaAceptacion: Now();
+                Aceptado:        true;
+                Origen:          "Personal"
+            }
+        );
+        Blank()
+    )
+);;
+If(
+    IsBlank(gTermRegistro.ID);
+    Notify("❌ No se pudo registrar tu aceptación. Revisa tu conexión e intenta de nuevo."; NotificationType.Error);
+    Set(varPopTerminos; false);;
+    Reset(chkTerminos);;
+    Notify("✅ Gracias. Tu aceptación quedó registrada."; NotificationType.Success)
+)
+
+btnTermRechazar.OnSelect:
+
+powerfx
+Notify("Para usar la aplicación debes aceptar los términos y condiciones."; NotificationType.Warning);;
+Exit()
+
+En el modo edición de Studio, Exit() no hace nada. Se prueba con la app publicada.
+
+Prueba
+Con tu cuenta, abre la app publicada. Debe aparecer el popup, y “Aceptar” debe estar deshabilitado hasta marcar la casilla.
+Acepta. En TERMINOS_ACEPTACION debe quedar una fila con tu correo, nombre, versión “1.0” y la fecha.
+Cierra y vuelve a entrar. El popup ya no debe aparecer.
+Cambia TerminosVersion a “1.1”. El popup vuelve a aparecer para todos.
