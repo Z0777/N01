@@ -1,0 +1,1837 @@
+═══════════════════════════════════════════════════════════════════════════════
+ PANTALLA scrRendimientos — CORRECCIONES, MANTENIMIENTO DE DATOS Y PROCESOS
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Revisado sobre el export de scrRendimientos del 03/11/2026.
+═══════════════════════════════════════════════════════════════════════════════
+
+ÍNDICE
+  0. Diagnóstico (qué encontré)
+  1. Peso, último peso, registrar peso y última cosecha (solo con permiso)
+  2. Cierre de actividad rápido (solo pendientes del set, por defecto de HOY)
+  3. Registro individual (2 errores que dejaban datos vacíos)
+  4. Nueva sección 🛠 CORREGIR DATOS (completar desde el set + corregir códigos)
+  5. Recalcular metas y análisis SIN el límite de 2.000 registros
+  6. Nueva sección 🧪 PROCESOS (registro diario)
+  7. Orden para ejecutar la corrección y pruebas
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 0. DIAGNÓSTICO
+═══════════════════════════════════════════════════════════════════════════════
+
+ ¿Por qué faltan Crop, MCT, generación, etc. en REGISTRO_PERSONAL1?
+  - btnGuardarInicio (Grupal) SÍ copia los 8 datos del set: está correcto.
+  - btnGuardarInd (Individual) NO guarda TrialIntent ni TypeOperation. Además
+    su If está mal anidado (usa ";" donde va ";;"), por eso mostraba el mensaje
+    equivocado y no limpiaba los campos.
+  - BarcodeReader1 (Individual) tiene el mismo error de ";" → al escanear a
+    alguien con actividad abierta solo cambia el modo y no carga la actividad.
+  - Si el set no tenía esos datos en DATASUMMARY1 el día que se registró, el
+    registro quedó vacío. La herramienta de la sección 4 los completa.
+
+ ¿Por qué el recálculo no es exacto?
+  - btnCalcMetasRef lee 180 días de una sola vez y btnCargarGlobal 30 días:
+    SharePoint devuelve como máximo 2.000 filas por consulta. Con más registros
+    las metas P75 se calculaban solo con una parte. Sección 5: se lee día por día.
+
+ ¿Por qué tarda el cierre?
+  - galFinPersonal, galActFin y drpActFin consultan SharePoint directamente.
+  - LbCodigos hace un LookUp a CATALOGO_PERSONAL1 por cada fila.
+  - btnGuardarFin hace un LookUp + Patch por persona y después
+    Refresh(REGISTRO_PERSONAL1), que vuelve a recalcular TODAS las tarjetas de
+    sets (lblCardHoras suma horas de todo el historial de cada set, y esa suma
+    no es delegable: baja hasta 2.000 filas por tarjeta).
+  - El último If de btnGuardarFin está mal anidado: cuando quedaban otras
+    actividades se iba a la vista de sets en lugar de pasar a la siguiente.
+  Solución: al abrir el set se cargan una sola vez sus pendientes ("En Proceso")
+  en colPendSet; por defecto se muestran solo los de HOY (los de días anteriores
+  se ven con un botón). El cierre se guarda en un solo Patch masivo y no se
+  refresca la lista completa.
+
+ Peso / cosecha:
+  - btnFinCosecha permite marcar a cualquiera (DisplayMode siempre Edit).
+  - btnRegistrarPeso y btnFinPeso usan varPuedePesar (está bien) pero recargan
+    toda la lista y si falla el correo no avisa.
+  - Se dejan visibles solo para quien tiene el permiso rendimientos_peso
+    (varPuedePesar). Revertir solo con rendimientos_admin.
+  - galSetss_1 (oculta) es una copia vieja de la galería de sets con botones
+    antiguos: ELIMINARLA.
+
+ Fórmulas de App: NO se modifican. Se usan varPuedePesar, fxPuede, fxTxt,
+ fxMct, fxSub, fxCultivo, fxHexCultivo, jobPeso, jobFinPeso, MaxHorasRegistro.
+ (Opcional) en catPermisos puedes cambiar solo el texto de Descripcion de
+ "rendimientos_peso" a "Registrar peso, último peso y última cosecha.".
+
+ Configuración de la app (obligatorio para la sección 4):
+  Configuración → General → "Límite de filas de datos" = 2000.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. PESO, ÚLTIMO PESO, REGISTRAR PESO Y ÚLTIMA COSECHA
+═══════════════════════════════════════════════════════════════════════════════
+ Quién puede: varPuedePesar  (= permiso "rendimientos_peso" o administrador).
+ Quién puede revertir: fxPuede("rendimientos_admin").
+ Dónde se guarda:
+   • Registrar peso  → REGISTRO_PERSONAL1 (Job = jobPeso, NumeroPeso) +
+                       DATASUMMARY1 (NumPesos, UltimoPeso, UltimoPesoPor)
+   • Último peso     → REGISTRO_PERSONAL1 (Job = jobFinPeso) +
+                       DATASUMMARY1 (FinPeso, FinPesoPor)
+   • Última cosecha  → DATASUMMARY1 (FinCosecha, FinCosechaPor)
+
+─────────────────────────────────────────────────────────────────
+ galSetss_1  (Gallery, oculta)  ·  conBody_Sets01
+─────────────────────────────────────────────────────────────────
+ ELIMINAR (con todo su contenido). Es una copia vieja que no se usa.
+
+─────────────────────────────────────────────────────────────────
+ Container126  (GroupContainer)  ·  conBody_Sets01 > galSetss > tarjeta
+─────────────────────────────────────────────────────────────────
+ Visible:
+=varPuedePesar
+
+─────────────────────────────────────────────────────────────────
+ btnFinCosecha  (Classic/Button)  ·  galSetss > Container126
+─────────────────────────────────────────────────────────────────
+ DisplayMode:
+=If(varPuedePesar; DisplayMode.Edit; DisplayMode.Disabled)
+
+ OnSelect:
+=With(
+    { _s: LookUp(DATASUMMARY1; ID = ThisItem.ID) };
+    If(
+        Not(varPuedePesar);
+        Notify("🔒 No tienes permiso para registrar la cosecha."; NotificationType.Error);
+
+        IsBlank(_s.FinCosecha);
+        Patch(DATASUMMARY1; _s; { FinCosecha: Now(); FinCosechaPor: User().FullName });;
+        Refresh(DATASUMMARY1);;
+        Notify("✅ Última cosecha marcada para " & _s.SetName; NotificationType.Success);
+
+        fxPuede("rendimientos_admin");
+        Patch(DATASUMMARY1; _s; { FinCosecha: Blank(); FinCosechaPor: ""; FinPeso: Blank(); FinPesoPor: "" });;
+        If(Not(IsBlank(_s.FinPeso)); RemoveIf(REGISTRO_PERSONAL1; SetName = _s.SetName And Job = jobFinPeso));;
+        Refresh(DATASUMMARY1);;
+        Notify("↩️ Cosecha (y último peso) revertidos en " & _s.SetName; NotificationType.Warning);
+
+        Notify("Ya marcado el " & Text(_s.FinCosecha; "[$-es]dd/mm/yyyy hh:mm") & " por " & Coalesce(_s.FinCosechaPor; "—"); NotificationType.Information)
+    )
+)
+
+ Text y Fill: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ btnRegistrarPeso  (Classic/Button)  ·  galSetss > Container126
+─────────────────────────────────────────────────────────────────
+ DisplayMode:
+=If(varPuedePesar; DisplayMode.Edit; DisplayMode.Disabled)
+
+ Fill:
+=If(Coalesce(ThisItem.NumPesos; 0) = 0; RGBA(122; 138; 143; 1); ColorValue("#0E7C86"))
+
+ OnSelect:
+=If(
+    Not(varPuedePesar);
+    Notify("🔒 Solo el responsable de peso puede registrar."; NotificationType.Error);
+    Set(gFPeso; Now());;
+    Set(gSetPeso; LookUp(DATASUMMARY1; ID = ThisItem.ID));;
+    Set(gNumPeso; Coalesce(gSetPeso.NumPesos; 0) + 1);;
+    Set(
+        gRegPeso;
+        IfError(
+            Patch(
+                REGISTRO_PERSONAL1;
+                Defaults(REGISTRO_PERSONAL1);
+                {
+                    Title:            gSetPeso.SetName & " - Peso " & gNumPeso;
+                    SetName:          gSetPeso.SetName;
+                    Job:              jobPeso;
+                    SubActividad:     { Value: "N/A" };
+                    TipoRegistro:     { Value: "Grupal" };
+                    NombrePersona:    User().FullName;
+                    CantidadPersonas: 1;
+                    NumeroPeso:       gNumPeso;
+                    Responsable:      User().FullName;
+                    FechaInicio:      gFPeso;
+                    HoraInicio:       Text(gFPeso; "[$-es]hh:mm");
+                    FechaFin:         gFPeso;
+                    HoraFin:          Text(gFPeso; "[$-es]hh:mm");
+                    HorasTotales:     0;
+                    MinutosTotales:   0;
+                    Cultivo:          gSetPeso.Crop.Value;
+                    MTC:              gSetPeso.MCT.Value;
+                    Field:            gSetPeso.Field;
+                    Greenhouse:       gSetPeso.Greenhouse;
+                    Program:          gSetPeso.Program.Value;
+                    Generation:       gSetPeso.Generation.Value;
+                    TrialIntent:      gSetPeso.TrialIntent.Value;
+                    TypeOperation:    { Value: gSetPeso.OperationType.Value };
+                    Estado:           { Value: "Finalizado" }
+                }
+            );
+            Blank()
+        )
+    );;
+    If(
+        IsBlank(gRegPeso.ID);
+        Notify("❌ No se pudo guardar el peso. Revisa la conexión e intenta de nuevo."; NotificationType.Error);
+        Patch(DATASUMMARY1; gSetPeso; { NumPesos: gNumPeso; UltimoPeso: gFPeso; UltimoPesoPor: User().FullName });;
+        Set(varRutaPeso; LookUp(rutaPesoCorreos; Cultivo = gSetPeso.Crop.Value));;
+        IfError(
+            Office365Outlook.SendEmailV2(
+                Coalesce(varRutaPeso.Para; gloMailPesoDefault);
+                "SPA · Peso " & gNumPeso & " · " & gSetPeso.SetName & " · " & Coalesce(gSetPeso.Crop.Value; "—");
+                "<div style='font-family:Segoe UI,Arial,sans-serif;color:#16273a;font-size:14px'>" &
+                "<p>Se registró el <b>peso número " & gNumPeso & "</b> del set <b>" & gSetPeso.SetName & "</b>.</p>" &
+                "<table style='border-collapse:collapse;font-size:13px;min-width:340px'>" &
+                Concat(
+                    Table(
+                        { k: "Set";            v: gSetPeso.SetName };
+                        { k: "Número de peso"; v: Text(gNumPeso) };
+                        { k: "Fecha";          v: Text(gFPeso; "[$-es]dd/mm/yyyy hh:mm") };
+                        { k: "Cultivo";        v: Coalesce(gSetPeso.Crop.Value; "—") };
+                        { k: "Programa";       v: Coalesce(gSetPeso.Program.Value; "—") };
+                        { k: "Generación";     v: Coalesce(gSetPeso.Generation.Value; "—") };
+                        { k: "MCT";            v: Coalesce(gSetPeso.MCT.Value; "—") };
+                        { k: "Field";          v: Coalesce(gSetPeso.Field; "—") };
+                        { k: "Invernadero";    v: Coalesce(gSetPeso.Greenhouse; "—") };
+                        { k: "Registrado por"; v: User().FullName }
+                    ) As F;
+                    "<tr><td style='padding:6px 12px;border:1px solid #e3eaf1;background:#f4f8fc;font-weight:600;color:#5a6b7b;white-space:nowrap'>" &
+                    F.k & "</td><td style='padding:6px 12px;border:1px solid #e3eaf1'>" & F.v & "</td></tr>"
+                ) &
+                "</table><p style='font-size:12px;color:#93a4b4;margin-top:14px'>Mensaje automático · SPA</p></div>";
+                { Cc: Coalesce(varRutaPeso.Copia; "") }
+            );
+            Notify("⚠️ El peso se guardó, pero no se pudo enviar el correo."; NotificationType.Warning)
+        );;
+        Refresh(DATASUMMARY1);;
+        Notify("⚖️ Peso " & gNumPeso & " registrado para " & gSetPeso.SetName; NotificationType.Success)
+    )
+)
+
+ Text: está correcto.
+
+─────────────────────────────────────────────────────────────────
+ btnFinPeso  (Classic/Button)  ·  galSetss > Container126   ("Ultimo Peso")
+─────────────────────────────────────────────────────────────────
+ DisplayMode:
+=If(varPuedePesar; DisplayMode.Edit; DisplayMode.Disabled)
+
+ OnSelect:
+=With(
+    { _s: LookUp(DATASUMMARY1; ID = ThisItem.ID) };
+    If(
+        Not(varPuedePesar);
+        Notify("🔒 Solo el responsable de peso puede registrar."; NotificationType.Error);
+
+        IsBlank(_s.FinPeso);
+        Set(gFPeso; Now());;
+        Set(gSetFinPeso; _s);;
+        Set(
+            gRegPeso;
+            IfError(
+                Patch(
+                    REGISTRO_PERSONAL1;
+                    Defaults(REGISTRO_PERSONAL1);
+                    {
+                        Title:            gSetFinPeso.SetName & " - " & User().FullName;
+                        SetName:          gSetFinPeso.SetName;
+                        Job:              jobFinPeso;
+                        SubActividad:     { Value: "N/A" };
+                        TipoRegistro:     { Value: "Grupal" };
+                        NombrePersona:    User().FullName;
+                        CantidadPersonas: 1;
+                        Responsable:      User().FullName;
+                        FechaInicio:      gFPeso;
+                        HoraInicio:       Text(gFPeso; "[$-es]hh:mm");
+                        FechaFin:         gFPeso;
+                        HoraFin:          Text(gFPeso; "[$-es]hh:mm");
+                        HorasTotales:     0;
+                        MinutosTotales:   0;
+                        Cultivo:          gSetFinPeso.Crop.Value;
+                        MTC:              gSetFinPeso.MCT.Value;
+                        Field:            gSetFinPeso.Field;
+                        Greenhouse:       gSetFinPeso.Greenhouse;
+                        Program:          gSetFinPeso.Program.Value;
+                        Generation:       gSetFinPeso.Generation.Value;
+                        TrialIntent:      gSetFinPeso.TrialIntent.Value;
+                        TypeOperation:    { Value: gSetFinPeso.OperationType.Value };
+                        Estado:           { Value: "Finalizado" }
+                    }
+                );
+                Blank()
+            )
+        );;
+        If(
+            IsBlank(gRegPeso.ID);
+            Notify("❌ No se pudo guardar el último peso. Intenta de nuevo."; NotificationType.Error);
+            Patch(DATASUMMARY1; gSetFinPeso; { FinPeso: gFPeso; FinPesoPor: User().FullName });;
+            Set(varRutaPeso; LookUp(rutaPesoCorreos; Cultivo = gSetFinPeso.Crop.Value));;
+            IfError(
+                Office365Outlook.SendEmailV2(
+                    Coalesce(varRutaPeso.Para; gloMailPesoDefault);
+                    "SPA · Último peso · " & gSetFinPeso.SetName & " · " & Coalesce(gSetFinPeso.Crop.Value; "—");
+                    "<div style='font-family:Segoe UI,Arial,sans-serif;color:#16273a;font-size:14px'>" &
+                    "<p>Se marcó el <b>fin de peso</b> del set <b>" & gSetFinPeso.SetName & "</b>.</p>" &
+                    "<table style='border-collapse:collapse;font-size:13px;min-width:340px'>" &
+                    Concat(
+                        Table(
+                            { k: "Set";            v: gSetFinPeso.SetName };
+                            { k: "Cultivo";        v: Coalesce(gSetFinPeso.Crop.Value; "—") };
+                            { k: "Programa";       v: Coalesce(gSetFinPeso.Program.Value; "—") };
+                            { k: "Generación";     v: Coalesce(gSetFinPeso.Generation.Value; "—") };
+                            { k: "MCT";            v: Coalesce(gSetFinPeso.MCT.Value; "—") };
+                            { k: "Field";          v: Coalesce(gSetFinPeso.Field; "—") };
+                            { k: "Invernadero";    v: Coalesce(gSetFinPeso.Greenhouse; "—") };
+                            { k: "Pesos totales";  v: Text(Coalesce(gSetFinPeso.NumPesos; 0)) };
+                            { k: "Fin peso";       v: Text(gFPeso; "[$-es]dd/mm/yyyy hh:mm") };
+                            { k: "Registrado por"; v: User().FullName }
+                        ) As F;
+                        "<tr><td style='padding:6px 12px;border:1px solid #e3eaf1;background:#f4f8fc;font-weight:600;color:#5a6b7b;white-space:nowrap'>" &
+                        F.k & "</td><td style='padding:6px 12px;border:1px solid #e3eaf1'>" & F.v & "</td></tr>"
+                    ) &
+                    "</table><p style='font-size:12px;color:#93a4b4;margin-top:14px'>Mensaje automático · SPA</p></div>";
+                    { Cc: Coalesce(varRutaPeso.Copia; "") }
+                );
+                Notify("⚠️ El último peso se guardó, pero no se pudo enviar el correo."; NotificationType.Warning)
+            );;
+            Refresh(DATASUMMARY1);;
+            Notify("⚖️ Último peso registrado para " & gSetFinPeso.SetName; NotificationType.Success)
+        );
+
+        fxPuede("rendimientos_admin");
+        Patch(DATASUMMARY1; _s; { FinPeso: Blank(); FinPesoPor: "" });;
+        RemoveIf(REGISTRO_PERSONAL1; SetName = _s.SetName And Job = jobFinPeso);;
+        Refresh(DATASUMMARY1);;
+        Notify("↩️ Último peso revertido en " & _s.SetName; NotificationType.Warning);
+
+        Notify("Ya marcado el " & Text(_s.FinPeso; "[$-es]dd/mm/yyyy hh:mm") & " por " & Coalesce(_s.FinPesoPor; "—"); NotificationType.Information)
+    )
+)
+
+ Fill y Text: están correctos.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. CIERRE DE ACTIVIDAD RÁPIDO
+═══════════════════════════════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────
+ scrRendimientos  (Pantalla)
+─────────────────────────────────────────────────────────────────
+ OnVisible:
+=If(
+    fxPuede("rendimientos");
+    Refresh(DATASUMMARY1);;
+    ClearCollect(colEnProceso; Filter(REGISTRO_PERSONAL1; Estado.Value = "En Proceso"));;
+    If(IsBlank(gVista); Set(gVista; "Sets"))
+)
+
+─────────────────────────────────────────────────────────────────
+ btnAbrirSet  (Classic/Button)  ·  AGREGAR en scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ Visible:  =false
+ OnSelect:
+=ClearCollect(colPendSet; Filter(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName; Estado.Value = "En Proceso"));;
+RemoveIf(colEnProceso; SetName = gSetActivo.SetName);;
+Collect(colEnProceso; colPendSet);;
+Set(gFinVerAnteriores; IsEmpty(Filter(colPendSet; FechaInicio >= Today())));;
+Set(gModo; If(IsEmpty(colPendSet); "Inicio"; "Fin"));;
+Set(gActividad; Blank());;
+Clear(colSeleccionados);;
+Clear(colFinSel);;
+Set(gVerActividades; false);;
+Set(gTab; "Grupal");;
+Set(gVista; "Detalle");;
+Clear(colBaseSet);;
+Clear(colSetFiltrado);;
+Clear(colAnaSetFecha);;
+Clear(colAnaSetAcum);;
+Clear(colKpiSet);;
+Select(btnArmarActFin)
+
+─────────────────────────────────────────────────────────────────
+ btnArmarActFin  (Classic/Button)  ·  AGREGAR en scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ Visible:  =false
+ OnSelect:
+=ClearCollect(
+    colActFin;
+    ForAll(
+        Sequence(CountRows(Distinct(Filter(colPendSet; gFinVerAnteriores Or FechaInicio >= Today()); Job)); 1) As _i;
+        {
+            Idx: _i.Value;
+            Act: Index(Distinct(Filter(colPendSet; gFinVerAnteriores Or FechaInicio >= Today()); Job); _i.Value).Value
+        }
+    )
+);;
+Set(gActFinIdx; 1);;
+Set(gActFin; First(colActFin).Act)
+
+─────────────────────────────────────────────────────────────────
+ btnCardSet  (Classic/Button)  ·  galSetss
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+=Set(gSetActivo; ThisItem);;
+Select(btnAbrirSet)
+
+─────────────────────────────────────────────────────────────────
+ txtBuscarSet  (Classic/TextInput)  ·  conHeaderST
+─────────────────────────────────────────────────────────────────
+ OnChange:
+=If(
+    radModoBusqueda.Selected.Value = "Automático" And !IsBlank(Trim(txtBuscarSet.Text));
+    Set(gSetActivo; LookUp(DATASUMMARY1; SetName = Trim(txtBuscarSet.Text)));;
+    If(
+        !IsBlank(gSetActivo);
+        Select(btnAbrirSet);
+        Notify("SET no encontrado"; NotificationType.Warning)
+    );;
+    Reset(txtBuscarSet);;
+    SetFocus(txtBuscarSet)
+)
+
+─────────────────────────────────────────────────────────────────
+ btnEscaner  (BarcodeReader)  ·  conHeaderST
+─────────────────────────────────────────────────────────────────
+ OnScan:
+=Set(gSetActivo; LookUp(DATASUMMARY1; SetName = Trim(First(Self.Barcodes).Value)));;
+If(
+    !IsBlank(gSetActivo);
+    Select(btnAbrirSet);
+    Notify("SET no encontrado: " & First(Self.Barcodes).Value; NotificationType.Warning)
+)
+
+─────────────────────────────────────────────────────────────────
+ btnModoFin  (Classic/Button)  ·  conVista_Detalle > Container18 > Container25
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+=Set(gModo; "Fin");;
+Set(gVerActividades; false);;
+ClearCollect(colPendSet; Filter(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName; Estado.Value = "En Proceso"));;
+Set(gFinVerAnteriores; IsEmpty(Filter(colPendSet; FechaInicio >= Today())));;
+Select(btnArmarActFin)
+
+ btnModoInicio: está correcto.
+
+─────────────────────────────────────────────────────────────────
+ galFinPersonal  (Gallery)  ·  conTab_Grupal > Container28
+─────────────────────────────────────────────────────────────────
+ Items:
+=Sort(
+    Filter(colPendSet; Job = gActFin; gFinVerAnteriores Or FechaInicio >= Today());
+    NombrePersona;
+    SortOrder.Ascending
+)
+
+─────────────────────────────────────────────────────────────────
+ LbCodigos  (Label)  ·  galFinPersonal > Container37
+─────────────────────────────────────────────────────────────────
+ Text:   =ThisItem.CODIGO
+
+─────────────────────────────────────────────────────────────────
+ Lb-Nombres  (Label)  ·  galFinPersonal > Container37
+─────────────────────────────────────────────────────────────────
+ Text:
+=ThisItem.NombrePersona & If(ThisItem.FechaInicio < Today(); "  · desde " & Text(ThisItem.FechaInicio; "[$-es]dd/mm hh:mm"); "")
+
+ chkFin, LbMateriales, txtFrutosFin, txtComentarioInd, Button13_3: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ galActFin  (Gallery)  ·  conTab_Grupal > Container28
+─────────────────────────────────────────────────────────────────
+ Items:
+=Distinct(Filter(colPendSet; gFinVerAnteriores Or FechaInicio >= Today()); Job)
+
+ Button13_2 y btnOtraActividad: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ drpActFin  (ModernCombobox, oculto)  ·  Container28 > Container35
+─────────────────────────────────────────────────────────────────
+ Items:
+=Distinct(Filter(colPendSet; gFinVerAnteriores Or FechaInicio >= Today()); Job)
+
+─────────────────────────────────────────────────────────────────
+ btnFinAnteriores  (Classic/Button)  ·  AGREGAR en conTab_Grupal > Container28,
+                   entre Container35 y Container37_1
+─────────────────────────────────────────────────────────────────
+ Height:        =32
+ FillPortions:  =0
+ AlignInContainer: =AlignInContainer.Stretch
+ Visible:
+=gModo = "Fin" And Not(gVerActividades) And CountRows(Filter(colPendSet; FechaInicio < Today())) > 0
+ Text:
+=If(
+    gFinVerAnteriores;
+    "📅 Mostrar solo los pendientes de hoy";
+    "⚠️ Hay " & CountRows(Filter(colPendSet; FechaInicio < Today())) & " pendiente(s) de días anteriores · Ver"
+)
+ Fill:
+=If(gFinVerAnteriores; RGBA(255; 255; 255; 1); ColorValue(hexAmberSoft))
+ Color:
+=ColorValue(hexInk)
+ BorderColor:      =ColorValue(hexAmber)
+ BorderThickness:  =1
+ OnSelect:
+=Set(gFinVerAnteriores; Not(gFinVerAnteriores));;
+Clear(colFinSel);;
+Select(btnArmarActFin)
+
+─────────────────────────────────────────────────────────────────
+ btnGuardarFin  (Classic/Button)  ·  Container28 > Container38
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+=Set(gAhoraFin; Now());;
+ClearCollect(
+    colFinGuardar;
+    ForAll(
+        Filter(
+            galFinPersonal.AllItems;
+            (IsEmpty(colFinSel) Or ThisRecord.ID in colFinSel.ID) And !IsBlank(Trim(Coalesce(LbMateriales.Text; "")))
+        ) As _r;
+        {
+            ID:                 _r.ID;
+            FechaFin:           gAhoraFin;
+            HoraFin:            Text(gAhoraFin; "[$-es]hh:mm");
+            HorasTotales:       Round(DateDiff(_r.FechaInicio; gAhoraFin; TimeUnit.Minutes) / 60; 2);
+            MinutosTotales:     DateDiff(_r.FechaInicio; gAhoraFin; TimeUnit.Minutes);
+            CantidadMateriales: Trim(_r.LbMateriales.Text);
+            NumeroFrutos:       If(gActFin in ["Proceso de semilla"; "Cosecha"]; Value(_r.txtFrutosFin.Text); Blank());
+            Comentarios:        If(tglComentarioGlobal.Checked; txtComentarioGlobal.Text; _r.txtComentarioInd.Text);
+            Estado:             { Value: "Finalizado" }
+        }
+    )
+);;
+If(
+    IsEmpty(colFinGuardar);
+    Notify("⚠️ Escribe la cantidad de materiales de las personas que vas a cerrar."; NotificationType.Warning);
+    Set(gErrFin; "");;
+    IfError(
+        Patch(REGISTRO_PERSONAL1; ShowColumns(colFinGuardar; ID); DropColumns(colFinGuardar; ID));
+        Set(gErrFin; FirstError.Message)
+    );;
+    If(
+        gErrFin <> "";
+        Notify("❌ No se pudo guardar el cierre: " & gErrFin; NotificationType.Error);
+        RemoveIf(colPendSet; ID in colFinGuardar.ID);;
+        RemoveIf(colEnProceso; ID in colFinGuardar.ID);;
+        Clear(colFinSel);;
+        Set(gFinSoloSel; false);;
+        Notify("✅ " & CountRows(colFinGuardar) & " persona(s) finalizadas en " & gActFin; NotificationType.Success);;
+        If(
+            IsEmpty(colPendSet);
+            Set(gModo; "Inicio");;
+            Set(gVerActividades; false);;
+            Set(gVista; "Sets");
+            Set(gFinVerAnteriores; gFinVerAnteriores Or IsEmpty(Filter(colPendSet; FechaInicio >= Today())));;
+            Set(gVerActividades; false);;
+            Select(btnArmarActFin)
+        )
+    )
+)
+
+ Text, Fill, Width: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ btnGuardarInicio  (Classic/Button)  ·  conTab_Grupal > Container34
+─────────────────────────────────────────────────────────────────
+ (Misma lógica de siempre; ahora guarda a todas las personas en un solo
+  Collect y no recarga toda la lista.)
+ OnSelect:
+=Set(
+    gErrGuardar;
+    If(
+        IsBlank(gActividad) Or gActividad = "";
+        "⚠️ Debes seleccionar una actividad primero.";
+        (gActividad in ActividadesConSub) And IsBlank(drpSubActividad.Selected.Value);
+        "⚠️ Debes seleccionar una subactividad para " & gActividad & ".";
+        CountRows(colSeleccionados) = 0;
+        "⚠️ Debes seleccionar al menos a una persona.";
+        ""
+    )
+);;
+If(
+    gErrGuardar <> "";
+    Notify(gErrGuardar; NotificationType.Error);
+    Set(gNumSel; CountRows(colSeleccionados));;
+    Set(gSubGuardar; If(gActividad in ActividadesConSub; drpSubActividad.Selected.Value; ""));;
+    Set(gAhoraIni; Now());;
+    Set(gEsSPA; gActividad = "Ingreso Semilla a SPA");;
+    Set(gErrIni; "");;
+    IfError(
+        Collect(
+            REGISTRO_PERSONAL1;
+            ForAll(
+                colSeleccionados As _p;
+                {
+                    Title:              gSetActivo.SetName & " - " & _p.Nombre;
+                    SetName:            gSetActivo.SetName;
+                    Job:                gActividad;
+                    SubActividad:       { Value: gSubGuardar };
+                    TipoRegistro:       { Value: "Grupal" };
+                    NombrePersona:      _p.Nombre;
+                    DEPARTAMENTO:       _p.Departamento;
+                    CODIGO:             _p.Codigo;
+                    CantidadPersonas:   1;
+                    Responsable:        User().FullName;
+                    FechaInicio:        gAhoraIni;
+                    HoraInicio:         Text(gAhoraIni; "[$-es]hh:mm");
+                    Cultivo:            gSetActivo.Crop.Value;
+                    MTC:                gSetActivo.MCT.Value;
+                    Field:              gSetActivo.Field;
+                    Greenhouse:         gSetActivo.Greenhouse;
+                    Program:            gSetActivo.Program.Value;
+                    Generation:         gSetActivo.Generation.Value;
+                    TrialIntent:        gSetActivo.TrialIntent.Value;
+                    TypeOperation:      { Value: gSetActivo.OperationType.Value };
+                    FechaFin:           If(gEsSPA; gAhoraIni; Blank());
+                    HoraFin:            If(gEsSPA; Text(gAhoraIni; "[$-es]hh:mm"); "");
+                    HorasTotales:       If(gEsSPA; 0; Blank());
+                    MinutosTotales:     If(gEsSPA; 0; Blank());
+                    CantidadMateriales: If(gEsSPA; Coalesce(txtMatSPA.Text; "0"); Blank());
+                    Comentarios:        If(gEsSPA; txtComentSPA.Text; Blank());
+                    Estado:             { Value: If(gEsSPA; "Finalizado"; "En Proceso") }
+                }
+            )
+        );
+        Set(gErrIni; FirstError.Message)
+    );;
+    If(
+        gErrIni <> "";
+        Notify("❌ No se pudo guardar el inicio: " & gErrIni; NotificationType.Error);
+        ClearCollect(colEnProceso; Filter(REGISTRO_PERSONAL1; Estado.Value = "En Proceso"));;
+        Clear(colSeleccionados);;
+        Reset(txtBuscarPersonal);;
+        Reset(drpSubActividad);;
+        Reset(txtMatSPA);;
+        Reset(txtComentSPA);;
+        Set(gActividad; Blank());;
+        Set(gSubGuardar; Blank());;
+        Set(gErrGuardar; "");;
+        Set(gVerActividades; false);;
+        Notify("✅ Inicio registrado para " & gNumSel & " personas."; NotificationType.Success);;
+        Set(gVista; "Sets")
+    )
+)
+
+ Text y Width: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ lblCardPers  (Label)  ·  galSetss > Container14
+─────────────────────────────────────────────────────────────────
+ Text:
+=CountRows(Distinct(Filter(colEnProceso; SetName = ThisItem.SetName); NombrePersona)) & " activos"
+
+─────────────────────────────────────────────────────────────────
+ lblCardHoras  (Label)  ·  galSetss > Container14
+─────────────────────────────────────────────────────────────────
+ (Antes sumaba las horas de TODO el historial del set en cada tarjeta: era lo
+  que más frenaba la pantalla. Ahora muestra la actividad en curso.)
+ Text:
+=With(
+    { _p: Filter(colEnProceso; SetName = ThisItem.SetName) };
+    If(
+        IsEmpty(_p);
+        "Sin actividad";
+        CountRows(Distinct(_p; Job)) & " act. · desde " & Text(Min(_p; FechaInicio); "[$-es]hh:mm")
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. REGISTRO INDIVIDUAL
+═══════════════════════════════════════════════════════════════════════════════
+
+─────────────────────────────────────────────────────────────────
+ BarcodeReader1  (BarcodeReader)  ·  conTab_Individual > conIndCard > Container27
+─────────────────────────────────────────────────────────────────
+ OnScan:
+=Set(gCodigoInd; Trim(First(Self.Barcodes).Value));;
+Set(gPersonaInd; LookUp(PersonalActivo; CODIGO = gCodigoInd));;
+If(
+    IsBlank(gPersonaInd);
+    Set(gRegIndActivo; Blank());;
+    Notify("Código no encontrado: " & gCodigoInd; NotificationType.Warning);
+    Set(gRegIndActivo; LookUp(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName And NombrePersona = gPersonaInd.Nombre And Estado.Value = "En Proceso"));;
+    If(
+        IsBlank(gRegIndActivo);
+        Set(gModoInd; "Inicio");;
+        Set(gActividad; Blank());;
+        Set(gActIndActiva; Blank());
+        Set(gModoInd; "Fin");;
+        Set(gActividad; gRegIndActivo.Job);;
+        Set(gActIndActiva; gRegIndActivo.Job)
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ galActInd  (Gallery)  ·  conTab_Individual > conIndCard
+─────────────────────────────────────────────────────────────────
+ Items:
+=If(
+    !IsBlank(gRegIndActivo);
+    Table({ Value: gRegIndActivo.Job });
+    RenameColumns(ListaActividades; Actividad; Value)
+)
+
+─────────────────────────────────────────────────────────────────
+ btnGuardarInd  (Classic/Button)  ·  conTab_Individual > conIndCard
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+=If(
+    IsBlank(gPersonaInd) Or IsBlank(gActividad);
+    Notify("⚠️ Falta escanear persona o seleccionar actividad."; NotificationType.Error);
+
+    IsBlank(gRegIndActivo) And (gActividad in ActividadesConSub) And IsBlank(drpSubActividad.Selected.Value);
+    Notify("⚠️ Debes seleccionar una subactividad."; NotificationType.Error);
+
+    Set(gAhoraInd; Now());;
+    If(
+        IsBlank(gRegIndActivo);
+        Patch(
+            REGISTRO_PERSONAL1;
+            Defaults(REGISTRO_PERSONAL1);
+            {
+                Title:            gSetActivo.SetName & " - " & gPersonaInd.Nombre;
+                SetName:          gSetActivo.SetName;
+                Job:              gActividad;
+                SubActividad:     { Value: If(gActividad in ActividadesConSub; Coalesce(drpSubActividad.Selected.Value; "N/A"); "N/A") };
+                TipoRegistro:     { Value: "Individual" };
+                NombrePersona:    gPersonaInd.Nombre;
+                DEPARTAMENTO:     gPersonaInd.DEPARTAMENTO;
+                CODIGO:           gPersonaInd.CODIGO;
+                CantidadPersonas: 1;
+                Responsable:      User().FullName;
+                FechaInicio:      gAhoraInd;
+                HoraInicio:       Text(gAhoraInd; "[$-es]hh:mm");
+                Cultivo:          gSetActivo.Crop.Value;
+                MTC:              gSetActivo.MCT.Value;
+                Field:            gSetActivo.Field;
+                Greenhouse:       gSetActivo.Greenhouse;
+                Program:          gSetActivo.Program.Value;
+                Generation:       gSetActivo.Generation.Value;
+                TrialIntent:      gSetActivo.TrialIntent.Value;
+                TypeOperation:    { Value: gSetActivo.OperationType.Value };
+                Estado:           { Value: "En Proceso" }
+            }
+        );;
+        Notify("✅ Inicio individual registrado para " & gPersonaInd.Nombre; NotificationType.Success);
+
+        Patch(
+            REGISTRO_PERSONAL1;
+            gRegIndActivo;
+            {
+                FechaFin:           gAhoraInd;
+                HoraFin:            Text(gAhoraInd; "[$-es]hh:mm");
+                HorasTotales:       Round(DateDiff(gRegIndActivo.FechaInicio; gAhoraInd; TimeUnit.Minutes) / 60; 2);
+                MinutosTotales:     DateDiff(gRegIndActivo.FechaInicio; gAhoraInd; TimeUnit.Minutes);
+                CantidadMateriales: Coalesce(Trim(txtMatInd.Text); "0");
+                NumeroFrutos:       If(gActIndActiva in ["Proceso de semilla"; "Cosecha"]; Value(txtFrutosInd.Text); Blank());
+                Comentarios:        txtComentarioinfinal.Text;
+                Estado:             { Value: "Finalizado" }
+            }
+        );;
+        Notify("✅ Cierre individual registrado para " & gPersonaInd.Nombre; NotificationType.Success)
+    );;
+    ClearCollect(colEnProceso; Filter(REGISTRO_PERSONAL1; Estado.Value = "En Proceso"));;
+    Set(gPersonaInd; Blank());;
+    Set(gCodigoInd; "");;
+    Set(gActividad; Blank());;
+    Set(gActIndActiva; Blank());;
+    Set(gRegIndActivo; Blank());;
+    Reset(txtMatInd);;
+    Reset(txtFrutosInd);;
+    Reset(txtComentarioinfinal)
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. NUEVA SECCIÓN 🛠 CORREGIR DATOS  (gVista = "Mant")
+═══════════════════════════════════════════════════════════════════════════════
+ Qué hace, sin riesgo:
+  A. COMPLETAR DESDE EL SET: busca el set de cada registro en DATASUMMARY1 y
+     completa Cultivo, MTC, Generation, TypeOperation, Field, Greenhouse,
+     Program y TrialIntent.
+       • Modo "Solo vacíos" (por defecto): solo llena lo que está vacío.
+       • Modo "Igualar al set": además corrige lo que sea distinto al set.
+       • Nunca borra un dato: si el set no tiene ese dato, se deja el que había.
+       • Si el set no existe en DATASUMMARY1, el registro no se toca.
+  B. CORREGIR CÓDIGOS: busca el NOMBRE de cada registro en CATALOGO_PERSONAL1
+     y le pone el código que tiene ahora el catálogo. NO se toca:
+       • si el nombre no está en el catálogo,
+       • si el nombre está repetido en el catálogo con códigos distintos
+         (si solo una de esas filas está activa, se usa la activa),
+       • si el código nuevo todavía está repetido en el catálogo.
+  Siempre: 1) Cargar  2) revisar la vista previa  3) Aplicar (pide confirmar
+  con un segundo toque)  4) se vuelve a cargar sola para comprobar que quedó en
+  cero  5) Recalcular metas y análisis.
+  Respaldo: en SharePoint, REGISTRO_PERSONAL1 → Configuración de la lista →
+  Configuración de versiones → "Crear una versión cada vez que edite" = Sí.
+  Así cada registro conserva su valor anterior.
+
+─────────────────────────────────────────────────────────────────
+ btnMantDatos  (Classic/Button)  ·  AGREGAR en conHeaderST, después de btnAnaGlobal
+─────────────────────────────────────────────────────────────────
+ Text:        ="🛠 Corregir datos"
+ Height:      =36
+ Fill:        =colGreen
+ Color:       =ColorValue(hexInk)
+ HoverFill:   =ColorFade(colGreen; -0,12)
+ FontWeight:  =FontWeight.Semibold
+ Visible:
+=(gVista = "Sets") And (Parent.Width >= bpTablet) And fxPuede("rendimientos_admin")
+ OnSelect:
+=Set(gMantConfSets; false);;
+Set(gMantConfCod; false);;
+Set(gVista; "Mant")
+
+─────────────────────────────────────────────────────────────────
+ conVista_Mant  (GroupContainer AutoLayout VERTICAL)
+               ·  AGREGAR en conRaiz_Sets, después de conVista_AnaGlobal
+─────────────────────────────────────────────────────────────────
+ Visible:           =gVista = "Mant"
+ Width:             =Parent.Width
+ FillPortions:      =1
+ Fill:              =colFondo
+ LayoutAlignItems:  =LayoutAlignItems.Stretch
+ LayoutGap:         =10
+ PaddingTop / PaddingBottom / PaddingLeft / PaddingRight: =12
+ LayoutOverflowY:   =LayoutOverflow.Scroll
+
+ Hijos (en este orden):
+
+ ── conMantHead  (GroupContainer horizontal)
+     Height =52 · FillPortions =0 · Fill =colDark · LayoutAlignItems =LayoutAlignItems.Center
+     LayoutGap =8 · PaddingLeft =12 · PaddingRight =12
+     • lblMantTit (Label)
+         Text  ="🛠 Corrección de datos de REGISTRO_PERSONAL1"
+         Color =RGBA(255; 255; 255; 1) · FontWeight =FontWeight.Bold · Size =13 · FillPortions =1
+     • dpMantDesde (ModernDatePicker)
+         DefaultDate =Date(Year(Today()); Month(Today()); 1) · Format ="dd/mm/yyyy" · Width =140 · Placeholder ="Desde"
+     • dpMantHasta (ModernDatePicker)
+         DefaultDate =Today() · Format ="dd/mm/yyyy" · Width =140 · Placeholder ="Hasta"
+     • btnMantCargar (Classic/Button)   Estilo A (lima)
+         Text ="🔄 1. Cargar y revisar" · Width =190 · Height =36
+         OnSelect: ver abajo
+
+ ── lblMantInfo  (Label)
+     AutoHeight =true · FillPortions =0 · Fill =ColorValue(hexInfoSoft) · Color =ColorValue(hexInfo)
+     PaddingLeft =10 · Size =10
+     Text: ver abajo
+
+ ── conMantSets  (GroupContainer vertical)
+     Height =360 · FillPortions =0 · Fill =RGBA(255; 255; 255; 1) · LayoutGap =6
+     Padding (4) =10 · LayoutAlignItems =LayoutAlignItems.Stretch
+     • conMantSetsHead (GroupContainer horizontal) Height =40 · FillPortions =0 · LayoutGap =8
+                       LayoutAlignItems =LayoutAlignItems.Center
+         - lblMantSetsTit (Label)  Text ="📋 A. Completar datos del set (DATASUMMARY1)"
+                                   FontWeight =FontWeight.Bold · FillPortions =1
+         - tglMantSobrescribir (Classic/Toggle)
+                                   Default =false · TrueText ="Igualar al set" · FalseText ="Solo vacíos"
+                                   Width =190 · OnChange =Select(btnMantCalcular)
+         - btnMantAplicarSets (Classic/Button)  Estilo A · Width =240 · Height =36
+                                   (Text, DisplayMode, OnSelect: ver abajo)
+     • lblMantSetsRes (Label)  AutoHeight =true · Size =10 · Text: ver abajo
+     • hdrMantSets (GroupContainer horizontal) Height =28 · FillPortions =0 · Fill =ColorValue(hexInk)
+         - Label  Text ="FECHA"   Width =90  · Color blanco · FontWeight Bold
+         - Label  Text ="SET"     Width =220 · Color blanco · FontWeight Bold
+         - Label  Text ="CAMBIOS (actual → nuevo)" FillPortions =1 · Color blanco · FontWeight Bold
+     • galMantSets (Gallery vertical)  FillPortions =1 · TemplateSize =40
+         Items:  =FirstN(Sort(colMantSetsUpd; Fecha; SortOrder.Descending); 300)
+         Fila: conFilaMantSet (GroupContainer horizontal, Width =Parent.TemplateWidth, Height =Parent.TemplateHeight)
+         - lblMSFecha  Width =90  · Size =9 · Text =Text(ThisItem.Fecha; "[$-es]dd/mm/yyyy")
+         - lblMSSet    Width =220 · Size =9 · FontWeight =FontWeight.Semibold · Text =ThisItem.SetName
+         - lblMSDet    FillPortions =1 · Size =9 · Text =ThisItem.Detalle
+
+ ── conMantCod  (GroupContainer vertical)  igual que conMantSets, Height =400
+     • conMantCodHead (GroupContainer horizontal) Height =40 · FillPortions =0 · LayoutGap =8
+         - lblMantCodTit (Label) Text ="👤 B. Corregir códigos según CATALOGO_PERSONAL1 (por nombre)"
+                                 FontWeight =FontWeight.Bold · FillPortions =1
+         - btnMantAplicarCod (Classic/Button)  Estilo A · Width =240 · Height =36
+     • lblMantCodDup (Label)  AutoHeight =true · Size =10 · Fill =ColorValue(hexDangerSoft)
+                              Color =ColorValue(hexDanger) · Visible =Not(IsEmpty(colMantCodDup))
+                              Text: ver abajo
+     • lblMantCodRes (Label)  AutoHeight =true · Size =10 · Text: ver abajo
+     • hdrMantCod (GroupContainer horizontal) Height =28 · FillPortions =0 · Fill =ColorValue(hexInk)
+         - Label Text ="NOMBRE"           FillPortions =2   (blanco, negrita)
+         - Label Text ="CÓDIGO ACTUAL"    FillPortions =1
+         - Label Text ="CÓDIGO CATÁLOGO"  FillPortions =1
+         - Label Text ="REGISTROS"        Width =90
+         - Label Text ="RESULTADO"        FillPortions =1,6
+     • galMantCod (Gallery vertical) FillPortions =1 · TemplateSize =36
+         Items:
+=Sort(
+    Filter(colMantCodMap; Registros > 0 Or Estado <> "OK");
+    If(Estado = "OK"; 1; 0);
+    SortOrder.Ascending
+)
+         Fila: conFilaMantCod (horizontal, Width =Parent.TemplateWidth, Height =Parent.TemplateHeight)
+         - lblMCNombre  FillPortions =2   · Size =9 · Text =ThisItem.Nombre
+         - lblMCAnt     FillPortions =1   · Size =9 · Text =ThisItem.Actuales
+         - lblMCNuevo   FillPortions =1   · Size =9 · FontWeight =FontWeight.Bold
+                        Text =If(ThisItem.CodigoNuevo = ""; "—"; ThisItem.CodigoNuevo)
+         - lblMCReg     Width =90         · Size =9 · Align =Align.Center · Text =ThisItem.Registros
+         - lblMCEstado  FillPortions =1,6 · Size =9
+                        Text =If(ThisItem.Estado = "OK"; "✔ Se corrige"; "⚠ " & ThisItem.Estado & " (no se toca)")
+                        Color =If(ThisItem.Estado = "OK"; ColorValue(hexLeafDark); ColorValue(hexDanger))
+
+ ── conMantPie  (GroupContainer horizontal)
+     Height =52 · FillPortions =0 · LayoutGap =8 · LayoutAlignItems =LayoutAlignItems.Center
+     • lblMantPaso (Label) FillPortions =1 · Size =10 · Text: ver abajo
+     • btnMantRecalcular (Classic/Button) Estilo A · Width =300 · Height =40
+         Text ="⚙️ 3. Recalcular metas y análisis"
+         Visible =fxPuede("rendimientos_metas")
+         OnSelect: ver abajo
+
+─────────────────────────────────────────────────────────────────
+ btnMantCalcular  (Classic/Button)  ·  AGREGAR en scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ Visible: =false    (OnSelect: ver abajo)
+
+────────────────────────── FÓRMULAS ──────────────────────────
+
+ btnMantCargar.OnSelect:
+=Set(gMantDesde; Coalesce(dpMantDesde.SelectedDate; Date(Year(Today()); Month(Today()); 1)));;
+Set(gMantHasta; Coalesce(dpMantHasta.SelectedDate; Today()));;
+If(
+    gMantHasta < gMantDesde;
+    Notify("⚠️ La fecha final es menor que la inicial."; NotificationType.Error);
+
+    DateDiff(gMantDesde; gMantHasta; TimeUnit.Days) > 120;
+    Notify("⚠️ Para trabajar seguro usa máximo 4 meses por vez (lo ideal es 1 mes)."; NotificationType.Warning);
+
+    Notify("⏳ Cargando registros día por día…"; NotificationType.Information);;
+    Clear(colMantReg);;
+    ForAll(
+        Sequence(DateDiff(gMantDesde; gMantHasta; TimeUnit.Days) + 1; 0) As _dia;
+        With(
+            { _f: DateAdd(gMantDesde; _dia.Value; TimeUnit.Days) };
+            Collect(
+                colMantReg;
+                ShowColumns(
+                    Filter(REGISTRO_PERSONAL1; FechaInicio >= _f; FechaInicio < DateAdd(_f; 1; TimeUnit.Days));
+                    ID; SetName; CODIGO; NombrePersona; Cultivo; MTC; Generation; TypeOperation; Field; Greenhouse; Program; TrialIntent; FechaInicio
+                )
+            )
+        )
+    );;
+    ClearCollect(
+        colMantSets;
+        ForAll(
+            Filter(Distinct(colMantReg; SetName); !IsBlank(Value)) As _n;
+            With(
+                { _d: LookUp(DATASUMMARY1; SetName = _n.Value) };
+                {
+                    SetName: _n.Value;
+                    Existe:  !IsBlank(_d.SetName);
+                    Crop:    _d.Crop.Value;
+                    Mct:     _d.MCT.Value;
+                    Gen:     _d.Generation.Value;
+                    Op:      _d.OperationType.Value;
+                    Fld:     _d.Field;
+                    GH:      _d.Greenhouse;
+                    Prog:    _d.Program.Value;
+                    Trial:   _d.TrialIntent.Value
+                }
+            )
+        )
+    );;
+    ClearCollect(
+        colMantCat;
+        ForAll(
+            CATALOGO_PERSONAL1 As _c;
+            {
+                Clave:  Upper(Trim(Substitute(Substitute("" & _c.Nombre; "  "; " "); "  "; " ")));
+                Codigo: Trim("" & _c.CODIGO);
+                Nombre: _c.Nombre;
+                Activo: _c.Activo
+            }
+        )
+    );;
+    Select(btnMantCalcular)
+)
+
+ btnMantCalcular.OnSelect:
+=Set(gMantConfSets; false);;
+Set(gMantConfCod; false);;
+ClearCollect(
+    colMantSetsUpd;
+    Filter(
+        ForAll(
+            colMantReg As _r;
+            With(
+                {
+                    _s:  LookUp(colMantSets; SetName = _r.SetName);
+                    _ow: tglMantSobrescribir.Value;
+                    _op: _r.TypeOperation.Value
+                };
+                With(
+                    {
+                        nCult:  If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Crop));  _r.Cultivo;     _ow Or IsBlank(Trim("" & _r.Cultivo));     _s.Crop;  _r.Cultivo);
+                        nMct:   If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Mct));   _r.MTC;         _ow Or IsBlank(Trim("" & _r.MTC));         _s.Mct;   _r.MTC);
+                        nGen:   If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Gen));   _r.Generation;  _ow Or IsBlank(Trim("" & _r.Generation));  _s.Gen;   _r.Generation);
+                        nOp:    If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Op));    _op;            _ow Or IsBlank(Trim("" & _op));            _s.Op;    _op);
+                        nFld:   If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Fld));   _r.Field;       _ow Or IsBlank(Trim("" & _r.Field));       _s.Fld;   _r.Field);
+                        nGH:    If(Not(_s.Existe) Or IsBlank(Trim("" & _s.GH));    _r.Greenhouse;  _ow Or IsBlank(Trim("" & _r.Greenhouse));  _s.GH;    _r.Greenhouse);
+                        nProg:  If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Prog));  _r.Program;     _ow Or IsBlank(Trim("" & _r.Program));     _s.Prog;  _r.Program);
+                        nTrial: If(Not(_s.Existe) Or IsBlank(Trim("" & _s.Trial)); _r.TrialIntent; _ow Or IsBlank(Trim("" & _r.TrialIntent)); _s.Trial; _r.TrialIntent)
+                    };
+                    {
+                        ID:      _r.ID;
+                        SetName: _r.SetName;
+                        Fecha:   _r.FechaInicio;
+                        nCult:   nCult;
+                        nMct:    nMct;
+                        nGen:    nGen;
+                        nOp:     nOp;
+                        nFld:    nFld;
+                        nGH:     nGH;
+                        nProg:   nProg;
+                        nTrial:  nTrial;
+                        Detalle:
+                            If(("" & nCult)  <> ("" & _r.Cultivo);     "Cultivo: "  & Coalesce(_r.Cultivo; "—")     & " → " & nCult  & "   "; "") &
+                            If(("" & nMct)   <> ("" & _r.MTC);         "MCT: "      & Coalesce(_r.MTC; "—")         & " → " & nMct   & "   "; "") &
+                            If(("" & nGen)   <> ("" & _r.Generation);  "Gen: "      & Coalesce(_r.Generation; "—")  & " → " & nGen   & "   "; "") &
+                            If(("" & nOp)    <> ("" & _op);            "TipoOp: "   & Coalesce(_op; "—")            & " → " & nOp    & "   "; "") &
+                            If(("" & nFld)   <> ("" & _r.Field);       "Field: "    & Coalesce(_r.Field; "—")       & " → " & nFld   & "   "; "") &
+                            If(("" & nGH)    <> ("" & _r.Greenhouse);  "Inv: "      & Coalesce(_r.Greenhouse; "—")  & " → " & nGH    & "   "; "") &
+                            If(("" & nProg)  <> ("" & _r.Program);     "Programa: " & Coalesce(_r.Program; "—")     & " → " & nProg  & "   "; "") &
+                            If(("" & nTrial) <> ("" & _r.TrialIntent); "Trial: "    & Coalesce(_r.TrialIntent; "—") & " → " & nTrial & "   "; "")
+                    }
+                )
+            )
+        );
+        Detalle <> ""
+    )
+);;
+ClearCollect(
+    colMantCodDup;
+    Filter(
+        ForAll(
+            Filter(Distinct(colMantCat; Upper(Codigo)); !IsBlank(Value)) As _k;
+            {
+                Codigo:   _k.Value;
+                Personas: CountRows(Distinct(Filter(colMantCat; Upper(Codigo) = _k.Value); Clave));
+                Nombres:  Concat(Filter(colMantCat; Upper(Codigo) = _k.Value); Nombre; " / ")
+            }
+        );
+        Personas > 1
+    )
+);;
+ClearCollect(
+    colMantCodMap;
+    ForAll(
+        Filter(Distinct(colMantReg; NombrePersona); !IsBlank(Value)) As _n;
+        With(
+            { _m: Filter(colMantCat; Clave = Upper(Trim(Substitute(Substitute(_n.Value; "  "; " "); "  "; " ")))) };
+            With(
+                { _ma: Filter(_m; Activo = "SI") };
+                With(
+                    {
+                        _cod: If(
+                                  CountRows(Distinct(_m; Upper(Codigo))) = 1;  First(_m).Codigo;
+                                  CountRows(Distinct(_ma; Upper(Codigo))) = 1; First(_ma).Codigo;
+                                  ""
+                              )
+                    };
+                    {
+                        Nombre:      _n.Value;
+                        CodigoNuevo: _cod;
+                        Actuales:    Concat(Distinct(Filter(colMantReg; NombrePersona = _n.Value); Coalesce(CODIGO; "s/c")); Value; ", ");
+                        Registros:   CountRows(Filter(colMantReg; NombrePersona = _n.Value And Upper(Trim(Coalesce(CODIGO; ""))) <> Upper(_cod)));
+                        Estado:      If(
+                                         IsEmpty(_m); "No está en el catálogo";
+                                         _cod = ""; "Nombre repetido en el catálogo con códigos distintos";
+                                         Upper(_cod) in colMantCodDup.Codigo; "Su código está repetido en el catálogo";
+                                         "OK"
+                                     )
+                    }
+                )
+            )
+        )
+    )
+);;
+ClearCollect(
+    colMantCodUpd;
+    Filter(
+        ForAll(
+            colMantReg As _r;
+            With(
+                { _m: LookUp(colMantCodMap; Nombre = _r.NombrePersona) };
+                {
+                    ID:          _r.ID;
+                    Nombre:      _r.NombrePersona;
+                    CodigoAnt:   Trim(Coalesce(_r.CODIGO; ""));
+                    CodigoNuevo: Coalesce(_m.CodigoNuevo; "");
+                    Ok:          _m.Estado = "OK"
+                }
+            )
+        );
+        Ok And CodigoNuevo <> "" And Upper(CodigoAnt) <> Upper(CodigoNuevo)
+    )
+)
+
+ lblMantInfo.Text:
+=If(
+    IsEmpty(colMantReg);
+    "Elige el rango de fechas y presiona 🔄 1. Cargar y revisar. Primero corrige los códigos en CATALOGO_PERSONAL1.";
+    "Registros cargados: " & CountRows(colMantReg) &
+    " (" & Text(gMantDesde; "[$-es]dd/mm/yyyy") & " – " & Text(gMantHasta; "[$-es]dd/mm/yyyy") & ")" &
+    " · Sets: " & CountRows(colMantSets) &
+    " · Sets que no existen en DATASUMMARY1: " & CountRows(Filter(colMantSets; Not(Existe))) &
+    " · Personas en el catálogo: " & CountRows(colMantCat)
+)
+
+ lblMantSetsRes.Text:
+=If(
+    IsEmpty(colMantReg);
+    "";
+    CountRows(colMantSetsUpd) & " registro(s) se van a actualizar con el modo «" &
+    If(tglMantSobrescribir.Value; "Igualar al set"; "Solo vacíos") & "». " &
+    "Cultivo: " & CountRows(Filter(colMantSetsUpd; "Cultivo:" in Detalle)) &
+    " · MCT: " & CountRows(Filter(colMantSetsUpd; "MCT:" in Detalle)) &
+    " · Gen: " & CountRows(Filter(colMantSetsUpd; "Gen:" in Detalle)) &
+    " · TipoOp: " & CountRows(Filter(colMantSetsUpd; "TipoOp:" in Detalle)) &
+    " · Field: " & CountRows(Filter(colMantSetsUpd; "Field:" in Detalle)) &
+    " · Inv: " & CountRows(Filter(colMantSetsUpd; "Inv:" in Detalle)) &
+    " · Programa: " & CountRows(Filter(colMantSetsUpd; "Programa:" in Detalle)) &
+    " · Trial: " & CountRows(Filter(colMantSetsUpd; "Trial:" in Detalle))
+)
+
+ btnMantAplicarSets.Text:
+=If(gMantConfSets; "⚠️ Toca otra vez para actualizar " & CountRows(colMantSetsUpd); "✅ 2A. Aplicar a " & CountRows(colMantSetsUpd) & " registros")
+
+ btnMantAplicarSets.DisplayMode:
+=If(IsEmpty(colMantSetsUpd); DisplayMode.Disabled; DisplayMode.Edit)
+
+ btnMantAplicarSets.OnSelect:
+=If(
+    Not(gMantConfSets);
+    Set(gMantConfSets; true);;
+    Notify("Revisa la vista previa. Toca otra vez para actualizar " & CountRows(colMantSetsUpd) & " registros."; NotificationType.Warning);
+
+    Set(gMantConfSets; false);;
+    Set(gMantErr; "");;
+    IfError(
+        Patch(
+            REGISTRO_PERSONAL1;
+            ShowColumns(colMantSetsUpd; ID);
+            ForAll(
+                colMantSetsUpd As _u;
+                {
+                    Cultivo:       _u.nCult;
+                    MTC:           _u.nMct;
+                    Generation:    _u.nGen;
+                    TypeOperation: { Value: _u.nOp };
+                    Field:         _u.nFld;
+                    Greenhouse:    _u.nGH;
+                    Program:       _u.nProg;
+                    TrialIntent:   _u.nTrial
+                }
+            )
+        );
+        Set(gMantErr; FirstError.Message)
+    );;
+    If(
+        gMantErr = "";
+        Notify("✅ " & CountRows(colMantSetsUpd) & " registros completados con los datos de su set. Comprobando…"; NotificationType.Success);;
+        Set(gMantRecalc; true);;
+        Select(btnMantCargar);
+        Notify("❌ Error: " & gMantErr & ". Vuelve a cargar: lo que ya se actualizó dejará de aparecer en la vista previa."; NotificationType.Error)
+    )
+)
+
+ lblMantCodDup.Text:
+="⚠️ Códigos repetidos en CATALOGO_PERSONAL1 (corrígelos primero; esas personas NO se tocan): " &
+Concat(colMantCodDup; Codigo & " = " & Nombres; "   |   ")
+
+ lblMantCodRes.Text:
+=If(
+    IsEmpty(colMantReg);
+    "";
+    CountRows(colMantCodUpd) & " registro(s) de " & CountRows(Distinct(colMantCodUpd; Nombre)) &
+    " persona(s) tomarán el código del catálogo. No se tocan " &
+    CountRows(Filter(colMantCodMap; Estado <> "OK")) & " nombre(s) (no están en el catálogo o están repetidos)."
+)
+
+ btnMantAplicarCod.Text:
+=If(gMantConfCod; "⚠️ Toca otra vez para corregir " & CountRows(colMantCodUpd); "✅ 2B. Corregir " & CountRows(colMantCodUpd) & " códigos")
+
+ btnMantAplicarCod.DisplayMode:
+=If(IsEmpty(colMantCodUpd); DisplayMode.Disabled; DisplayMode.Edit)
+
+ btnMantAplicarCod.OnSelect:
+=If(
+    Not(gMantConfCod);
+    Set(gMantConfCod; true);;
+    Notify("Revisa la lista. Toca otra vez para corregir " & CountRows(colMantCodUpd) & " registros."; NotificationType.Warning);
+
+    Set(gMantConfCod; false);;
+    Set(gMantErr; "");;
+    IfError(
+        Patch(
+            REGISTRO_PERSONAL1;
+            ShowColumns(colMantCodUpd; ID);
+            ForAll(colMantCodUpd As _u; { CODIGO: _u.CodigoNuevo })
+        );
+        Set(gMantErr; FirstError.Message)
+    );;
+    If(
+        gMantErr = "";
+        Notify("✅ " & CountRows(colMantCodUpd) & " registros ahora tienen el código del catálogo. Comprobando…"; NotificationType.Success);;
+        Set(gMantRecalc; true);;
+        Select(btnMantCargar);
+        Notify("❌ Error: " & gMantErr & ". Vuelve a cargar: lo que ya se corrigió dejará de aparecer."; NotificationType.Error)
+    )
+)
+
+ lblMantPaso.Text:
+=If(
+    gMantRecalc;
+    "✔ Hubo cambios. Cuando termines todos los meses, presiona ⚙️ 3. Recalcular metas y análisis.";
+    "Orden: corrige el catálogo → 1. Cargar → 2B. Códigos → 2A. Datos del set → (siguiente mes) → 3. Recalcular."
+)
+
+ btnMantRecalcular.OnSelect:
+=Set(gMantRecalc; false);;
+Set(gVista; "AnaGlobal");;
+Set(gGlobalModo; "Set");;
+Select(btnCalcMetasRef)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. RECALCULAR METAS Y ANÁLISIS SIN EL LÍMITE DE 2.000 REGISTROS
+═══════════════════════════════════════════════════════════════════════════════
+ Es la MISMA lógica que ya tienes (filtros, P25/P50/P75/P90, exclusión de días
+ de más de 9 h, etc.). Solo cambia la lectura: ahora se lee día por día, así
+ cada consulta trae pocos registros y no se pierde ninguno. Al final de las
+ metas se recarga el análisis global automáticamente.
+
+─────────────────────────────────────────────────────────────────
+ btnCalcMetasRef  (Classic/Button)  ·  conVista_AnaGlobal > conModoGlobal
+─────────────────────────────────────────────────────────────────
+ Visible y Text: están correctos.
+ OnSelect (REEMPLAZAR COMPLETO):
+=Notify("⏳ Recalculando metas: se leen los registros día por día, puede tardar 1–2 minutos…"; NotificationType.Information);;
+Set(gMetaDesde; Coalesce(dpMetaDesde.SelectedDate; DateAdd(Today(); -180; TimeUnit.Days)));;
+Set(gMetaHasta; DateAdd(Coalesce(dpMetaHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+
+Clear(colMetaBruto);;
+ForAll(
+    Sequence(DateDiff(gMetaDesde; gMetaHasta; TimeUnit.Days); 0) As _dia;
+    With(
+        { _f: DateAdd(gMetaDesde; _dia.Value; TimeUnit.Days) };
+        Collect(
+            colMetaBruto;
+            ForAll(
+                Filter(
+                    REGISTRO_PERSONAL1;
+                    Estado.Value = "Finalizado";
+                    HorasTotales > 0;
+                    HorasTotales <= MaxHorasRegistro;
+                    FechaInicio >= _f;
+                    FechaInicio < DateAdd(_f; 1; TimeUnit.Days)
+                ) As _r;
+                With(
+                    {
+                        _h: Coalesce(_r.HorasTotales; 0);
+                        _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                        _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                        _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+                    };
+                    {
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Gen:         fxTxt(_r.Generation);
+                        Mct:         fxMct(_r.MTC);
+                        Prog:        fxTxt(_r.Program);
+                        TipoOp:      fxTxt(_r.TypeOperation.Value);
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        FechaRaw:    _fi;
+                        MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                        Horas:       _h;
+                        Mat:         _m;
+                        Rend:        If(_h > 0; _m / _h; 0)
+                    }
+                )
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colMetaDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colMetaBruto; FechaRaw; Codigo; _d) As _g;
+                {
+                    ClaveDia: Text(_g.FechaRaw; "[$-es]yyyymmdd") & "|" & _g.Codigo;
+                    HorasDia: Sum(_g._d; Horas)
+                }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colMetaRaw;
+    Filter(
+        ForAll(
+            colMetaBruto As _b;
+            {
+                Codigo: _b.Codigo; Persona: _b.Persona; SetName: _b.SetName;
+                Actividad: _b.Actividad; SubAct: _b.SubAct;
+                Gen: _b.Gen; Mct: _b.Mct; Prog: _b.Prog; TipoOp: _b.TipoOp;
+                Horas: _b.Horas; Mat: _b.Mat; Rend: _b.Rend;
+                MismoDia: _b.MismoDia;
+                DiaOk: Not(
+                    (Text(_b.FechaRaw; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colMetaDiaExcl.ClaveDia
+                );
+                MatOk: _b.Mat > 0
+                       Or _b.SetName in SetsSinMaterialOK
+                       Or _b.Actividad in ActividadesSinMaterialOK
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk;
+        Rend > 0
+    )
+);;
+
+ClearCollect(colMetaLargo;Ungroup(Table({ _t: ForAll(colMetaRaw As r; { Nivel: 1; Clave: fxClave(1; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: r.Prog; TipoOp: r.TipoOp; Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) }; { _t: ForAll(colMetaRaw As r; { Nivel: 2; Clave: fxClave(2; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: r.Prog; TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) };{ _t: ForAll(colMetaRaw As r; { Nivel: 3; Clave: fxClave(3; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: r.Gen;  Mct: r.Mct;  Prog: "*";    TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) }; { _t: ForAll(colMetaRaw As r; { Nivel: 4; Clave: fxClave(4; r.Gen; r.Mct; r.Prog; r.TipoOp; r.Actividad; r.SubAct); Actividad: r.Actividad; SubAct: r.SubAct; Gen: "*";    Mct: "*";    Prog: "*";    TipoOp: "*";      Codigo: r.Codigo; Rend: r.Rend; Horas: r.Horas; Mat: r.Mat }) }); _t));;
+
+ClearCollect(
+    colMetasCalc;
+    Filter(
+        ForAll(
+            GroupBy(colMetaLargo; Nivel; Clave; Actividad; SubAct; Gen; Mct; Prog; TipoOp; _d) As g;
+            With(
+                {
+                    _o: Sort(g._d; Rend; SortOrder.Ascending);
+                    _n: CountRows(g._d)
+                };
+                With(
+                    {
+                        _l25: RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _f25: 1 + (_n - 1) * 0,25 - RoundDown(1 + (_n - 1) * 0,25; 0);
+                        _l50: RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _f50: 1 + (_n - 1) * 0,50 - RoundDown(1 + (_n - 1) * 0,50; 0);
+                        _l75: RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _f75: 1 + (_n - 1) * 0,75 - RoundDown(1 + (_n - 1) * 0,75; 0);
+                        _l90: RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _f90: 1 + (_n - 1) * 0,90 - RoundDown(1 + (_n - 1) * 0,90; 0);
+                        _nn: _n
+                    };
+                    With(
+                        {
+                            _p25: Last(FirstN(_o; _l25)).Rend + (Last(FirstN(_o; Min(_l25 + 1; _nn))).Rend - Last(FirstN(_o; _l25)).Rend) * _f25;
+                            _p50: Last(FirstN(_o; _l50)).Rend + (Last(FirstN(_o; Min(_l50 + 1; _nn))).Rend - Last(FirstN(_o; _l50)).Rend) * _f50;
+                            _p75: Last(FirstN(_o; _l75)).Rend + (Last(FirstN(_o; Min(_l75 + 1; _nn))).Rend - Last(FirstN(_o; _l75)).Rend) * _f75;
+                            _p90: Last(FirstN(_o; _l90)).Rend + (Last(FirstN(_o; Min(_l90 + 1; _nn))).Rend - Last(FirstN(_o; _l90)).Rend) * _f90;
+                            _hs: Sum(g._d; Horas);
+                            _ms: Sum(g._d; Mat);
+                            _np: CountRows(Distinct(g._d; Codigo))
+                        };
+                        {
+                            Clave:         g.Clave;
+                            Nivel:         g.Nivel;
+                            Actividad:     g.Actividad;
+                            SubActividad:  g.SubAct;
+                            Generation:    g.Gen;
+                            MCT:           g.Mct;
+                            Program:       g.Prog;
+                            OperationType: g.TipoOp;
+                            RendP25:       Round(_p25; 1);
+                            RendMediana:   Round(_p50; 1);
+                            RendMeta:      Round(_p75; 1);
+                            RendP90:       Round(_p90; 1);
+                            RendPromedio:  If(_hs > 0; Round(_ms / _hs; 1); 0);
+                            NumRegistros:  _nn;
+                            NumPersonas:   _np;
+                            Confiabilidad: fxConfiab(_nn; _np)
+                        }
+                    )
+                )
+            )
+        );
+        NumRegistros >= MinRegMeta
+    )
+);;
+
+ForAll(
+    colMetasCalc As mc;
+    Patch(
+        RENDIMIENTOS_CATALOGO;
+        Coalesce(LookUp(RENDIMIENTOS_CATALOGO; Title = mc.Clave); Defaults(RENDIMIENTOS_CATALOGO));
+        {
+            Title:         mc.Clave;
+            Nivel:         mc.Nivel;
+            Actividad:     mc.Actividad;
+            SubActividad:  mc.SubActividad;
+            Generation:    mc.Generation;
+            MCT:           mc.MCT;
+            Program:       mc.Program;
+            OperationType: mc.OperationType;
+            RendP25:       mc.RendP25;
+            RendMeta:      mc.RendMeta;
+            RendP90:       mc.RendP90;
+            RendPromedio:  mc.RendPromedio;
+            RendMediana:   mc.RendMediana;
+            NumRegistros:  mc.NumRegistros;
+            NumPersonas:   mc.NumPersonas;
+            Confiabilidad: mc.Confiabilidad;
+            FechaCalculo:  Now()
+        }
+    )
+);;
+
+Refresh(RENDIMIENTOS_CATALOGO);;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+Notify(
+    "✅ Metas recalculadas: " & CountRows(colMetasCalc) & " combinaciones | " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Alta")) & " Alta · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Media")) & " Media · " &
+    CountRows(Filter(colMetasCalc; Confiabilidad = "Baja")) & " Baja. Registros válidos: " &
+    CountRows(colMetaRaw) & " de " & CountRows(colMetaBruto);
+    NotificationType.Success
+);;
+Select(btnCargarGlobal)
+
+─────────────────────────────────────────────────────────────────
+ btnCargarGlobal  (Classic/Button, oculto)  ·  conVista_AnaGlobal
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO):
+=Set(gGDesde; Coalesce(dpGDesde.SelectedDate; DateAdd(Today(); -30; TimeUnit.Days)));;
+Set(gGHasta; DateAdd(Coalesce(dpGHasta.SelectedDate; Today()); 1; TimeUnit.Days));;
+ClearCollect(colRendCat; RENDIMIENTOS_CATALOGO);;
+
+Clear(colGlobalBruto);;
+ForAll(
+    Sequence(DateDiff(gGDesde; gGHasta; TimeUnit.Days); 0) As _dia;
+    With(
+        { _f: DateAdd(gGDesde; _dia.Value; TimeUnit.Days) };
+        Collect(
+            colGlobalBruto;
+            ForAll(
+                Filter(
+                    REGISTRO_PERSONAL1;
+                    Estado.Value = "Finalizado";
+                    HorasTotales > 0;
+                    HorasTotales <= MaxHorasRegistro;
+                    FechaInicio >= _f;
+                    FechaInicio < DateAdd(_f; 1; TimeUnit.Days)
+                ) As _r;
+                With(
+                    {
+                        _h: Coalesce(_r.HorasTotales; 0);
+                        _m: Value(Coalesce(_r.CantidadMateriales; "0"));
+                        _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                        _ff: Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin))
+                    };
+                    {
+                        IDReg:       _r.ID;
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Program:     fxTxt(_r.Program);
+                        Generacion:  fxTxt(_r.Generation);
+                        Trial:       fxTxt(_r.TrialIntent);
+                        Mct:         fxMct(_r.MTC);
+                        TipoOp:      fxTxt(_r.TypeOperation.Value);
+                        Field:       Coalesce(_r.Field; "—");
+                        Greenhouse:  Coalesce(_r.Greenhouse; "—");
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                        Responsable: Coalesce(_r.Responsable; "—");
+                        EstadoTxt:   Coalesce(_r.Estado.Value; "Finalizado");
+                        Comentarios: Coalesce(_r.Comentarios; "Sin comentarios");
+                        Fecha:       _fi;
+                        FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm/yyyy");
+                        HoraIni:     Coalesce(_r.HoraInicio; "—");
+                        HoraFin:     Coalesce(_r.HoraFin; "—");
+                        Horas:       _h;
+                        Mat:         _m;
+                        Frutos:      Coalesce(_r.NumeroFrutos; 0);
+                        Rend:        If(_h > 0; _m / _h; 0);
+                        MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                        MatOk:       _m > 0
+                                     Or Coalesce(_r.SetName; "") in SetsSinMaterialOK
+                                     Or fxTxt(_r.Job) in ActividadesSinMaterialOK
+                    }
+                )
+            )
+        )
+    )
+);;
+
+ClearCollect(
+    colGlobalDiaExcl;
+    ForAll(
+        Filter(
+            ForAll(
+                GroupBy(colGlobalBruto; Fecha; Codigo; _d) As _g;
+                { ClaveDia: Text(_g.Fecha; "[$-es]yyyymmdd") & "|" & _g.Codigo; HorasDia: Sum(_g._d; Horas) }
+            );
+            HorasDia > MaxHorasDiaPersona
+        ) As _x;
+        { ClaveDia: _x.ClaveDia }
+    )
+);;
+
+ClearCollect(
+    colGlobalRaw;
+    Filter(
+        ForAll(
+            colGlobalBruto As _b;
+            {
+                IDReg: _b.IDReg; SetName: _b.SetName; Cultivo: _b.Cultivo;
+                Actividad: _b.Actividad; SubAct: _b.SubAct; Program: _b.Program;
+                Generacion: _b.Generacion; Trial: _b.Trial; Mct: _b.Mct; TipoOp: _b.TipoOp;
+                Field: _b.Field; Greenhouse: _b.Greenhouse; Codigo: _b.Codigo;
+                Persona: _b.Persona; Responsable: _b.Responsable; EstadoTxt: _b.EstadoTxt;
+                Comentarios: _b.Comentarios; Fecha: _b.Fecha; FechaTxt: _b.FechaTxt;
+                HoraIni: _b.HoraIni; HoraFin: _b.HoraFin; Horas: _b.Horas; Mat: _b.Mat;
+                Frutos: _b.Frutos; Rend: _b.Rend;
+                MismoDia: _b.MismoDia; MatOk: _b.MatOk;
+                DiaOk: Not((Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.Codigo) in colGlobalDiaExcl.ClaveDia);
+                ClaveM1: fxClave(1; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM2: fxClave(2; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM3: fxClave(3; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveM4: fxClave(4; _b.Generacion; _b.Mct; _b.Program; _b.TipoOp; _b.Actividad; _b.SubAct);
+                ClaveGF: Text(_b.Fecha; "[$-es]yyyymmdd") & "|" & _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad & "|" & _b.SubAct;
+                ClaveGA: _b.SetName & "|" & _b.Codigo & "|" & _b.Actividad
+            }
+        );
+        MismoDia;
+        DiaOk;
+        MatOk
+    )
+);;
+
+Set(gGlobalTrunc; false);;
+Clear(colExclGF);;
+Clear(colExclGA);;
+Clear(colExclGM);;
+Select(btnRecalcGlobal)
+
+ El aviso "Se alcanzó el límite de 2.000 registros" (lblAvisoGlobal) ya no
+ aparecerá, porque gGlobalTrunc queda en false. btnRecalcGlobal: está correcto.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. NUEVA SECCIÓN 🧪 PROCESOS — REGISTRO DIARIO  (gVista = "Procesos")
+═══════════════════════════════════════════════════════════════════════════════
+ Muestra lo que cada persona trabajó: fecha, código, persona, set, cultivo,
+ generación, MCT, invernadero, actividad, materiales, hora inicio, hora fin y
+ horas. NO muestra rendimiento. Por defecto HOY; chevrones ◀ ▶ para mover el
+ rango; dos datepicker para rangos; filtro por set/persona/código y actividad.
+ Los KPIs y los cultivos se recalculan con el mismo filtro.
+ No se incluyen los registros de peso (jobPeso / jobFinPeso).
+
+─────────────────────────────────────────────────────────────────
+ btnVerProcesos  (Classic/Button)  ·  AGREGAR en conHeaderST, después de btnAnaGlobal
+─────────────────────────────────────────────────────────────────
+ Text:        ="🧪 Procesos"
+ Height:      =36
+ Fill:        =colGreen
+ Color:       =ColorValue(hexInk)
+ HoverFill:   =ColorFade(colGreen; -0,12)
+ FontWeight:  =FontWeight.Semibold
+ Visible:     =(gVista = "Sets") And fxPuede("rendimientos")
+ OnSelect:
+=Set(gProcDesde; Today());;
+Set(gProcHasta; Today());;
+Set(gVista; "Procesos");;
+Select(btnCargarProc)
+
+─────────────────────────────────────────────────────────────────
+ btnCargarProc  (Classic/Button)  ·  AGREGAR en scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ Visible: =false
+ OnSelect:
+=Set(gProcDesde; Coalesce(gProcDesde; Today()));;
+Set(gProcHasta; Coalesce(gProcHasta; gProcDesde));;
+If(gProcHasta < gProcDesde; Set(gProcHasta; gProcDesde));;
+If(
+    DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) > 62;
+    Notify("⚠️ Elige un rango de máximo 2 meses."; NotificationType.Warning);
+    Clear(colProc);;
+    ForAll(
+        Sequence(DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) + 1; 0) As _dia;
+        With(
+            { _f: DateAdd(gProcDesde; _dia.Value; TimeUnit.Days) };
+            Collect(
+                colProc;
+                ForAll(
+                    Filter(
+                        REGISTRO_PERSONAL1;
+                        FechaInicio >= _f;
+                        FechaInicio < DateAdd(_f; 1; TimeUnit.Days);
+                        Job <> jobPeso;
+                        Job <> jobFinPeso
+                    ) As _r;
+                    {
+                        ID:          _r.ID;
+                        Fecha:       _r.FechaInicio;
+                        FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm");
+                        Codigo:      Coalesce(_r.CODIGO; "s/c");
+                        Persona:     Coalesce(_r.NombrePersona; "—");
+                        SetName:     Coalesce(_r.SetName; "Sin set");
+                        Cultivo:     fxTxt(_r.Cultivo);
+                        Generacion:  fxTxt(_r.Generation);
+                        Mct:         fxMct(_r.MTC);
+                        Invernadero: Coalesce(_r.Greenhouse; "—");
+                        Actividad:   fxTxt(_r.Job);
+                        SubAct:      fxSub(_r.SubActividad.Value);
+                        Mat:         IfError(Value(Coalesce(_r.CantidadMateriales; "0")); 0);
+                        HoraIni:     Coalesce(_r.HoraInicio; Text(_r.FechaInicio; "[$-es]hh:mm"));
+                        HoraFin:     If(IsBlank(_r.FechaFin); "—"; Coalesce(_r.HoraFin; Text(_r.FechaFin; "[$-es]hh:mm")));
+                        Horas:       If(IsBlank(_r.FechaFin); 0; Coalesce(_r.HorasTotales; 0));
+                        Estado:      Coalesce(_r.Estado.Value; "—")
+                    }
+                )
+            )
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ conVista_Procesos  (GroupContainer AutoLayout VERTICAL)
+                   ·  AGREGAR en conRaiz_Sets, después de conVista_Mant
+─────────────────────────────────────────────────────────────────
+ Visible:           =gVista = "Procesos"
+ Width:             =Parent.Width
+ FillPortions:      =1
+ Fill:              =colFondo
+ LayoutAlignItems:  =LayoutAlignItems.Stretch
+ LayoutGap:         =8
+ PaddingTop / PaddingBottom / PaddingLeft / PaddingRight: =12
+
+ Hijos (en este orden):
+
+ ── conProcHead  (GroupContainer horizontal)
+     Height =52 · FillPortions =0 · Fill =colDark · LayoutAlignItems =LayoutAlignItems.Center
+     LayoutGap =6 · PaddingLeft =10 · PaddingRight =10
+     • lblProcTit (Label)  Text ="🧪 Procesos · registro diario"
+                           Color =RGBA(255; 255; 255; 1) · FontWeight =FontWeight.Bold · Width =230
+     • icoProcPrev (ModernIcon)  Icon ="ChevronLeft" · IconColor =RGBA(255; 255; 255; 1) · Width =32
+         OnSelect:
+=With(
+    { _n: DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) + 1 };
+    Set(gProcDesde; DateAdd(gProcDesde; -_n; TimeUnit.Days));;
+    Set(gProcHasta; DateAdd(gProcHasta; -_n; TimeUnit.Days))
+);;
+Select(btnCargarProc)
+     • dpProcDesde (ModernDatePicker)  DefaultDate =gProcDesde · Format ="dd/mm/yyyy" · Width =130
+         OnChange:
+=If(
+    Self.SelectedDate <> gProcDesde;
+    Set(gProcDesde; Self.SelectedDate);;
+    If(gProcHasta < gProcDesde; Set(gProcHasta; gProcDesde));;
+    Select(btnCargarProc)
+)
+     • dpProcHasta (ModernDatePicker)  DefaultDate =gProcHasta · Format ="dd/mm/yyyy" · Width =130
+         OnChange:
+=If(
+    Self.SelectedDate <> gProcHasta;
+    Set(gProcHasta; Self.SelectedDate);;
+    If(gProcHasta < gProcDesde; Set(gProcDesde; gProcHasta));;
+    Select(btnCargarProc)
+)
+     • icoProcNext (ModernIcon)  Icon ="ChevronRight" · IconColor =RGBA(255; 255; 255; 1) · Width =32
+         OnSelect:
+=With(
+    { _n: DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) + 1 };
+    Set(gProcDesde; DateAdd(gProcDesde; _n; TimeUnit.Days));;
+    Set(gProcHasta; DateAdd(gProcHasta; _n; TimeUnit.Days))
+);;
+Select(btnCargarProc)
+     • btnProcHoy (Classic/Button)  Estilo A · Text ="Hoy" · Width =70 · Height =34
+         OnSelect:
+=Set(gProcDesde; Today());;
+Set(gProcHasta; Today());;
+Select(btnCargarProc)
+     • txtProcBuscar (Classic/TextInput)  HintText ="Filtrar por set, persona o código…"
+                                          DelayOutput =true · FillPortions =1 · Height =34
+     • drpProcAct (ModernCombobox)  Width =200 · InputTextPlaceholder ="Todas las actividades"
+                                    SelectMultiple =false · ItemDisplayText =ThisItem.Value
+         Items:  =Sort(Distinct(colProc; Actividad); Value; SortOrder.Ascending)
+     • icoProcLimpiar (ModernIcon)  Icon ="Dismiss" · IconColor =RGBA(255; 255; 255; 1) · Width =28
+         Visible:  =!IsBlank(Trim(txtProcBuscar.Text)) Or !IsBlank(drpProcAct.Selected.Value)
+         OnSelect: =Reset(txtProcBuscar);; Reset(drpProcAct)
+     • btnProcActualizar (Classic/Button)  Estilo A · Text ="🔄 Actualizar" · Width =110 · Height =34
+         OnSelect: =Select(btnCargarProc)
+
+ ── lblProcRango  (Label)
+     Height =26 · FillPortions =0 · FontWeight =FontWeight.Semibold · Color =ColorValue(hexInk)
+     Text:
+=If(
+    gProcDesde = gProcHasta;
+    "📅 " & Text(gProcDesde; "[$-es]dddd dd/mm/yyyy") & If(gProcDesde = Today(); "  · HOY"; "");
+    "📅 Del " & Text(gProcDesde; "[$-es]dd/mm/yyyy") & " al " & Text(gProcHasta; "[$-es]dd/mm/yyyy")
+)
+
+ ── galProcKpi  (Gallery HORIZONTAL)
+     Height =86 · FillPortions =0 · TemplatePadding =6 · ShowScrollbar =false
+     TemplateSize =Max(120; (Self.Width - 7 * Self.TemplatePadding) / 6)
+     Items:
+=With(
+    {
+        _f: Filter(
+                colProc;
+                IsBlank(Trim(txtProcBuscar.Text)) Or Trim(txtProcBuscar.Text) in SetName Or Trim(txtProcBuscar.Text) in Persona Or StartsWith(Codigo; Trim(txtProcBuscar.Text));
+                IsBlank(drpProcAct.Selected.Value) Or Actividad = drpProcAct.Selected.Value
+            )
+    };
+    Table(
+        { Titulo: "REGISTROS";  Valor: Text(CountRows(_f));                              Hex: "#0E2018"; HexSoft: "#E9ECE8" };
+        { Titulo: "PERSONAS";   Valor: Text(CountRows(Distinct(_f; Codigo)));            Hex: "#2F9E44"; HexSoft: "#E8F5EC" };
+        { Titulo: "SETS";       Valor: Text(CountRows(Distinct(_f; SetName)));           Hex: "#2563EB"; HexSoft: "#E6EDFD" };
+        { Titulo: "CULTIVOS";   Valor: Text(CountRows(Distinct(_f; Cultivo)));           Hex: "#0E7C86"; HexSoft: "#E0F1F2" };
+        { Titulo: "MATERIALES"; Valor: Text(Sum(_f; Mat); "[$-es]#.##0");                Hex: "#B45309"; HexSoft: "#FBF1DC" };
+        { Titulo: "EN PROCESO"; Valor: Text(CountRows(Filter(_f; Estado = "En Proceso"))); Hex: "#DC2626"; HexSoft: "#FCE9E9" }
+    )
+)
+     Plantilla: conProcKpi (GroupContainer vertical)
+         Width =Parent.TemplateWidth · Height =Parent.TemplateHeight · LayoutJustifyContent =LayoutJustifyContent.Center
+         Fill =ColorValue(ThisItem.HexSoft) · BorderColor =ColorValue(ThisItem.Hex) · BorderThickness =1
+         RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight =10
+         - lblProcKpiTit (Label)  Align =Align.Center · Size =9 · Color =ColorValue(hexMuted) · Text =ThisItem.Titulo
+         - lblProcKpiVal (Label)  Align =Align.Center · Size =22 · FontWeight =FontWeight.Bold
+                                  Color =ColorValue(ThisItem.Hex) · Text =ThisItem.Valor
+
+ ── galProcCult  (Gallery HORIZONTAL)  — cultivos trabajados
+     Height =46 · FillPortions =0 · TemplateSize =250 · TemplatePadding =6 · ShowScrollbar =false
+     Items:
+=With(
+    {
+        _f: Filter(
+                colProc;
+                IsBlank(Trim(txtProcBuscar.Text)) Or Trim(txtProcBuscar.Text) in SetName Or Trim(txtProcBuscar.Text) in Persona Or StartsWith(Codigo; Trim(txtProcBuscar.Text));
+                IsBlank(drpProcAct.Selected.Value) Or Actividad = drpProcAct.Selected.Value
+            )
+    };
+    Sort(
+        ForAll(
+            Distinct(_f; Cultivo) As _c;
+            {
+                Cultivo:  _c.Value;
+                Sets:     CountRows(Distinct(Filter(_f; Cultivo = _c.Value); SetName));
+                Personas: CountRows(Distinct(Filter(_f; Cultivo = _c.Value); Codigo));
+                Mat:      Sum(Filter(_f; Cultivo = _c.Value); Mat)
+            }
+        );
+        Mat;
+        SortOrder.Descending
+    )
+)
+     Plantilla: lblProcCult (Label)
+         Width =Parent.TemplateWidth · Height =Parent.TemplateHeight · Size =10 · FontWeight =FontWeight.Semibold
+         PaddingLeft =10 · Color =ColorValue(fxHexCultivo(fxCultivo(ThisItem.Cultivo)))
+         Fill =ColorFade(ColorValue(fxHexCultivo(fxCultivo(ThisItem.Cultivo))); 0,85)
+         BorderColor =ColorValue(fxHexCultivo(fxCultivo(ThisItem.Cultivo))) · BorderThickness =1
+         Text =ThisItem.Cultivo & " · " & ThisItem.Sets & " sets · " & ThisItem.Personas & " pers. · " & Text(ThisItem.Mat; "[$-es]#.##0") & " mat."
+
+ ── hdrProc  (GroupContainer horizontal)
+     Height =32 · FillPortions =0 · Fill =ColorValue(hexInk) · LayoutAlignItems =LayoutAlignItems.Center
+     PaddingLeft =8 · PaddingRight =8
+     Labels (Color =RGBA(255; 255; 255; 1) · FontWeight =FontWeight.Bold · Size =9 · Align =Align.Center):
+       hdrPrFecha     Text ="FECHA"       Width =60
+       hdrPrCodigo    Text ="CÓDIGO"      Width =70
+       hdrPrPersona   Text ="PERSONA"     FillPortions =2
+       hdrPrSet       Text ="SET"         FillPortions =1,5
+       hdrPrCultivo   Text ="CULTIVO"     FillPortions =1
+       hdrPrGen       Text ="GEN."        FillPortions =0,7
+       hdrPrMct       Text ="MCT"         FillPortions =0,8
+       hdrPrInv       Text ="INV."        FillPortions =0,6
+       hdrPrAct       Text ="ACTIVIDAD"   FillPortions =1,5
+       hdrPrMat       Text ="MATERIALES"  Width =90
+       hdrPrIni       Text ="INICIO"      Width =60
+       hdrPrFin       Text ="FIN"         Width =60
+       hdrPrHoras     Text ="HORAS"       Width =60
+       hdrPrEstado    Text ="ESTADO"      Width =90
+
+ ── galProc  (Gallery vertical)
+     FillPortions =1 · TemplateSize =36 · TemplatePadding =0
+     Items:
+=Sort(
+    Filter(
+        colProc;
+        IsBlank(Trim(txtProcBuscar.Text)) Or Trim(txtProcBuscar.Text) in SetName Or Trim(txtProcBuscar.Text) in Persona Or StartsWith(Codigo; Trim(txtProcBuscar.Text));
+        IsBlank(drpProcAct.Selected.Value) Or Actividad = drpProcAct.Selected.Value
+    );
+    Fecha;
+    SortOrder.Descending
+)
+     Plantilla: conFilaProc (GroupContainer horizontal)
+         Width =Parent.TemplateWidth · Height =Parent.TemplateHeight · PaddingLeft =8 · PaddingRight =8
+         LayoutAlignItems =LayoutAlignItems.Center
+         Fill =If(ThisItem.Estado = "En Proceso"; ColorValue(hexAmberSoft); RGBA(255; 255; 255; 1))
+     Labels (Size =9 · Align =Align.Center · mismos Width/FillPortions que el encabezado):
+       lblPrFecha     Text =ThisItem.FechaTxt
+       lblPrCodigo    Text =ThisItem.Codigo
+       lblPrPersona   Text =ThisItem.Persona                       · Align =Align.Left
+       lblPrSet       Text =ThisItem.SetName                       · FontWeight =FontWeight.Semibold
+       lblPrCultivo   Text =ThisItem.Cultivo
+                      Color =ColorValue(fxHexCultivo(fxCultivo(ThisItem.Cultivo)))
+       lblPrGen       Text =ThisItem.Generacion
+       lblPrMct       Text =ThisItem.Mct
+       lblPrInv       Text =ThisItem.Invernadero
+       lblPrAct       Text =ThisItem.Actividad & If(ThisItem.SubAct = "(sin subactividad)"; ""; " · " & ThisItem.SubAct)
+       lblPrMat       Text =If(ThisItem.Estado = "En Proceso"; "—"; Text(ThisItem.Mat; "[$-es]#.##0"))
+                      FontWeight =FontWeight.Bold
+       lblPrIni       Text =ThisItem.HoraIni
+       lblPrFin       Text =ThisItem.HoraFin
+       lblPrHoras     Text =If(ThisItem.Estado = "En Proceso"; "en curso"; Text(ThisItem.Horas; "[$-es]0,0"))
+       lblPrEstado    Text =ThisItem.Estado
+                      Color =If(ThisItem.Estado = "En Proceso"; ColorValue(hexAmber); ColorValue(hexLeafDark))
+                      FontWeight =FontWeight.Semibold
+
+ ── lblProcVacio  (Label)
+     Height =60 · FillPortions =0 · Align =Align.Center · Color =ColorValue(hexMuted)
+     Text    ="No hay registros en este rango con ese filtro."
+     Visible =CountRows(galProc.AllItems) = 0
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. ORDEN PARA CORREGIR LOS DATOS Y PRUEBAS
+═══════════════════════════════════════════════════════════════════════════════
+ Antes:
+  a) SharePoint → REGISTRO_PERSONAL1 → Configuración de versiones = Sí.
+  b) Power Apps → Configuración → General → Límite de filas de datos = 2000.
+  c) Corrige los códigos repetidos en CATALOGO_PERSONAL1.
+  d) Verifica que SetName, Estado y FechaInicio estén INDIZADAS en
+     REGISTRO_PERSONAL1 (Configuración de la lista → Columnas indizadas), y
+     SetName en DATASUMMARY1. Es necesario si la lista pasa de 5.000 elementos.
+
+ Corrección (Rendimientos → 🛠 Corregir datos), mes por mes desde el más antiguo:
+  1. Elige el mes → 🔄 1. Cargar y revisar.
+  2. Revisa la tabla de códigos. Lo que dice "no se toca" corrígelo en el
+     catálogo y vuelve a cargar.
+  3. ✅ 2B. Corregir códigos → toca otra vez para confirmar.
+  4. Revisa la tabla de datos del set → ✅ 2A. Aplicar → confirmar.
+  5. Al recargarse sola, ambas tablas deben quedar en 0. Pasa al siguiente mes.
+  6. Al terminar todos los meses: ⚙️ 3. Recalcular metas y análisis.
+
+ Pruebas:
+  • Con una cuenta sin rendimientos_peso: en las tarjetas no aparecen los
+    botones de peso/cosecha.
+  • Con rendimientos_peso: registra un peso, revisa que suba el número en la
+    tarjeta, que haya un registro "Registro de peso" en REGISTRO_PERSONAL1 y
+    que llegue el correo.
+  • Inicia 5 personas en un set, ábrelo y cierra 3: el cierre debe tardar 1–2 s
+    y quedar las otras 2 en la lista.
+  • Deja una actividad abierta de ayer: al abrir el set aparece el botón
+    ⚠️ "pendientes de días anteriores".
+  • Registro individual: escanea, inicia, vuelve a escanear y cierra; revisa que
+    el registro tenga TrialIntent y TypeOperation.
+  • 🧪 Procesos: hoy por defecto, ◀ ▶ cambian de día, filtra un set y revisa
+    que KPIs y cultivos cambien con el filtro.
