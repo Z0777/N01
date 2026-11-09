@@ -1,0 +1,1846 @@
+═══════════════════════════════════════════════════════════════════════════════
+ SISTEMA DE PERSONAL — SELECCIÓN EN LOTE, VISITANTES, ASISTENCIA EN GARITA,
+ RENDIMIENTOS, PESO POR ACCESOS Y DESCARGAS EN SHAREPOINT  (09/11/2026)
+ Pantallas: Personal · REGISTROS · scrRendimientos
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Fórmulas SIN "=" al inicio. Solo aparecen controles que se AGREGAN,
+ MODIFICAN o ELIMINAN. Este archivo continúa el txt anterior
+ (Sistema_Personal_Accesos_Garita_Visitantes_HE_Permisos.txt): donde un
+ control se repite aquí, ESTA versión es la que vale.
+═══════════════════════════════════════════════════════════════════════════════
+
+ÍNDICE
+  1. SharePoint: lista CONFIG_PESO_CORREOS, carpeta Personal y revisión de
+     tu acceso de administrador
+  2. Fórmulas de App: administrador y peso desde la base de datos
+  3. PERSONAL · Activar / desactivar varias personas a la vez
+  4. PERSONAL · Horas extras: horas reales en lote
+  5. REGISTROS · Visitantes: el ingreso queda al GUARDAR (sin escanear)
+  6. REGISTROS · Pestaña Asistencia y permisos (todo el personal, filtros,
+     chevrons por día)
+  7. RENDIMIENTOS · Finalizar solo lo del día y análisis solo con registros
+     válidos
+  8. RENDIMIENTOS · galSetss más rápido: últimos 250 días, cambio de año y
+     búsqueda en todos los años
+  9. RENDIMIENTOS · Botones de peso solo para quien registra peso
+ 10. DESCARGAS: carpeta Personal en SharePoint, Office Script, flujo único
+     y botones de cada descarga
+ 11. Orden de implementación y pruebas
+ 12. Lo que interpreté (revísalo)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. SHAREPOINT
+═══════════════════════════════════════════════════════════════════════════════
+ 1.1 CONFIG_PESO_CORREOS (lista NUEVA, en el sitio de la app)
+   Title (= cultivo, exactamente como sale en DATASUMMARY1.Crop: Tomato,
+   Tomato cherry, Pepper, Melon, Watermelon, Cucumber…) · Para (texto: correos
+   separados por ";") · Copia (texto: correos separados por ";") · Activo
+   (Sí/No, predeterminado Sí).
+   Crea una fila con Title = DEFAULT: es el correo que se usa cuando el
+   cultivo no tiene fila (antes era gloMailPesoDefault).
+   Pasa aquí las filas que hoy están en la fórmula rutaPesoCorreos.
+   Desde ahora, cambiar a quién le llega el correo de peso = editar esta lista
+   (sin publicar la app).
+
+ 1.2 Carpeta "Personal" para TODAS las descargas (sitio Proyectos-usuarios)
+   Documentos → Nuevo → Carpeta → Personal. Dentro:
+     Personal/Plantilla   → sube aquí PlantillaVacia.xlsx (un libro de Excel
+                            vacío con una sola hoja)
+     Personal/Scripts     → aquí va ExportarExcelGenerico.osts (sección 10.1)
+   Los Excel y PDF que se generen quedan directo en Personal.
+   Permisos: Personal → ⋯ → Administrar acceso → los usuarios de la app con
+   permiso de LECTURA (para abrir lo que descargan).
+
+ 1.3 ACCESOS_USUARIOS — ANTES de cambiar las fórmulas de la sección 2
+   Revisa que exista TU fila: Title = tu correo en minúsculas, Rol =
+   Administrador, Activo = Sí. Desde ahora el administrador sale SOLO de esta
+   lista (la fórmula adminEmails se elimina). Si tu fila no está, pierdes el
+   acceso de administrador al publicar.
+
+ 1.4 ROLES_PERMISOS / ACCESOS_USUARIOS — quién registra peso
+   • Rol de peso: Permisos = rendimientos;rendimientos_peso
+   • A otra persona con otro rol, sin cambiarle el rol: en su fila de
+     ACCESOS_USUARIOS escribe en PermisosExtra:  rendimientos_peso
+   • Para quitárselo: bórralo de PermisosExtra, o escribe rendimientos_peso
+     en PermisosQuitar.
+   Todo se hace desde la vista Accesos de la app o editando la lista; ya no
+   hay correos de peso dentro de las fórmulas.
+
+ Después: Power Apps → Datos → + Agregar datos → SharePoint →
+ CONFIG_PESO_CORREOS.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. FÓRMULAS DE APP (App → Formulas)
+═══════════════════════════════════════════════════════════════════════════════
+ ELIMINAR estas dos fórmulas completas:
+   adminEmails = [ … ];;
+   pesoEmails = [ … ];;
+
+ REEMPLAZAR estas cuatro (cada una completa):
+
+varAdmin = gAccUsuario.Rol = "Administrador";;
+
+varPuedePesar = fxPuede("rendimientos_peso");;
+
+rutaPesoCorreos =
+    ForAll(
+        Filter(CONFIG_PESO_CORREOS; Activo = true; Title <> "DEFAULT") As _r;
+        { Cultivo: _r.Title; Para: _r.Para; Copia: _r.Copia }
+    );;
+
+gloMailPesoDefault = Coalesce(LookUp(CONFIG_PESO_CORREOS; Title = "DEFAULT" And Activo = true).Para; "");;
+
+ AGREGAR (al final):
+
+SetsDiasVigentes = 250;;
+
+ActividadesNoRendimiento = [jobPeso; jobFinPeso];;
+
+ (btnRegistrarPeso y btnFinPeso ya usan rutaPesoCorreos y
+  gloMailPesoDefault: no se tocan. La lógica por cultivo queda igual, solo
+  que los correos salen de la lista.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. PERSONAL · ACTIVAR / DESACTIVAR VARIAS PERSONAS A LA VEZ
+═══════════════════════════════════════════════════════════════════════════════
+ Cómo funciona:
+  • El botón ✔ Activo / ⛔ Inactivo de cada tarjeta ahora SELECCIONA (☑).
+  • Al seleccionar la primera persona aparece abajo la barra de selección:
+    cuántas van, "Seleccionar todos los visibles", "👁 Ver seleccionados"
+    (filtra la galería para revisar), "✖ Limpiar" y "Cambiar estado (N) ›".
+  • Puedes seguir buscando / filtrando y agregando más a la selección.
+  • "Cambiar estado" abre el popup: el título dice cuántas personas son,
+    eliges ⛔ Dar de baja o ✔ Reactivar, fecha y motivo, y se guarda a todas
+    de una vez (catálogo + historial).
+  • Si eliges Baja, solo se aplica a las seleccionadas que están activas (las
+    inactivas se saltan) y al revés con Reactivar.
+
+─────────────────────────────────────────────────────────────────
+ galPersonas  (Gallery)  ·  conPersonal > Container78_1
+─────────────────────────────────────────────────────────────────
+ Items:
+Sort(
+    Filter(
+        CATALOGO_PERSONAL1;
+        Switch(Coalesce(drpPersEstado.Selected.Value; "Todos"); "Activos"; Activo = "SI"; "Inactivos"; Activo <> "SI"; true);
+        IsBlank(drpPersArea.Selected.Value) Or drpPersArea.Selected.Value = "TODAS" Or AREA_GENERAL = drpPersArea.Selected.Value;
+        IsBlank(Trim(txtBuscarPersona.Text)) Or Trim(txtBuscarPersona.Text) in Nombre Or Trim(txtBuscarPersona.Text) in CODIGO;
+        Not(gPerVerSel) Or ID in colPerSel.ID;
+        fxVeArea(AREA_GENERAL; DEPARTAMENTO; SUBAREA)
+    );
+    Nombre;
+    SortOrder.Ascending
+)
+
+─────────────────────────────────────────────────────────────────
+ btnEstadoPer  (Classic/Button)  ·  galPersonas (encima de btnPersona)
+─────────────────────────────────────────────────────────────────
+ Width: 104 · Height: 26 · X: 6 · Y: 6 · Size: 9 · BorderThickness: 0
+ Visible: fxPuede("personal_editar")
+ Text:
+If(ThisItem.ID in colPerSel.ID; "☑ "; "☐ ") & If(ThisItem.Activo = "SI"; "Activo"; "Inactivo")
+ Fill:
+If(ThisItem.ID in colPerSel.ID; ColorValue(hexInfo); ThisItem.Activo = "SI"; ColorValue(hexLeafSoft); ColorValue(hexDangerSoft))
+ Color:
+If(ThisItem.ID in colPerSel.ID; RGBA(255; 255; 255; 1); ThisItem.Activo = "SI"; ColorValue(hexLeafDark); ColorValue(hexDanger))
+ OnSelect:
+If(
+    ThisItem.ID in colPerSel.ID;
+    RemoveIf(colPerSel; ID = ThisItem.ID);
+    Collect(colPerSel; { ID: ThisItem.ID; CODIGO: ThisItem.CODIGO; Nombre: ThisItem.Nombre; DEPARTAMENTO: ThisItem.DEPARTAMENTO; Activo: ThisItem.Activo })
+);;
+If(IsEmpty(colPerSel); Set(gPerVerSel; false))
+
+ celCal_1 (GroupContainer) · galPersonas
+   BorderColor: If(ThisItem.ID in colPerSel.ID; ColorValue(hexInfo); RGBA(0; 0; 0; 0))
+   BorderThickness: If(ThisItem.ID in colPerSel.ID; 2; 0)
+   (Fill: el del txt anterior está correcto)
+
+─────────────────────────────────────────────────────────────────
+ conSelPer  (GroupContainer AutoLayout horizontal)  ·  AGREGAR en conPersonal,
+            DEBAJO de Container78_1
+─────────────────────────────────────────────────────────────────
+ Visible: fxPuede("personal_editar") And CountRows(colPerSel) > 0
+ FillPortions: 0 · Height: If(App.Width < bpTablet; 96; 52) · LayoutWrap: true
+ LayoutGap: 6 · Padding (4): 8 · LayoutAlignItems: LayoutAlignItems.Center
+ Fill: ColorValue(hexInk) · AlignInContainer: AlignInContainer.Stretch
+ Hijos:
+ • lblSelPer (Label) · FillPortions 1 · Color RGBA(255; 255; 255; 1) · FontWeight Semibold · Size 11
+     Text:
+CountRows(colPerSel) & " seleccionada(s) · " & CountRows(Filter(colPerSel; Activo = "SI")) & " activa(s) · " & CountRows(Filter(colPerSel; Activo <> "SI")) & " inactiva(s)"
+ • btnSelPerTodos (Classic/Button) · Width If(App.Width < bpTablet; 44; 190) · Height 34
+     Text: If(App.Width < bpTablet; "☑"; "☑ Seleccionar todos los visibles")
+     OnSelect:
+ClearCollect(colPerTmp; Filter(galPersonas.AllItems; Not(ID in colPerSel.ID)));;
+Collect(
+    colPerSel;
+    ForAll(colPerTmp As _p; { ID: _p.ID; CODIGO: _p.CODIGO; Nombre: _p.Nombre; DEPARTAMENTO: _p.DEPARTAMENTO; Activo: _p.Activo })
+);;
+Clear(colPerTmp)
+ • btnSelPerVer (Classic/Button) · Width If(App.Width < bpTablet; 44; 160) · Height 34
+     Text: If(gPerVerSel; If(App.Width < bpTablet; "👥"; "👥 Ver todos"); If(App.Width < bpTablet; "👁"; "👁 Ver seleccionados"))
+     OnSelect: Set(gPerVerSel; Not(gPerVerSel))
+ • btnSelPerLimpiar (Classic/Button) · Width If(App.Width < bpTablet; 44; 100) · Height 34
+     Text: If(App.Width < bpTablet; "✖"; "✖ Limpiar")
+     OnSelect: Clear(colPerSel);; Set(gPerVerSel; false)
+ • btnSelPerAbrir (Classic/Button) · Width If(App.Width < bpTablet; 150; 200) · Height 34
+     Fill colGreen · Color ColorValue(hexInk) · FontWeight Bold
+     Text: "Cambiar estado (" & CountRows(colPerSel) & ") ›"
+     OnSelect:
+Set(
+    gEstadoAccion;
+    If(
+        CountRows(Filter(colPerSel; Activo <> "SI")) = 0; "Baja";
+        CountRows(Filter(colPerSel; Activo = "SI")) = 0; "Reingreso";
+        ""
+    )
+);;
+Reset(dpEstadoFecha);;
+Reset(txtEstadoMotivo);;
+Set(varPopEstadoPer; true)
+
+─────────────────────────────────────────────────────────────────
+ Popup conPopEstadoPer  ·  Personal (raíz)  — se MODIFICA el del txt anterior
+─────────────────────────────────────────────────────────────────
+ conEstadoCard (GroupContainer)
+   Height: Min(500; Parent.Height - 24)
+   LayoutOverflowY: LayoutOverflow.Scroll
+   Orden de hijos: lblEstadoTit → conEstadoAccion (nuevo) → galEstadoSel
+   (nuevo) → dpEstadoFecha → txtEstadoMotivo → conEstadoBtns
+
+ lblEstadoTit (Label)
+   Text: "Cambiar estado · " & CountRows(colPerSel) & " persona(s) seleccionada(s)"
+   Height: 40
+
+ conEstadoAccion (GroupContainer AutoLayout horizontal) · AGREGAR debajo de lblEstadoTit
+   Height: 44 · FillPortions: 0 · LayoutGap: 8
+   • btnAccBaja (Classic/Button) · FillPortions 1
+       Text: "⛔ Dar de baja (" & CountRows(Filter(colPerSel; Activo = "SI")) & ")"
+       Fill: If(gEstadoAccion = "Baja"; ColorValue(hexDanger); ColorValue(hexDangerSoft))
+       Color: If(gEstadoAccion = "Baja"; RGBA(255; 255; 255; 1); ColorValue(hexDanger))
+       DisplayMode: If(CountRows(Filter(colPerSel; Activo = "SI")) = 0; DisplayMode.Disabled; DisplayMode.Edit)
+       OnSelect: Set(gEstadoAccion; "Baja")
+   • btnAccReing (Classic/Button) · FillPortions 1
+       Text: "✔ Reactivar (" & CountRows(Filter(colPerSel; Activo <> "SI")) & ")"
+       Fill: If(gEstadoAccion = "Reingreso"; ColorValue(hexLeafDark); ColorValue(hexLeafSoft))
+       Color: If(gEstadoAccion = "Reingreso"; RGBA(255; 255; 255; 1); ColorValue(hexLeafDark))
+       DisplayMode: If(CountRows(Filter(colPerSel; Activo <> "SI")) = 0; DisplayMode.Disabled; DisplayMode.Edit)
+       OnSelect: Set(gEstadoAccion; "Reingreso")
+
+ galEstadoSel (Gallery vertical en blanco) · AGREGAR debajo de conEstadoAccion
+   Items: Sort(colPerSel; Nombre; SortOrder.Ascending)
+   Height: Min(150; 30 * CountRows(colPerSel)) · TemplateSize: 30 · FillPortions: 0
+   • lblEstadoSelFila (Label) · Width Parent.TemplateWidth - 36 · Height 30 · Size 10
+       Text: ThisItem.CODIGO & " · " & ThisItem.Nombre & " · " & If(ThisItem.Activo = "SI"; "activo"; "inactivo")
+   • icoEstadoQuitar (ModernIcon) · X Parent.TemplateWidth - 32 · Y 2 · Width 26 · Height 26
+       Icon: "Dismiss" · IconColor: ColorValue(hexDanger)
+       OnSelect: RemoveIf(colPerSel; ID = ThisItem.ID);; If(IsEmpty(colPerSel); Set(varPopEstadoPer; false))
+
+ txtEstadoMotivo (Classic/TextInput)
+   HintText: If(gEstadoAccion = "Reingreso"; "Motivo del reingreso"; "Motivo de la baja (renuncia, fin de contrato…)")
+
+ btnEstadoConfirmar (Classic/Button) · conEstadoBtns
+   Text:
+If(
+    IsBlank(gEstadoAccion); "Elige Baja o Reactivar";
+    gEstadoAccion = "Baja"; "Confirmar baja de " & CountRows(Filter(colPerSel; Activo = "SI"));
+    "Confirmar reingreso de " & CountRows(Filter(colPerSel; Activo <> "SI"))
+)
+   DisplayMode:
+If(IsBlank(gEstadoAccion) Or Len(Trim(txtEstadoMotivo.Text)) < 3; DisplayMode.Disabled; DisplayMode.Edit)
+   OnSelect (REEMPLAZAR COMPLETO):
+With(
+    {
+        _baja: gEstadoAccion = "Baja";
+        _f:    Coalesce(dpEstadoFecha.SelectedDate; Today());
+        _mot:  Trim(txtEstadoMotivo.Text);
+        _usr:  User().FullName;
+        _ahora: Now()
+    };
+    ClearCollect(colPerAplicar; Filter(colPerSel; If(_baja; Activo = "SI"; Activo <> "SI")));;
+    If(
+        IsEmpty(colPerAplicar);
+        Notify("⚠️ Ninguna de las personas seleccionadas necesita ese cambio."; NotificationType.Warning);
+
+        Set(gErrEst; "");;
+        IfError(
+            If(
+                _baja;
+                Patch(
+                    CATALOGO_PERSONAL1;
+                    ForAll(colPerAplicar As _a; { ID: _a.ID });
+                    ForAll(colPerAplicar As _a; { Activo: "NO"; FECHA_BAJA: _f })
+                );
+                Patch(
+                    CATALOGO_PERSONAL1;
+                    ForAll(colPerAplicar As _a; { ID: _a.ID });
+                    ForAll(colPerAplicar As _a; { Activo: "SI"; FECHA_REINGRESO: _f })
+                )
+            );
+            Set(gErrEst; FirstError.Message)
+        );;
+        If(
+            gErrEst <> "";
+            Notify("❌ No se pudo cambiar el estado: " & gErrEst; NotificationType.Error);
+
+            IfError(
+                Collect(
+                    HISTORIAL_ESTADO_PERSONAL;
+                    ForAll(
+                        colPerAplicar As _a;
+                        {
+                            Title:         _a.CODIGO;
+                            Nombre:        _a.Nombre;
+                            Departamento:  _a.DEPARTAMENTO;
+                            Accion:        If(_baja; "Baja"; "Reingreso");
+                            Fecha:         _f;
+                            Motivo:        _mot;
+                            RegistradoPor: _usr;
+                            FechaRegistro: _ahora
+                        }
+                    )
+                );
+                Notify("⚠️ El estado cambió, pero no se guardó el historial."; NotificationType.Warning)
+            );;
+            Notify(
+                If(_baja; "⛔ " & CountRows(colPerAplicar) & " persona(s) dada(s) de baja desde "; "✔ " & CountRows(colPerAplicar) & " persona(s) reactivada(s) desde ") &
+                Text(_f; "dd/mm/yyyy") &
+                If(CountRows(colPerSel) > CountRows(colPerAplicar); " · " & (CountRows(colPerSel) - CountRows(colPerAplicar)) & " ya tenían ese estado"; "");
+                NotificationType.Success
+            );;
+            Clear(colPerSel);;
+            Clear(colPerAplicar);;
+            Set(gPerVerSel; false);;
+            Set(gEstadoAccion; "");;
+            Set(varPopEstadoPer; false);;
+            Refresh(CATALOGO_PERSONAL1);;
+            ClearCollect(colPersonal; CATALOGO_PERSONAL1)
+        )
+    )
+)
+
+ btnEstadoCancelar y btnEstadoScrim: están correctos (cierran sin borrar la
+ selección, así puedes seguir agregando).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. PERSONAL · HORAS EXTRAS: HORAS REALES EN LOTE
+═══════════════════════════════════════════════════════════════════════════════
+ Cómo funciona:
+  • El botón ⏱ de cada solicitud autorizada ahora SELECCIONA (☑⏱).
+  • En la barra de Análisis aparecen: "☑ Autorizadas visibles", "👁 Ver
+    seleccionadas", "✖" y "⏱ Horas reales (N) ›".
+  • El popup aplica la misma hora real de inicio y fin a todas las
+    seleccionadas, calcula las horas reales y ajusta el acumulado de cada
+    persona según la diferencia.
+  • Quien no tiene he_autorizar no puede guardar horas reales mayores a las
+    autorizadas de alguna de las seleccionadas.
+
+─────────────────────────────────────────────────────────────────
+ btnHERealFila  (Classic/Button)  ·  galAnalisisHE > Container33_7
+─────────────────────────────────────────────────────────────────
+ Width: 48 · Height: 30
+ Visible: fxPuede("horasextras") And ThisItem.Estado.Value = "Autorizado"
+ Text: If(ThisItem.ID in colHERealSel.ID; "☑⏱"; "⏱")
+ Fill: If(ThisItem.ID in colHERealSel.ID; ColorValue(hexInfo); RGBA(255; 255; 255; 1))
+ Color: If(ThisItem.ID in colHERealSel.ID; RGBA(255; 255; 255; 1); ColorValue(hexInk))
+ OnSelect:
+If(
+    ThisItem.ID in colHERealSel.ID;
+    RemoveIf(colHERealSel; ID = ThisItem.ID);
+    Collect(
+        colHERealSel;
+        {
+            ID:               ThisItem.ID;
+            Codigo:           ThisItem.Codigo;
+            Nombre:           ThisItem.NombrePersona;
+            Fecha:            ThisItem.FechaRequerida;
+            HoraInicio:       ThisItem.HoraInicio;
+            HoraFin:          ThisItem.HoraFin;
+            HoraInicioReal:   ThisItem.HoraInicioReal;
+            HoraFinReal:      ThisItem.HoraFinReal;
+            HorasSolicitadas: ThisItem.HorasSolicitadas;
+            HorasReales:      ThisItem.HorasReales
+        }
+    )
+);;
+If(IsEmpty(colHERealSel); Set(gHERealVerSel; false))
+
+─────────────────────────────────────────────────────────────────
+ galAnalisisHE  (Gallery)  ·  congalAnalisisHE
+─────────────────────────────────────────────────────────────────
+ Items:
+Sort(
+    Filter(
+        colSolicitudesHE;
+        IsBlank(varFiltroEstatusAna) Or varFiltroEstatusAna = "TODOS" Or Estado.Value = varFiltroEstatusAna;
+        IsBlank(dpFiltroFechaAna.SelectedDate) Or FechaRequerida = dpFiltroFechaAna.SelectedDate;
+        drpFiltroAreaAna.Selected.Title = "TODAS" Or IsBlank(drpFiltroAreaAna.Selected.Title) Or Area = drpFiltroAreaAna.Selected.Title;
+        txtBuscarAnaHE.Text = "" Or StartsWith(NombrePersona; txtBuscarAnaHE.Text) Or StartsWith(Codigo; txtBuscarAnaHE.Text) Or StartsWith(Actividad; txtBuscarAnaHE.Text) Or StartsWith(Rol; txtBuscarAnaHE.Text);
+        Not(gHERealVerSel) Or ID in colHERealSel.ID;
+        fxVeArea(LookUp(colPersonal; CODIGO = Codigo; AREA_GENERAL); Area; LookUp(colPersonal; CODIGO = Codigo; SUBAREA))
+    );
+    FechaHoraSolicitud;
+    SortOrder.Descending
+)
+
+─────────────────────────────────────────────────────────────────
+ conBarraChecklistHE  (GroupContainer)  ·  conVista_AnaSet_1-Este
+─────────────────────────────────────────────────────────────────
+ LayoutWrap: true
+ Height: If(App.Width < bpTablet And CountRows(colHERealSel) > 0; 92; 44)
+ AGREGAR estos 4 botones al final (después de btnRechazarLote):
+ • btnHERealTodos (Classic/Button) · Height 30 · Width If(App.Width < bpTablet; 44; 175)
+     Text: If(App.Width < bpTablet; "☑"; "☑ Autorizadas visibles")
+     Visible: fxPuede("horasextras")
+     OnSelect:
+ClearCollect(colHERealTmp; Filter(galAnalisisHE.AllItems; Estado.Value = "Autorizado" And Not(ID in colHERealSel.ID)));;
+Collect(
+    colHERealSel;
+    ForAll(
+        colHERealTmp As _r;
+        {
+            ID:               _r.ID;
+            Codigo:           _r.Codigo;
+            Nombre:           _r.NombrePersona;
+            Fecha:            _r.FechaRequerida;
+            HoraInicio:       _r.HoraInicio;
+            HoraFin:          _r.HoraFin;
+            HoraInicioReal:   _r.HoraInicioReal;
+            HoraFinReal:      _r.HoraFinReal;
+            HorasSolicitadas: _r.HorasSolicitadas;
+            HorasReales:      _r.HorasReales
+        }
+    )
+);;
+Clear(colHERealTmp)
+ • btnHERealVerSel (Classic/Button) · Height 30 · Width If(App.Width < bpTablet; 44; 165)
+     Visible: CountRows(colHERealSel) > 0
+     Text: If(gHERealVerSel; If(App.Width < bpTablet; "👥"; "👥 Ver todas"); If(App.Width < bpTablet; "👁"; "👁 Ver seleccionadas"))
+     OnSelect: Set(gHERealVerSel; Not(gHERealVerSel))
+ • btnHERealLimpiar (Classic/Button) · Height 30 · Width 44 · Text "✖"
+     Visible: CountRows(colHERealSel) > 0
+     OnSelect: Clear(colHERealSel);; Set(gHERealVerSel; false)
+ • btnHERealAbrir (Classic/Button) · Height 30 · Width If(App.Width < bpTablet; 130; 190)
+     Fill colGreen · Color ColorValue(hexInk) · FontWeight Bold
+     Visible: CountRows(colHERealSel) > 0
+     Text: "⏱ Horas reales (" & CountRows(colHERealSel) & ") ›"
+     OnSelect: Reset(txtHEIniReal);; Reset(txtHEFinReal);; Set(varPopHEReal; true)
+
+─────────────────────────────────────────────────────────────────
+ Popup conPopHEReal  ·  Personal (raíz)  — se MODIFICA el del txt anterior
+─────────────────────────────────────────────────────────────────
+ conHERealCard (GroupContainer)
+   Height: Min(500; Parent.Height - 24) · LayoutOverflowY: LayoutOverflow.Scroll
+   Orden: lblHERealTit → lblHERealProg → galHERealSel (nuevo) →
+   conHERealHoras → lblHERealCalc → conHERealBtns
+
+ lblHERealTit (Label)
+   Text: "⏱ Horas reales · " & CountRows(colHERealSel) & " solicitud(es) seleccionada(s)"
+ lblHERealProg (Label)
+   Text:
+If(
+    CountRows(colHERealSel) = 1;
+    "Programado: " & First(colHERealSel).HoraInicio & " – " & First(colHERealSel).HoraFin & " (" & First(colHERealSel).HorasSolicitadas & " h)";
+    "Horarios programados: " & Concat(Distinct(ForAll(colHERealSel As _s; _s.HoraInicio & "–" & _s.HoraFin); Value); Value; " · ")
+)
+
+ galHERealSel (Gallery vertical en blanco) · AGREGAR debajo de lblHERealProg
+   Items: Sort(colHERealSel; Nombre; SortOrder.Ascending)
+   Height: Min(150; 30 * CountRows(colHERealSel)) · TemplateSize: 30 · FillPortions: 0
+   • lblHERealSelFila (Label) · Width Parent.TemplateWidth - 36 · Height 30 · Size 10
+       Text: Text(ThisItem.Fecha; "dd/mm") & " · " & ThisItem.Nombre & " · " & ThisItem.HoraInicio & "–" & ThisItem.HoraFin & " (" & ThisItem.HorasSolicitadas & " h)"
+   • icoHERealQuitar (ModernIcon) · X Parent.TemplateWidth - 32 · Y 2 · Width 26 · Height 26
+       Icon: "Dismiss" · IconColor: ColorValue(hexDanger)
+       OnSelect: RemoveIf(colHERealSel; ID = ThisItem.ID);; If(IsEmpty(colHERealSel); Set(varPopHEReal; false))
+
+ txtHEIniReal (Classic/TextInput)
+   Default: Coalesce(First(colHERealSel).HoraInicioReal; First(colHERealSel).HoraInicio)
+ txtHEFinReal (Classic/TextInput)
+   Default: Coalesce(First(colHERealSel).HoraFinReal; First(colHERealSel).HoraFin)
+ lblHERealCalc (Label)
+   Text:
+If(
+    IsMatch(txtHEIniReal.Text; "\d{2}:\d{2}") And IsMatch(txtHEFinReal.Text; "\d{2}:\d{2}");
+    "Horas reales: " & Text(Round(Mod((Value(Left(txtHEFinReal.Text; 2)) * 60 + Value(Right(txtHEFinReal.Text; 2))) - (Value(Left(txtHEIniReal.Text; 2)) * 60 + Value(Right(txtHEIniReal.Text; 2))) + 1440; 1440) / 60; 2); "[$-es]0,00") & " h" & If(CountRows(colHERealSel) > 1; " a cada una"; "");
+    "Escribe las horas en formato hh:mm (ej. 17:30)"
+)
+
+ btnHERealGuardar (Classic/Button) · conHERealBtns
+   Text: "💾 Guardar en " & CountRows(colHERealSel) & " solicitud(es)"
+   OnSelect (REEMPLAZAR COMPLETO):
+With(
+    {
+        _i: Value(Left(txtHEIniReal.Text; 2)) * 60 + Value(Right(txtHEIniReal.Text; 2));
+        _f: Value(Left(txtHEFinReal.Text; 2)) * 60 + Value(Right(txtHEFinReal.Text; 2));
+        _usr: User().FullName;
+        _ahora: Now()
+    };
+    With(
+        { _hr: Round(Mod(_f - _i + 1440; 1440) / 60; 2) };
+        If(
+            Not(IsMatch(txtHEIniReal.Text; "\d{2}:\d{2}") And IsMatch(txtHEFinReal.Text; "\d{2}:\d{2}"));
+            Notify("⚠️ Escribe las horas en formato hh:mm (ej. 17:30)."; NotificationType.Error);
+
+            Not(fxPuede("he_autorizar")) And CountRows(Filter(colHERealSel; _hr > HorasSolicitadas + 0,01)) > 0;
+            Notify("⚠️ " & _hr & " h supera lo autorizado en " & CountRows(Filter(colHERealSel; _hr > HorasSolicitadas + 0,01)) & " solicitud(es). Solo el encargado puede guardarlo."; NotificationType.Error);
+
+            ClearCollect(
+                colHERealCalc;
+                ForAll(colHERealSel As _s; { ID: _s.ID; Codigo: _s.Codigo; Delta: _hr - Coalesce(_s.HorasReales; _s.HorasSolicitadas) })
+            );;
+            Set(gErrHR; "");;
+            IfError(
+                Patch(
+                    SOLICITUDES_HORAS_EXTRAS;
+                    ForAll(colHERealSel As _s; { ID: _s.ID });
+                    ForAll(
+                        colHERealSel As _s;
+                        { HoraInicioReal: txtHEIniReal.Text; HoraFinReal: txtHEFinReal.Text; HorasReales: _hr; RegistroRealPor: _usr; FechaRegistroReal: _ahora }
+                    )
+                );
+                Set(gErrHR; FirstError.Message)
+            );;
+            If(
+                gErrHR <> "";
+                Notify("❌ No se pudieron guardar las horas reales: " & gErrHR; NotificationType.Error);
+
+                ForAll(
+                    GroupBy(colHERealCalc; 'Codigo'; 'Filas') As _g;
+                    With(
+                        { _acum: LookUp(BD_HORAS_EXTRAS_ACUMULADAS; Codigo = _g.Codigo) };
+                        If(
+                            !IsBlank(_acum) And Sum(_g.Filas; Delta) <> 0;
+                            Patch(BD_HORAS_EXTRAS_ACUMULADAS; _acum; { TotalHorasAutorizadas: Coalesce(_acum.TotalHorasAutorizadas; 0) + Sum(_g.Filas; Delta) })
+                        )
+                    )
+                );;
+                Concurrent(
+                    ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));
+                    ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS)
+                );;
+                Notify("✅ Horas reales guardadas: " & Text(_hr; "[$-es]0,00") & " h en " & CountRows(colHERealSel) & " solicitud(es)."; NotificationType.Success);;
+                Clear(colHERealSel);;
+                Clear(colHERealCalc);;
+                Set(gHERealVerSel; false);;
+                Set(varPopHEReal; false)
+            )
+        )
+    )
+)
+
+ btnHERealCancelar y btnHERealScrim: están correctos (cierran sin borrar la
+ selección).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. REGISTROS · VISITANTES: EL INGRESO QUEDA AL GUARDAR (SIN ESCANEAR)
+═══════════════════════════════════════════════════════════════════════════════
+ Cómo queda:
+  • Garita toca 🪪 Visitante(s) → elige el gafete de la lista (no se escanea)
+    → escribe nombre y DPI → ➕ (si son varios) → llena los datos generales →
+    💾 Guardar. En ese momento quedan INGRESADOS (ADENTRO) y el gafete
+    "Asignado". No hace falta escanear nada para entrar.
+  • Si es una sola persona, basta elegir gafete + nombre y tocar Guardar
+    (no hace falta ➕).
+  • Salida: escaneando el QR del gafete o con el botón Salida de la lista de
+    adentro (btnSalidaVis).
+  • conVisCard, drpVisGafete, btnVisAgregar, btnGuardarVisita,
+    btnCancelarVisita y btnSalidaVis del txt anterior (sección 6) están
+    correctos: btnGuardarVisita ya guarda el ingreso en REGIST al guardar.
+
+ Lo que impedía escribir en el popup: el temporizador del escáner seguía
+ corriendo y devolvía el foco a txtScan. Ahora los temporizadores se APAGAN
+ mientras el popup está abierto:
+
+─────────────────────────────────────────────────────────────────
+ tmrFocoScan  (Timer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ AutoStart: false
+ Repeat: true
+ Duration: 300
+ Start:
+gGarTab = "Scan" And Not(varPopVisita) And Not(varPopExcepcion) And Not(gModoBusqueda) And Not(gModoCamara)
+ OnTimerEnd:
+If(Not(gBusyScan) And Not(varPopVisita) And Not(varPopExcepcion); SetFocus(txtScan))
+
+─────────────────────────────────────────────────────────────────
+ tmrAutoScan  (Timer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ Start:
+Len(txtScan.Text) >= LargoMinCodigo And Not(varPopVisita) And Not(varPopExcepcion)
+ (OnTimerEnd, Duration y Repeat están correctos)
+
+─────────────────────────────────────────────────────────────────
+ conPopVisita  (GroupContainer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ En la vista de árbol debe quedar ARRIBA de cntSP (clic derecho →
+ Reordenar → Traer al frente). Si queda debajo, los clics caen en la
+ pantalla de atrás y no deja escribir.
+
+─────────────────────────────────────────────────────────────────
+ btnNuevoVisitanteCel  (Classic/Button)  ·  AGREGAR en conGarita > conGarHeader,
+                       ANTES de btnGarTabScan
+─────────────────────────────────────────────────────────────────
+ (En celular conGarIzq se oculta, así que el botón de visitantes también va
+  en el encabezado.)
+ Text: "🪪" · Width: 48 · Height: 30 · Size: 12
+ Visible: App.Width < bpTablet And fxPuede("garita") And gGarTab = "Scan"
+ OnSelect:
+Set(gVisManual; true);;
+Set(gCodVisita; "");;
+Clear(colVisGrupo);;
+Set(gBusyScan; true);;
+Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+Set(varPopVisita; true)
+
+ Si drpVisGafete sale vacío: revisa que GAFETES_VISITA tenga filas (VIS001,
+ VIS002… con Estado = Libre) y que la lista esté agregada en Datos.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. REGISTROS · PESTAÑA ASISTENCIA Y PERMISOS
+═══════════════════════════════════════════════════════════════════════════════
+ Cómo queda la pestaña (btnGarTabPerm):
+  • Abre por defecto en HOY con TODO el personal activo y su estado:
+      ✅ Ingresó 07:02 · salió 16:05   📝 Vacaciones · hasta 15/11
+      💤 Descanso (según su jornada)    ❌ No ingresó   (⛔ Denegado 07:10)
+  • Botones de filtro con su conteo: Todos · ✅ Ingresaron · 📝 Con permiso ·
+    ❌ No ingresaron. Una etiqueta resume los números del día.
+  • Chevrons ‹ › para pasar de día (o del rango elegido), botón Hoy, y los
+    datepicker para elegir más días.
+  • Botón "📝 Ver permisos (N)" en el encabezado: muestra galPermisos_1 (los
+    permisos autorizados del rango). "👥 Ver personal" regresa a la lista.
+  • La lista de personal es del día "Desde". Si eliges un rango de varios
+    días, la lista de permisos muestra todo el rango.
+
+─────────────────────────────────────────────────────────────────
+ btnGarTabPerm  (Classic/Button)  ·  conGarHeader
+─────────────────────────────────────────────────────────────────
+ Text: If(App.Width < bpTablet; "📋"; "📋 Asistencia")
+ Width: If(App.Width < bpTablet; 48; 150)
+ OnSelect:
+Set(gGarTab; "Perm");;
+Set(gGarPermVista; "Lista");;
+Set(gAsisFiltro; "Todos");;
+Set(gGarPD; Today());;
+Set(gGarPH; Today());;
+Reset(dpPermFDesde_1);;
+Reset(dpPermFHasta_1);;
+Select(btnPermFCargar_1)
+
+─────────────────────────────────────────────────────────────────
+ Encabezado  ·  conPermLista_1 > conPermFiltros_1
+─────────────────────────────────────────────────────────────────
+ conPermFiltros_1 (GroupContainer)
+   LayoutWrap: true · Height: If(App.Width < bpTablet; 96; 50)
+   LayoutAlignItems: LayoutAlignItems.Center
+ icoGarPermPrev (ModernIcon) · AGREGAR como PRIMER hijo
+   Icon: "ChevronLeft" · Width: 32 · Height: 32
+   OnSelect:
+With(
+    { _n: DateDiff(gGarPD; gGarPH; TimeUnit.Days) + 1 };
+    Set(gGarPD; DateAdd(gGarPD; -_n; TimeUnit.Days));;
+    Set(gGarPH; DateAdd(gGarPH; -_n; TimeUnit.Days))
+);;
+Reset(dpPermFDesde_1);;
+Reset(dpPermFHasta_1);;
+Select(btnPermFCargar_1)
+ dpPermFDesde_1 (ModernDatePicker)
+   DefaultDate: Coalesce(gGarPD; Today())
+   OnChange: Set(gGarPD; Self.SelectedDate);; Select(btnPermFCargar_1)
+   Width: If(App.Width < bpTablet; 105; 120)
+ dpPermFHasta_1 (ModernDatePicker)
+   DefaultDate: Coalesce(gGarPH; Today())
+   OnChange: Set(gGarPH; Self.SelectedDate);; Select(btnPermFCargar_1)
+   Width: If(App.Width < bpTablet; 105; 120)
+ icoGarPermNext (ModernIcon) · AGREGAR después de dpPermFHasta_1
+   Icon: "ChevronRight" · Width: 32 · Height: 32
+   OnSelect:
+With(
+    { _n: DateDiff(gGarPD; gGarPH; TimeUnit.Days) + 1 };
+    Set(gGarPD; DateAdd(gGarPD; _n; TimeUnit.Days));;
+    Set(gGarPH; DateAdd(gGarPH; _n; TimeUnit.Days))
+);;
+Reset(dpPermFDesde_1);;
+Reset(dpPermFHasta_1);;
+Select(btnPermFCargar_1)
+ btnGarPermHoy (Classic/Button) · AGREGAR después de icoGarPermNext
+   Text: "Hoy" · Width: 60 · Height: 32
+   OnSelect:
+Set(gGarPD; Today());;
+Set(gGarPH; Today());;
+Reset(dpPermFDesde_1);;
+Reset(dpPermFHasta_1);;
+Select(btnPermFCargar_1)
+ txtPermFBuscar_1 (Classic/TextInput)
+   HintText: "Buscar persona, código o departamento…"
+ btnPermFCargar_1 (Classic/Button)
+   Text: If(App.Width < bpTablet; "🔄"; "🔄 Cargar") · Width: If(App.Width < bpTablet; 44; 110)
+   OnSelect (REEMPLAZAR COMPLETO):
+Set(gGarPD; Coalesce(gGarPD; Today()));;
+Set(gGarPH; Coalesce(gGarPH; gGarPD));;
+If(gGarPH < gGarPD; Set(gGarPH; gGarPD));;
+Set(gPermGarDesde; gGarPD);;
+Set(gPermGarHasta; DateAdd(gGarPH; 1; TimeUnit.Days));;
+Concurrent(
+    ClearCollect(colPermGar; Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; FechaFin >= gPermGarDesde; FechaInicio < gPermGarHasta));
+    ClearCollect(colAsisDia; Filter(REGIST; FECHA = gGarPD))
+);;
+ClearCollect(
+    colAsisGar;
+    ForAll(
+        colPersGar As p;
+        With(
+            {
+                _ok:  Sort(Filter(colAsisDia; Upper(Trim(CODIGO)) = Upper(Trim(p.CODIGO)) And ESTADO.Value <> "DENEGADO"); INGRESO; SortOrder.Ascending);
+                _den: LookUp(colAsisDia; Upper(Trim(CODIGO)) = Upper(Trim(p.CODIGO)) And ESTADO.Value = "DENEGADO");
+                _pm:  LookUp(colPermGar; Upper(Trim(Codigo)) = Upper(Trim(p.CODIGO)) And FechaInicio < DateAdd(gGarPD; 1; TimeUnit.Days) And FechaFin >= gGarPD);
+                _lab: fxEsDiaLaboral(LookUp(colGruposJornada; Title = Coalesce(p.GrupoJornada; "L-V")).DiasLaborales; gGarPD)
+            };
+            With(
+                { _ing: Not(IsEmpty(_ok)); _ult: Last(_ok) };
+                {
+                    Codigo:       p.CODIGO;
+                    Nombre:       p.Nombre;
+                    Departamento: p.DEPARTAMENTO;
+                    Sede:         p.SEDE;
+                    Ingreso:      _ing;
+                    Permiso:      !IsBlank(_pm);
+                    Descanso:     Not(_ing) And IsBlank(_pm) And Not(_lab);
+                    Falta:        Not(_ing) And IsBlank(_pm) And _lab;
+                    Estado:       If(_ing; "Ingresó"; !IsBlank(_pm); "Permiso"; Not(_lab); "Descanso"; "No ingresó");
+                    Detalle:      If(
+                                      _ing;
+                                      "✅ Ingresó " & Text(First(_ok).INGRESO; "hh:mm") &
+                                      If(_ult.ESTADO.Value = "ADENTRO"; " · adentro"; If(IsBlank(_ult.SALIDA); ""; " · salió " & Text(_ult.SALIDA; "hh:mm"))) &
+                                      If(IsBlank(_pm); ""; " · 📝 " & _pm.TipoPermiso);
+                                      !IsBlank(_pm);
+                                      "📝 " & _pm.TipoPermiso &
+                                      If(
+                                          _pm.DiaCompleto Or DateDiff(_pm.FechaInicio; _pm.FechaFin; TimeUnit.Days) >= 1;
+                                          " · hasta " & Text(_pm.FechaFin; "dd/mm");
+                                          " · " & Text(_pm.FechaInicio; "hh:mm") & "–" & Text(_pm.FechaFin; "hh:mm")
+                                      );
+                                      !IsBlank(_den);
+                                      "⛔ Denegado " & Text(_den.INGRESO; "hh:mm");
+                                      Not(_lab);
+                                      "💤 Descanso";
+                                      "❌ No ingresó"
+                                  )
+                }
+            )
+        )
+    )
+)
+
+ btnGarVerPermisos (Classic/Button) · AGREGAR como ÚLTIMO hijo de conPermFiltros_1
+   Width: If(App.Width < bpTablet; 120; 190) · Height: 32
+   Text:
+If(gGarPermVista = "Permisos"; "👥 Ver personal"; "📝 Ver permisos (" & CountRows(colPermGar) & ")")
+   Fill: If(gGarPermVista = "Permisos"; ColorValue(hexInfo); colGreen)
+   Color: If(gGarPermVista = "Permisos"; RGBA(255; 255; 255; 1); ColorValue(hexInk))
+   OnSelect:
+Set(gGarPermVista; If(gGarPermVista = "Permisos"; "Lista"; "Permisos"))
+
+─────────────────────────────────────────────────────────────────
+ conAsisFiltros  (GroupContainer AutoLayout horizontal)  ·  AGREGAR en
+                 conPermLista_1, DEBAJO de conPermFiltros_1
+─────────────────────────────────────────────────────────────────
+ Visible: gGarPermVista = "Lista"
+ FillPortions: 0 · Height: If(App.Width < bpTablet; 120; 44) · LayoutWrap: true
+ LayoutGap: 6 · LayoutAlignItems: LayoutAlignItems.Center
+ Hijos (los 4 botones: Height 32 · Size 10 · BorderThickness 0):
+ • btnAsisTodos (Classic/Button) · Width 120
+     Text: "Todos (" & CountRows(colAsisGar) & ")"
+     Fill: If(gAsisFiltro = "Todos"; ColorValue(hexInk); RGBA(255; 255; 255; 1))
+     Color: If(gAsisFiltro = "Todos"; RGBA(255; 255; 255; 1); ColorValue(hexInk))
+     OnSelect: Set(gAsisFiltro; "Todos")
+ • btnAsisIng (Classic/Button) · Width 150
+     Text: "✅ Ingresaron (" & CountRows(Filter(colAsisGar; Ingreso)) & ")"
+     Fill: If(gAsisFiltro = "Ingreso"; ColorValue(hexLeafDark); ColorValue(hexLeafSoft))
+     Color: If(gAsisFiltro = "Ingreso"; RGBA(255; 255; 255; 1); ColorValue(hexLeafDark))
+     OnSelect: Set(gAsisFiltro; "Ingreso")
+ • btnAsisPerm (Classic/Button) · Width 160
+     Text: "📝 Con permiso (" & CountRows(Filter(colAsisGar; Permiso)) & ")"
+     Fill: If(gAsisFiltro = "Permiso"; ColorValue(hexInfo); RGBA(230; 237; 253; 1))
+     Color: If(gAsisFiltro = "Permiso"; RGBA(255; 255; 255; 1); ColorValue(hexInfo))
+     OnSelect: Set(gAsisFiltro; "Permiso")
+ • btnAsisFalta (Classic/Button) · Width 170
+     Text: "❌ No ingresaron (" & CountRows(Filter(colAsisGar; Falta)) & ")"
+     Fill: If(gAsisFiltro = "Falta"; ColorValue(hexDanger); ColorValue(hexDangerSoft))
+     Color: If(gAsisFiltro = "Falta"; RGBA(255; 255; 255; 1); ColorValue(hexDanger))
+     OnSelect: Set(gAsisFiltro; "Falta")
+ • lblAsisResumen (Label) · FillPortions 1 · Size 10 · Color ColorValue(hexMuted)
+     Text:
+"Asistencia del " & Text(gGarPD; "dd/mm/yyyy") & " · " & CountRows(colAsisGar) & " activos · " &
+CountRows(Filter(colAsisGar; Ingreso)) & " ingresaron · " &
+CountRows(Filter(colAsisGar; Permiso)) & " con permiso · " &
+CountRows(Filter(colAsisGar; Falta)) & " no vinieron · " &
+CountRows(Filter(colAsisGar; Descanso)) & " en descanso"
+
+─────────────────────────────────────────────────────────────────
+ Lista del personal: COPIA del contenedor Detalle del Historial
+─────────────────────────────────────────────────────────────────
+ 1. En la vista de árbol: Historial > Detalle → clic derecho → Copiar.
+ 2. Selecciona conPermLista_1 → Pegar. Arrastra la copia para que quede
+    DEBAJO de conAsisFiltros y ARRIBA de hdrPerm_1.
+ 3. Renombra la copia y sus controles (Power Apps les agrega _1, _2…):
+      copia de Detalle      → conAsisGar
+      copia de hdrHist      → hdrAsis
+      copia de hdrHCodigo   → hdrAsCodigo      copia de lblHCodigo → lblAsCodigo
+      copia de hdrHNombre   → hdrAsNombre      copia de lblHNombre → lblAsNombre
+      copia de hdrHDepto    → hdrAsDepto       copia de lblHDepto  → lblAsDepto
+      copia de hdrHEstado   → hdrAsEstado      copia de lblHEstado → lblAsEstado
+      copia de galHist      → galAsisGar
+      copia de conFilaHist  → conFilaAsis
+ 4. ELIMINA en la copia (encabezado y fila): FECHA, UBICACION, INGRESO,
+    SALIDA, HORAS, DÍA LAB, HE REALES y NOTA / MOTIVO SALIDA
+    (las copias de hdrHFecha, hdrHSede, hdrHIngreso, hdrHSalida, hdrHHoras,
+    hdrHDia, hdrHHE, hdrHNota y sus lblH… correspondientes). El ESTADO se
+    queda: ahí sale si ingresó (con hora de entrada y salida), si tiene
+    permiso, si está de descanso o si no vino.
+
+ conAsisGar (GroupContainer)
+   Visible: gGarPermVista = "Lista"
+ hdrAsEstado (Label) · FillPortions: 2.5 · Text: "ESTADO"
+ galAsisGar (Gallery)
+   Visible: true
+   Items:
+Sort(
+    Filter(
+        colAsisGar;
+        Switch(gAsisFiltro; "Ingreso"; Ingreso; "Permiso"; Permiso; "Falta"; Falta; true);
+        IsBlank(Trim(txtPermFBuscar_1.Text)) Or StartsWith(Nombre; Trim(txtPermFBuscar_1.Text)) Or StartsWith(Codigo; Trim(txtPermFBuscar_1.Text)) Or Trim(txtPermFBuscar_1.Text) in Departamento
+    );
+    Departamento & " " & Nombre;
+    SortOrder.Ascending
+)
+ conFilaAsis (GroupContainer) · galAsisGar
+   Visible: true
+   Fill:
+Switch(ThisItem.Estado; "Ingresó"; RGBA(47; 158; 68; 0,08); "Permiso"; RGBA(37; 99; 235; 0,08); "No ingresó"; RGBA(220; 38; 38; 0,10); RGBA(0; 0; 0; 0))
+ lblAsCodigo (Label)  · Text: ThisItem.Codigo
+ lblAsNombre (Label)  · Text: ThisItem.Nombre
+ lblAsDepto (Label)   · Text: ThisItem.Departamento
+ lblAsEstado (Label)  · FillPortions: 2.5 · Align: Align.Left · FontWeight: FontWeight.Semibold
+   Text: ThisItem.Detalle
+   Color:
+Switch(ThisItem.Estado; "Ingresó"; ColorValue(hexLeafDark); "Permiso"; ColorValue(hexInfo); "No ingresó"; ColorValue(hexDanger); ColorValue(hexMuted))
+
+─────────────────────────────────────────────────────────────────
+ Lista de permisos (lo que ya existía)
+─────────────────────────────────────────────────────────────────
+ hdrPerm_1 (GroupContainer)    Visible: gGarPermVista = "Permisos"
+ galPermisos_1 (Gallery)       Visible: gGarPermVista = "Permisos"
+ (Items de galPermisos_1 y sus etiquetas, incluida lblPerSalidaGar, están
+  correctos.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. RENDIMIENTOS · FINALIZAR SOLO LO DEL DÍA Y ANÁLISIS SOLO CON VÁLIDOS
+═══════════════════════════════════════════════════════════════════════════════
+ Reglas que quedan:
+  • galFinPersonal (y la lista de actividades para finalizar) muestra SOLO
+    lo que está "En Proceso" y empezó HOY. Lo de días anteriores ya no se
+    muestra ni se carga (también carga más rápido).
+  • Las tarjetas de sets ("N act. · desde", "N activos") cuentan solo lo de
+    hoy.
+  • Análisis del set, Análisis global y Recalcular metas toman SOLO
+    registros que cumplen TODO esto:
+      - Estado Finalizado (nunca En Proceso)
+      - abiertos y cerrados el MISMO día (si quedó abierto de un día para
+        otro, no entra)
+      - horas > 0 y hasta MaxHorasRegistro (9 h)
+      - con materiales > 0 (Proceso de semilla, Preparacion de semilla para
+        siembra, Colecta de datos, Colecta de tejido y todas las demás). Solo
+        se aceptan sin materiales las de ActividadesSinMaterialOK y
+        SetsSinMaterialOK (Actividades varias, Otros, Ausencias,
+        Entrenamientos, Oficina).
+      - sin Registro de peso ni Último peso (ActividadesNoRendimiento): esos
+        se guardan en REGISTRO_PERSONAL1 y DATASUMMARY1 (y envían el correo)
+        pero no son rendimiento.
+  • btnCargarGlobal y btnCalcMetasRef YA cumplen estas reglas (Finalizado,
+    MismoDia, MatOk, DiaOk; el peso queda fuera porque tiene 0 horas): están
+    correctos. Solo cambia btnCargarAnaSet (análisis del set), que no
+    revisaba el mismo día.
+  • La vista Procesos de semillas muestra lo En Proceso de HOY y lo
+    Finalizado del mismo día con materiales.
+
+─────────────────────────────────────────────────────────────────
+ scrRendimientos  (Pantalla)
+─────────────────────────────────────────────────────────────────
+ OnVisible:
+If(
+    fxPuede("rendimientos");
+    Refresh(DATASUMMARY1);;
+    ClearCollect(colEnProceso; Filter(REGISTRO_PERSONAL1; Estado.Value = "En Proceso"; FechaInicio >= Today()));;
+    If(IsBlank(gVista); Set(gVista; "Sets"))
+)
+
+─────────────────────────────────────────────────────────────────
+ Tarjeta de set  ·  galSetss > Container9_2 > Container14
+─────────────────────────────────────────────────────────────────
+ lblCardHoras (Label)
+   Text:
+With(
+    { _p: Filter(colEnProceso; SetName = ThisItem.SetName; FechaInicio >= Today()) };
+    If(
+        IsEmpty(_p);
+        "Sin actividad";
+        CountRows(Distinct(_p; Job)) & " act. · desde " & Text(Min(_p; FechaInicio); "[$-es]hh:mm")
+    )
+)
+ lblCardPers (Label)
+   Text:
+CountRows(Distinct(Filter(colEnProceso; SetName = ThisItem.SetName; FechaInicio >= Today()); NombrePersona)) & " activos"
+
+─────────────────────────────────────────────────────────────────
+ btnModoFin  (Classic/Button)  ·  Container18 > Container25
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Set(gModo; "Fin");;
+Set(gVerActividades; false);;
+ClearCollect(colPendSet; Filter(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName; Estado.Value = "En Proceso"; FechaInicio >= Today()));;
+Set(gFinVerAnteriores; false);;
+Select(btnArmarActFin)
+
+─────────────────────────────────────────────────────────────────
+ btnAbrirSet  (Classic/Button, oculto)  ·  scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+ClearCollect(colPendSet; Filter(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName; Estado.Value = "En Proceso"; FechaInicio >= Today()));;
+RemoveIf(colEnProceso; SetName = gSetActivo.SetName);;
+Collect(colEnProceso; colPendSet);;
+Set(gFinVerAnteriores; false);;
+Set(gModo; If(IsEmpty(colPendSet); "Inicio"; "Fin"));;
+Set(gActividad; Blank());;
+Clear(colSeleccionados);;
+Clear(colFinSel);;
+Set(gVerActividades; false);;
+Set(gTab; "Grupal");;
+Set(gVista; "Detalle");;
+Clear(colBaseSet);;
+Clear(colSetFiltrado);;
+Clear(colAnaSetFecha);;
+Clear(colAnaSetAcum);;
+Clear(colKpiSet);;
+Select(btnArmarActFin)
+
+─────────────────────────────────────────────────────────────────
+ Finalizar  ·  conTab_Grupal > Container28
+─────────────────────────────────────────────────────────────────
+ galFinPersonal (Gallery)
+   Items:
+Sort(
+    Filter(colPendSet; Job = gActFin; FechaInicio >= Today());
+    NombrePersona;
+    SortOrder.Ascending
+)
+ drpActFin (ModernCombobox)
+   Items: Distinct(Filter(colPendSet; FechaInicio >= Today()); Job)
+ galActFin (Gallery)
+   Items: Distinct(Filter(colPendSet; FechaInicio >= Today()); Job)
+ btnFinAnteriores (Classic/Button) → ELIMINAR (ya no hay pendientes de días
+   anteriores en la lista).
+
+─────────────────────────────────────────────────────────────────
+ btnCargarAnaSet  (Classic/Button, oculto)  ·  conVista_Detalle > Container17
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO):
+Set(gSetAnalizado; gSetActivo.SetName);;
+ClearCollect(
+    colBaseSet;
+    Filter(
+        ForAll(
+            Filter(
+                REGISTRO_PERSONAL1;
+                SetName = gSetActivo.SetName;
+                Estado.Value = "Finalizado";
+                HorasTotales > 0;
+                HorasTotales <= MaxHorasRegistro;
+                FechaInicio >= Coalesce(dpDesde.SelectedDate; Date(2020; 1; 1));
+                FechaInicio < DateAdd(Coalesce(dpHasta.SelectedDate; Today()); 1; TimeUnit.Days)
+            ) As _r;
+            With(
+                {
+                    _h:  Coalesce(_r.HorasTotales; 0);
+                    _m:  IfError(Value(Coalesce(_r.CantidadMateriales; "0")); 0);
+                    _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                    _ff: Date(Year(Coalesce(_r.FechaFin; _r.FechaInicio)); Month(Coalesce(_r.FechaFin; _r.FechaInicio)); Day(Coalesce(_r.FechaFin; _r.FechaInicio)))
+                };
+                {
+                    IDReg:       _r.ID;
+                    SetName:     Coalesce(_r.SetName; "");
+                    Cultivo:     Coalesce(_r.Cultivo; "—");
+                    Program:     Coalesce(_r.Program; "—");
+                    Generacion:  Coalesce(_r.Generation; "—");
+                    TipoOp:      Coalesce(_r.TypeOperation.Value; "N/A");
+                    Mct:         Coalesce(_r.MTC; "N/A");
+                    Field:       Coalesce(_r.Field; "—");
+                    Greenhouse:  Coalesce(_r.Greenhouse; "—");
+                    FechaRaw:    _fi;
+                    FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm/yyyy");
+                    HoraIni:     Coalesce(_r.HoraInicio; "—");
+                    HoraFin:     Coalesce(_r.HoraFin; "—");
+                    Codigo:      Coalesce(_r.CODIGO; "s/c");
+                    Persona:     Coalesce(_r.NombrePersona; "Sin nombre");
+                    Responsable: Coalesce(_r.Responsable; "—");
+                    Actividad:   Coalesce(_r.Job; "Sin actividad");
+                    SubAct:      Coalesce(_r.SubActividad.Value; "N/A");
+                    EstadoTxt:   Coalesce(_r.Estado.Value; "Finalizado");
+                    Comentarios: Coalesce(_r.Comentarios; "Sin comentarios");
+                    Horas:       _h;
+                    Mat:         _m;
+                    Frutos:      Coalesce(_r.NumeroFrutos; 0);
+                    Rend:        If(_h > 0; _m / _h; 0);
+                    MismoDia:    DateDiff(_fi; _ff; TimeUnit.Days) = 0;
+                    MatOk:       _m > 0
+                                 Or Coalesce(_r.SetName; "") in SetsSinMaterialOK
+                                 Or Coalesce(_r.Job; "") in ActividadesSinMaterialOK;
+                    ClaveF:      Text(_fi; "[$-es]yyyymmdd")
+                                 & "|" & Coalesce(_r.CODIGO; "s/c")
+                                 & "|" & Coalesce(_r.Job; "Sin actividad")
+                                 & "|" & Coalesce(_r.SubActividad.Value; "N/A");
+                    ClaveA:      Coalesce(_r.CODIGO; "s/c") & "|" & Coalesce(_r.Job; "Sin actividad")
+                }
+            )
+        );
+        MismoDia;
+        MatOk;
+        Not(Actividad in ActividadesNoRendimiento)
+    )
+);;
+Set(gSetTrunc; CountRows(colBaseSet) >= 2000);;
+Clear(colExclF);;
+Clear(colExclA);;
+Select(btnRecalcAnaSet)
+
+─────────────────────────────────────────────────────────────────
+ btnCargarProc  (Classic/Button, oculto)  ·  scrRendimientos (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO):
+Set(gProcDesde; Coalesce(gProcDesde; Today()));;
+Set(gProcHasta; Coalesce(gProcHasta; gProcDesde));;
+If(gProcHasta < gProcDesde; Set(gProcHasta; gProcDesde));;
+If(
+    DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) > 62;
+    Notify("⚠️ Elige un rango de máximo 2 meses."; NotificationType.Warning);
+    Clear(colProc);;
+    ForAll(
+        Sequence(DateDiff(gProcDesde; gProcHasta; TimeUnit.Days) + 1; 0) As _dia;
+        With(
+            { _f: DateAdd(gProcDesde; _dia.Value; TimeUnit.Days) };
+            Collect(
+                colProc;
+                Filter(
+                    ForAll(
+                        Filter(
+                            REGISTRO_PERSONAL1;
+                            FechaInicio >= _f;
+                            FechaInicio < DateAdd(_f; 1; TimeUnit.Days);
+                            Job = "Proceso de semilla"
+                        ) As _r;
+                        With(
+                            {
+                                _m:  IfError(Value(Coalesce(_r.CantidadMateriales; "0")); 0);
+                                _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio))
+                            };
+                            {
+                                ID:          _r.ID;
+                                Fecha:       _r.FechaInicio;
+                                FechaTxt:    Text(_r.FechaInicio; "[$-es]dd/mm");
+                                Codigo:      Coalesce(_r.CODIGO; "s/c");
+                                Persona:     Coalesce(_r.NombrePersona; "—");
+                                SetName:     Coalesce(_r.SetName; "Sin set");
+                                Cultivo:     fxTxt(_r.Cultivo);
+                                Generacion:  fxTxt(_r.Generation);
+                                Mct:         fxMct(_r.MTC);
+                                Invernadero: Coalesce(_r.Greenhouse; "—");
+                                Actividad:   fxTxt(_r.Job);
+                                SubAct:      fxSub(_r.SubActividad.Value);
+                                Mat:         _m;
+                                HoraIni:     Coalesce(_r.HoraInicio; Text(_r.FechaInicio; "[$-es]hh:mm"));
+                                HoraFin:     If(IsBlank(_r.FechaFin); "—"; Coalesce(_r.HoraFin; Text(_r.FechaFin; "[$-es]hh:mm")));
+                                Horas:       If(IsBlank(_r.FechaFin); 0; Coalesce(_r.HorasTotales; 0));
+                                Estado:      Coalesce(_r.Estado.Value; "—");
+                                Valido:      If(
+                                                 _r.Estado.Value = "En Proceso"; _fi = Today();
+                                                 _r.Estado.Value = "Finalizado";
+                                                 !IsBlank(_r.FechaFin) And DateDiff(_fi; Date(Year(_r.FechaFin); Month(_r.FechaFin); Day(_r.FechaFin)); TimeUnit.Days) = 0 And _m > 0;
+                                                 false
+                                             )
+                            }
+                        )
+                    );
+                    Valido
+                )
+            )
+        )
+    )
+)
+ (galProcKpi, galProcCult y galProc están correctos: ya usan colProc.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. RENDIMIENTOS · galSetss MÁS RÁPIDO (250 DÍAS · AÑO · BÚSQUEDA TOTAL)
+═══════════════════════════════════════════════════════════════════════════════
+ Por qué tardaba: el filtro usaba StartsWith(Crop.Value…) (columna de
+ opción). Eso NO es delegable: Power Apps bajaba hasta 2000 sets y filtraba
+ en el teléfono. Ahora todo el filtro va a SharePoint y la galería carga de
+ 100 en 100, los más nuevos primero.
+
+ Cómo queda:
+  • Por defecto: sets creados en los últimos 250 días (SetsDiasVigentes).
+  • Chevron ‹ : pasa a "todo el año actual", y cada ‹ más va un año atrás.
+    Chevron › : avanza de año; desde el año actual regresa a "250 días".
+    Botón 🕒 : regresa directo a los últimos 250 días.
+  • Los datepicker "Creado desde / hasta", si se llenan, mandan sobre el año.
+  • Buscar (modo Búsqueda) y el escáner encuentran el set de CUALQUIER año:
+    la búsqueda ignora los 250 días y el año. txtBuscarSet (modo Automático)
+    y btnEscaner ya buscan en toda la lista: están correctos.
+
+─────────────────────────────────────────────────────────────────
+ conSubtitulo  (GroupContainer)  ·  conBody_Sets01
+─────────────────────────────────────────────────────────────────
+ LayoutAlignItems: LayoutAlignItems.Center
+ Orden de hijos: icoSetAnioPrev (nuevo) → lblSetsActivos → icoSetAnioNext
+ (nuevo) → btnSetRecientes (nuevo) → lblSetCount → dpSetCreacionDesde →
+ dpSetCreacionHasta → icoLimpiarFechaSet
+
+ icoSetAnioPrev (ModernIcon) · AGREGAR como PRIMER hijo
+   Icon: "ChevronLeft" · Width: 32 · Height: 32 · IconColor: colDark
+   OnSelect:
+Set(gAnioSets; If(IsBlank(gAnioSets); Year(Today()); gAnioSets - 1));;
+Reset(dpSetCreacionDesde);;
+Reset(dpSetCreacionHasta)
+ lblSetsActivos (Label)
+   Text:
+If(
+    radModoBusqueda.Selected.Value = "Búsqueda" And Len(Trim(txtBuscarSet.Text)) > 0; "Resultados en todos los años";
+    !IsBlank(dpSetCreacionDesde.SelectedDate) Or !IsBlank(dpSetCreacionHasta.SelectedDate); "Sets por fecha de creación";
+    IsBlank(gAnioSets); "Sets · últimos " & SetsDiasVigentes & " días";
+    "Sets creados en " & gAnioSets
+)
+ icoSetAnioNext (ModernIcon) · AGREGAR después de lblSetsActivos
+   Icon: "ChevronRight" · Width: 32 · Height: 32 · IconColor: colDark
+   Visible: !IsBlank(gAnioSets)
+   OnSelect:
+Set(gAnioSets; If(gAnioSets >= Year(Today()); Blank(); gAnioSets + 1));;
+Reset(dpSetCreacionDesde);;
+Reset(dpSetCreacionHasta)
+ btnSetRecientes (Classic/Button) · AGREGAR después de icoSetAnioNext
+   Text: If(App.Width < bpTablet; "🕒"; "🕒 " & SetsDiasVigentes & " días")
+   Width: If(App.Width < bpTablet; 40; 100) · Height: 30 · Size: 9
+   Visible: !IsBlank(gAnioSets)
+   OnSelect:
+Set(gAnioSets; Blank());;
+Reset(dpSetCreacionDesde);;
+Reset(dpSetCreacionHasta)
+ lblSetCount (Label)
+   Text: CountRows(galSetss.AllItems) & If(CountRows(galSetss.AllItems) >= 100; "+"; "") & " sets"
+   Width: 110
+
+─────────────────────────────────────────────────────────────────
+ galSetss  (Gallery)  ·  conBody_Sets01
+─────────────────────────────────────────────────────────────────
+ Items:
+With(
+    {
+        _t:     Trim(txtBuscarSet.Text);
+        _busca: radModoBusqueda.Selected.Value = "Búsqueda" And Len(Trim(txtBuscarSet.Text)) > 0;
+        _d:     Coalesce(
+                    dpSetCreacionDesde.SelectedDate;
+                    If(IsBlank(gAnioSets); DateAdd(Today(); -SetsDiasVigentes; TimeUnit.Days); Date(gAnioSets; 1; 1))
+                );
+        _h:     If(
+                    IsBlank(dpSetCreacionHasta.SelectedDate);
+                    If(IsBlank(gAnioSets); DateAdd(Today(); 1; TimeUnit.Days); Date(gAnioSets + 1; 1; 1));
+                    DateAdd(dpSetCreacionHasta.SelectedDate; 1; TimeUnit.Days)
+                )
+    };
+    If(
+        _busca;
+        Sort(
+            Filter(
+                DATASUMMARY1;
+                StartsWith(SetName; _t) Or StartsWith(Greenhouse; _t) Or StartsWith(Field; _t) Or Crop.Value = _t
+            );
+            Created;
+            SortOrder.Descending
+        );
+        Sort(
+            Filter(DATASUMMARY1; Created >= _d; Created < _h);
+            Created;
+            SortOrder.Descending
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. RENDIMIENTOS · BOTONES DE PESO SOLO PARA QUIEN REGISTRA PESO
+═══════════════════════════════════════════════════════════════════════════════
+ btnFinCosecha, btnRegistrarPeso, btnFinPeso y Container126 están
+ correctos: se habilitan y se muestran con varPuedePesar. Con la sección 2,
+ varPuedePesar = fxPuede("rendimientos_peso"), que sale de ROLES_PERMISOS y
+ ACCESOS_USUARIOS (rol o PermisosExtra). El administrador también sale de
+ ACCESOS_USUARIOS. Para dar o quitar el acceso a otra persona ya no se
+ publica la app: se edita su fila (sección 1.4).
+ Los registros de peso siguen guardándose en REGISTRO_PERSONAL1 (Job
+ "Registro de peso" / "Ultimo peso") y en DATASUMMARY1 (NumPesos,
+ UltimoPeso, FinPeso) y siguen enviando el correo según el cultivo
+ (ahora desde CONFIG_PESO_CORREOS). No entran en el análisis de rendimiento.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 10. DESCARGAS EXCEL / PDF — TODO EN SHAREPOINT, CARPETA "Personal"
+═══════════════════════════════════════════════════════════════════════════════
+ Queda UN solo flujo para Excel y PDF (ExportarPersonal), sin OneDrive:
+   Power Apps arma los datos → el flujo copia la plantilla en
+   Documentos/Personal → el Office Script llena la hoja → si es PDF,
+   SharePoint lo convierte y guarda el PDF en Personal → devuelve el vínculo
+   → la app lo abre.
+
+ 10.1 OFFICE SCRIPT  "ExportarExcelGenerico"
+ ────────────────────────────────────────────
+   1. Abre Personal/Plantilla/PlantillaVacia.xlsx en Excel para la web.
+   2. Automatizar → Nuevo script → borra todo y pega el código de abajo →
+      cambia el nombre a ExportarExcelGenerico → Guardar script.
+   3. Para dejarlo en SharePoint: en el editor ⋯ → "Guardar como" → elige
+      el sitio Proyectos-usuarios → Documentos → Personal → Scripts.
+      Si tu Excel no muestra esa opción: abre tu OneDrive → Mis archivos →
+      Documentos → Scripts de Office → descarga ExportarExcelGenerico.osts
+      → súbelo a Documentos/Personal/Scripts del sitio.
+
+────────────────────────── CÓDIGO DEL SCRIPT (TypeScript) ──────────────────────────
+interface Fila {
+  [clave: string]: string | number | boolean | null;
+}
+
+function main(
+  workbook: ExcelScript.Workbook,
+  nombreHoja: string,
+  columnas: string,
+  datosJson: string
+): number {
+  // 1. Columnas ("A;B;C") y datos (JSON de Power Apps)
+  const cols: string[] = (columnas || "")
+    .split(";")
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+  let datos: Fila[] = [];
+  try {
+    datos = JSON.parse(datosJson || "[]") as Fila[];
+  } catch (e) {
+    datos = [];
+  }
+  const nCol = cols.length;
+  const nFil = datos.length;
+
+  // 2. Una sola hoja, limpia, con el nombre pedido
+  let titulo = (nombreHoja || "Datos").replace(/[\\\/\?\*\[\]:]/g, "").substring(0, 31);
+  if (titulo.length === 0) {
+    titulo = "Datos";
+  }
+  const hojas = workbook.getWorksheets();
+  const hoja = hojas[0];
+  for (let i = hojas.length - 1; i > 0; i--) {
+    hojas[i].delete();
+  }
+  hoja.setName(titulo);
+  hoja.getRange().clear(ExcelScript.ClearApplyTo.all);
+  if (nCol === 0) {
+    hoja.getRange("A1").setValue("Sin columnas para exportar");
+    return 0;
+  }
+
+  // 3. Valores: vacío para null, Sí/No para verdadero/falso
+  const filas: (string | number)[][] = [];
+  for (let i = 0; i < nFil; i++) {
+    const d = datos[i];
+    const fila: (string | number)[] = [];
+    for (let j = 0; j < nCol; j++) {
+      const v = d[cols[j]];
+      if (v === null || v === undefined) {
+        fila.push("");
+      } else if (typeof v === "boolean") {
+        fila.push(v ? "Sí" : "No");
+      } else if (typeof v === "number") {
+        fila.push(v);
+      } else {
+        fila.push(String(v));
+      }
+    }
+    filas.push(fila);
+  }
+
+  // 4. Formato por columna: número = General; lo demás = Texto (así Excel
+  //    no cambia fechas dd/mm/yyyy ni códigos con ceros)
+  for (let j = 0; j < nCol; j++) {
+    let esNumero = nFil > 0;
+    for (let i = 0; i < nFil; i++) {
+      if (filas[i][j] !== "" && typeof filas[i][j] !== "number") {
+        esNumero = false;
+        break;
+      }
+    }
+    if (nFil > 0) {
+      hoja.getRangeByIndexes(1, j, nFil, 1).setNumberFormat(esNumero ? "General" : "@");
+    }
+  }
+
+  // 5. Encabezado y datos (en bloques de 1000 filas)
+  hoja.getRangeByIndexes(0, 0, 1, nCol).setValues([cols]);
+  const bloque = 1000;
+  for (let i = 0; i < nFil; i += bloque) {
+    const parte = filas.slice(i, i + bloque);
+    hoja.getRangeByIndexes(1 + i, 0, parte.length, nCol).setValues(parte);
+  }
+
+  // 6. Tabla con estilo y encabezado oscuro
+  const totalFilas = Math.max(nFil, 1) + 1;
+  const tabla = hoja.addTable(hoja.getRangeByIndexes(0, 0, totalFilas, nCol), true);
+  tabla.setName("T_" + titulo.replace(/[^A-Za-z0-9_]/g, "_"));
+  tabla.setPredefinedTableStyle("TableStyleMedium7");
+  const enc = tabla.getHeaderRowRange();
+  enc.getFormat().getFill().setColor("#0E2018");
+  enc.getFormat().getFont().setColor("#FFFFFF");
+  enc.getFormat().getFont().setBold(true);
+  enc.getFormat().setWrapText(true);
+  enc.getFormat().setVerticalAlignment(ExcelScript.VerticalAlignment.center);
+
+  // 7. Ancho de columnas (máximo 260 pt con ajuste de texto) y encabezado fijo
+  hoja.getRangeByIndexes(0, 0, totalFilas, nCol).getFormat().autofitColumns();
+  for (let j = 0; j < nCol; j++) {
+    const col = hoja.getRangeByIndexes(0, j, 1, 1).getEntireColumn();
+    if (col.getFormat().getColumnWidth() > 260) {
+      col.getFormat().setColumnWidth(260);
+      hoja.getRangeByIndexes(1, j, totalFilas - 1, 1).getFormat().setWrapText(true);
+    }
+  }
+  hoja.getFreezePanes().freezeRows(1);
+
+  // 8. Página para el PDF: horizontal, carta, 1 página de ancho,
+  //    encabezado repetido en cada hoja, título y número de página
+  const pag = hoja.getPageLayout();
+  pag.setOrientation(ExcelScript.PageOrientation.landscape);
+  pag.setPaperSize(ExcelScript.PaperType.letter);
+  pag.setCenterHorizontally(true);
+  pag.setPrintMargins(ExcelScript.PrintMarginUnit.centimeters, {
+    top: 1.5,
+    bottom: 1.2,
+    left: 0.8,
+    right: 0.8,
+    header: 0.5,
+    footer: 0.5
+  });
+  pag.setZoom({
+    horizontalFitToPages: 1,
+    verticalFitToPages: Math.max(1, Math.ceil(totalFilas / 35))
+  });
+  pag.setPrintTitleRows("$1:$1");
+  const hf = pag.getHeadersFooters().getDefaultForAllPages();
+  hf.setCenterHeader("&B" + titulo);
+  hf.setLeftFooter("&D &T");
+  hf.setRightFooter("Página &P de &N");
+
+  return nFil;
+}
+────────────────────────────── FIN DEL SCRIPT ──────────────────────────────
+
+ 10.2 FLUJO  "ExportarPersonal"  (Power Automate)
+ ─────────────────────────────────────────────────
+ make.powerautomate.com → Crear → Flujo de nube instantáneo → "Cuando Power
+ Apps llama a un flujo (V2)" → nombre: ExportarPersonal.
+ En todos los pasos de SharePoint el sitio es Proyectos-usuarios (elígelo de
+ la lista, no lo escribas).
+
+  1. Power Apps (V2) · 5 entradas de TEXTO, en este orden exacto:
+       nombreArchivo · nombreHoja · columnas · datosJson · formato
+  2. Inicializar variable · Nombre: vNombre · Tipo: Cadena
+       Valor (Expresión):
+       concat(triggerBody()?['text'], '_', formatDateTime(convertFromUtc(utcNow(), 'Central America Standard Time'), 'yyyyMMdd_HHmmss'))
+  3. Inicializar variable · Nombre: vUrl · Tipo: Cadena · Valor: (vacío)
+  4. SharePoint · "Obtener contenido de archivo mediante ruta de acceso"
+       Ruta de acceso (elígela con el ícono de carpeta):
+       /Shared Documents/Personal/Plantilla/PlantillaVacia.xlsx
+  5. SharePoint · "Crear archivo" → cámbiale el nombre a:  Crear archivo Excel
+       Ruta de acceso de la carpeta: /Shared Documents/Personal
+       Nombre de archivo (Expresión): concat(variables('vNombre'), '.xlsx')
+       Contenido del archivo: "Contenido de archivo" (paso 4)
+  6. Retraso · 3 Segundos
+  7. Excel Online (Business) · "Ejecutar script desde una biblioteca de
+     SharePoint"
+       Ubicación del libro: Proyectos-usuarios · Biblioteca: Documentos
+       Archivo del libro: "Id" de Crear archivo Excel (contenido dinámico)
+       Ubicación del script: Proyectos-usuarios · Biblioteca: Documentos
+       Script: /Personal/Scripts/ExportarExcelGenerico.osts
+       Aparecen 3 cajas del script: nombreHoja = "nombreHoja" (dinámico),
+       columnas = "columnas", datosJson = "datosJson".
+  8. Condición · formato  es igual a  pdf
+     ── Si es verdadero ──
+     8a. Retraso · 2 Segundos
+     8b. SharePoint · "Enviar una solicitud HTTP a SharePoint"
+           → cámbiale el nombre a:  Convertir a PDF
+           Método: GET
+           URI (Expresión):
+           concat('_api/v2.0/drive/root:/Personal/', encodeUriComponent(concat(variables('vNombre'), '.xlsx')), ':/content?format=pdf')
+           (Esto convierte el Excel a PDF dentro de SharePoint. "drive" es
+           la biblioteca Documentos del sitio.)
+     8c. SharePoint · "Crear archivo" → nombre:  Crear archivo PDF
+           Carpeta: /Shared Documents/Personal
+           Nombre (Expresión): concat(variables('vNombre'), '.pdf')
+           Contenido (Expresión): body('Convertir_a_PDF')
+     8d. SharePoint · "Eliminar archivo"
+           Identificador de archivo: "Id" de Crear archivo Excel
+     8e. Establecer variable · vUrl (Expresión):
+           concat('https://TUEMPRESA.sharepoint.com/sites/Proyectos-usuarios', replace(outputs('Crear_archivo_PDF')?['body/Path'], ' ', '%20'))
+     ── Si es falso ──
+     8f. Establecer variable · vUrl (Expresión):
+           concat('https://TUEMPRESA.sharepoint.com/sites/Proyectos-usuarios', replace(outputs('Crear_archivo_Excel')?['body/Path'], ' ', '%20'), '?web=1')
+     (Cambia TUEMPRESA por el nombre que aparece en la dirección de tu sitio.)
+  9. FUERA de la condición, último paso: "Responder a una aplicación o flujo
+     de Power Apps" → + Agregar una salida → Texto → Nombre: fileurl →
+     Valor: variable vUrl.
+ 10. Guardar → Probar → Manualmente; en Power Apps no se prueba hasta
+     agregarlo (10.3).
+ 11. Para TODOS los usuarios: flujo → Detalles → "Usuarios con permisos de
+     solo ejecución" → Editar → en SharePoint y Excel Online elige
+     "Usar esta conexión (tu cuenta)" → Guardar. Los usuarios necesitan
+     permiso de lectura en la carpeta Personal (sección 1.2).
+ Si algo falla: make.powerautomate.com → ExportarPersonal → Historial de
+ ejecuciones → abre la ejecución → el paso en rojo dice qué falta (lo más
+ común: la ruta de la plantilla o del script escrita a mano en vez de
+ elegirla con la carpeta).
+
+ 10.3 EN POWER APPS STUDIO
+ ──────────────────────────
+   Power Automate (barra izquierda) → quita ExportarExcelGenerico y
+   ExportarPDFGenerico (⋯ → Quitar de la aplicación) → + Agregar flujo →
+   ExportarPersonal. Luego pega los botones de envío (10.4).
+   Cuando cambies entradas o salidas del flujo: quítalo y vuelve a agregarlo.
+
+ 10.4 BOTONES DE ENVÍO (los tres con el MISMO OnSelect)
+ ───────────────────────────────────────────────────────
+   btnEnviarExport  (Classic/Button, oculto) · Personal (raíz)
+   btnEnviarExportG (Classic/Button, oculto) · REGISTROS (raíz)
+   btnEnviarExportR (Classic/Button, oculto) · scrRendimientos (raíz)
+   OnSelect:
+If(
+    IsBlank(gJsonExp) Or gJsonExp = "[]";
+    Notify("⚠️ No hay datos para exportar con los filtros actuales."; NotificationType.Warning);
+    Notify("⏳ Generando " & If(gFormatoExp = "pdf"; "PDF"; "Excel") & "… espera unos segundos."; NotificationType.Information);;
+    Set(gUrlExp; "");;
+    Set(gErrExp; "");;
+    IfError(
+        Set(gUrlExp; ExportarPersonal.Run(gNombreExp; gHojaExp; gColsExp; gJsonExp; If(gFormatoExp = "pdf"; "pdf"; "xlsx")).fileurl);
+        Set(gErrExp; FirstError.Message);;
+        Set(gUrlExp; "")
+    );;
+    If(
+        IsBlank(gUrlExp);
+        Notify("❌ No se pudo generar el archivo. " & gErrExp & " · Revisa el historial de ejecuciones del flujo ExportarPersonal."; NotificationType.Error);
+        Launch(gUrlExp);;
+        Notify("📄 Archivo listo en SharePoint · carpeta Personal."; NotificationType.Success)
+    )
+)
+
+ 10.5 BOTONES VISIBLES DE DESCARGA (están correctos, para referencia)
+ ─────────────────────────────────────────────────────────────────────
+   Personal
+     btnCalExcel   OnSelect: Set(gFormatoExp; "xlsx");; Select(btnArmarExpCal)
+     btnCalPDF     OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpCal)
+     btnHEExcel    OnSelect: Set(gFormatoExp; "xlsx");; Select(btnArmarExpHE)
+     btnHEPDF      OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpHE)
+     btnPermExcel  OnSelect: Set(gFormatoExp; "xlsx");; Select(btnArmarExpPerm)
+     btnPermPDF    OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpPerm)
+   REGISTROS
+     btnHistExcel  OnSelect: Set(gFormatoExp; "xlsx");; Select(btnArmarExpHist)
+     btnHistPDF    OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpHist)
+     btnEvacPDF    OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpEvac)
+   scrRendimientos
+     btnExcelGlobal OnSelect: Set(gFormatoExp; "xlsx");; Select(btnArmarExpRend)
+     btnPDFGlobal   OnSelect: Set(gFormatoExp; "pdf");; Select(btnArmarExpRend)
+
+ 10.6 BOTONES QUE ARMAN LOS DATOS (ocultos)
+ ───────────────────────────────────────────
+ Cal, Hist, Evac y Rend están correctos (van completos para que tengas todo
+ junto). HE y Perm CAMBIAN: ahora incluyen las horas reales y el regreso
+ real de los permisos sin hora de regreso.
+
+ ▸ btnArmarExpCal (Classic/Button, oculto) · Personal (raíz) · Programación
+   OnSelect:
+Set(gNombreExp; "Programacion_" & Text(gloDiaSel; "yyyymmdd"));;
+Set(gHojaExp; "Programacion");;
+Set(gColsExp; "Fecha;Codigo;Persona;Area;Actividad;Jornada;MetaOpHora;SuMediana;NivelEval;Cumplimiento");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            Sort(colDiaFiltrado; Area; SortOrder.Ascending) As d;
+            {
+                Fecha:        Text(gloDiaSel; "dd/mm/yyyy");
+                Codigo:       d.Codigo;
+                Persona:      d.Persona;
+                Area:         d.Area;
+                Actividad:    d.Actividad;
+                Jornada:      d.Jornada;
+                MetaOpHora:   d.MetaOpHora;
+                SuMediana:    d.RendHistorico;
+                NivelEval:    d.NivelEval;
+                Cumplimiento: If(
+                                  d.MetaOpHora <= 0 Or d.RendHistorico = 0; "Sin dato";
+                                  d.RendHistorico >= d.MetaOpHora;          "Cumple";
+                                  d.RendHistorico >= d.MetaOpHora * 0,75;   "En rango";
+                                  "Bajo meta"
+                              )
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+ ▸ btnArmarExpHE (Classic/Button, oculto) · Personal (raíz) · Horas extras
+   OnSelect (REEMPLAZAR — se agregan HoraInicioReal, HoraFinReal, HorasReales, Estado):
+With(
+    {
+        _d: Coalesce(dpDesde_1.SelectedDate; Date(Year(Today()); Month(Today()); 1));
+        _h: Coalesce(dpHasta_1.SelectedDate; Today())
+    };
+    Set(gNombreExp; "HorasExtras_" & Text(_d; "yyyymmdd") & "_" & Text(_h; "yyyymmdd"))
+);;
+Set(gHojaExp; "HorasExtras");;
+Set(gColsExp; "Fecha;Semana;Codigo;Nombre;Area;Rol;Actividad;SubActividad;HoraInicio;HoraFin;Horas;HoraInicioReal;HoraFinReal;HorasReales;Estado;Justificacion;SolicitadoPor;AutorizadoPor;FechaAutorizacion");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            Sort(
+                Filter(colHERango; IsBlank(drpAreaAcumHE.Selected.Title) Or drpAreaAcumHE.Selected.Title = "TODAS" Or Area = drpAreaAcumHE.Selected.Title);
+                FechaRequerida;
+                SortOrder.Ascending
+            ) As r;
+            {
+                Fecha:             Text(r.FechaRequerida; "dd/mm/yyyy");
+                Semana:            "" & r.SemanaAnio;
+                Codigo:            r.Codigo;
+                Nombre:            r.NombrePersona;
+                Area:              r.Area;
+                Rol:               "" & r.Rol;
+                Actividad:         "" & r.Actividad;
+                SubActividad:      "" & r.SubActividad;
+                HoraInicio:        "" & r.HoraInicio;
+                HoraFin:           "" & r.HoraFin;
+                Horas:             Coalesce(r.HorasSolicitadas; 0);
+                HoraInicioReal:    "" & r.HoraInicioReal;
+                HoraFinReal:       "" & r.HoraFinReal;
+                HorasReales:       r.HorasReales;
+                Estado:            "" & r.Estado.Value;
+                Justificacion:     "" & r.Justificacion;
+                SolicitadoPor:     "" & r.SolicitadoPor;
+                AutorizadoPor:     "" & r.AutorizadoPor;
+                FechaAutorizacion: If(IsBlank(r.FechaHoraAutorizacion); ""; Text(r.FechaHoraAutorizacion; "dd/mm/yyyy hh:mm"))
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+ ▸ btnArmarExpPerm (Classic/Button, oculto) · Personal (raíz) · Permisos
+   OnSelect (REEMPLAZAR — se agregan RegresoReal y HorasReales):
+Set(gNombreExp; "Permisos_" & Text(Coalesce(dpPermFDesde.SelectedDate; Today()); "yyyymmdd") & "_" & Text(Coalesce(dpPermFHasta.SelectedDate; Today()); "yyyymmdd"));;
+Set(gHojaExp; "Permisos");;
+Set(gColsExp; "Codigo;Nombre;Departamento;Tipo;Desde;Hasta;DiaCompleto;Horas;RegresoReal;HorasReales;Motivo;Estado;SolicitadoPor;FechaSolicitud;AutorizadoPor;FechaAutorizacion");;
+Set(
+    gJsonExp;
+    JSON(
+        ForAll(
+            galPermisos.AllItems As r;
+            {
+                Codigo:            r.Codigo;
+                Nombre:            r.NombrePersona;
+                Departamento:      "" & r.Departamento;
+                Tipo:              "" & r.TipoPermiso;
+                Desde:             Text(r.FechaInicio; "dd/mm/yyyy hh:mm");
+                Hasta:             If(r.SinHoraRegreso; "Sin hora de regreso"; Text(r.FechaFin; "dd/mm/yyyy hh:mm"));
+                DiaCompleto:       If(r.DiaCompleto; "Sí"; "No");
+                Horas:             Coalesce(r.Horas; 0);
+                RegresoReal:       If(IsBlank(r.FechaRegresoReal); ""; Text(r.FechaRegresoReal; "dd/mm/yyyy hh:mm"));
+                HorasReales:       r.HorasReales;
+                Motivo:            "" & r.Motivo;
+                Estado:            r.Estado;
+                SolicitadoPor:     "" & r.SolicitadoPor;
+                FechaSolicitud:    If(IsBlank(r.FechaSolicitud); ""; Text(r.FechaSolicitud; "dd/mm/yyyy hh:mm"));
+                AutorizadoPor:     "" & r.AutorizadoPor;
+                FechaAutorizacion: If(IsBlank(r.FechaAutorizacion); ""; Text(r.FechaAutorizacion; "dd/mm/yyyy hh:mm"))
+            }
+        );
+        JSONFormat.Compact
+    )
+);;
+Select(btnEnviarExport)
+
+ ▸ btnArmarExpHist (Classic/Button, oculto) · REGISTROS (raíz) · Historial
+   OnSelect:
+Set(gNombreExp; "Asistencia_" & gHistVista & "_" & Text(gHistDesde; "yyyymmdd") & "_" & Text(gHistHasta; "yyyymmdd"));;
+Set(gHojaExp; gHistVista);;
+If(
+    gHistVista = "Detalle";
+    Set(gColsExp; "Fecha;Codigo;Nombre;Tipo;Departamento;Sede;Grupo;Ingreso;Salida;IngresoPlanilla;SalidaPlanilla;HorasPlanilla;MotivoSalida;Horas;DiaLaborado;HEReales;Estado;DiaDescanso;Excepcion;Justificacion;Autorizo;VisitaEmpresa;VisitaA;Observacion");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistFiltrado; FECHA & NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Fecha:         Text(r.FECHA; "dd/mm/yyyy");
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Tipo:          If(IsBlank(r.TIPO); If(r.CATEGORIA.Value = "V"; "Visitante"; "Empleado"); r.TIPO);
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    Sede:          "" & r.AREA.Value;
+                    Grupo:         "" & r.GRUPO_JORNADA;
+                    Ingreso:       Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                    Salida:        If(IsBlank(r.SALIDA); ""; Text(r.SALIDA; "dd/mm/yyyy hh:mm"));
+                    IngresoPlanilla: "" & r.INGRESO_PLANILLA;
+                    SalidaPlanilla:  "" & r.SALIDA_PLANILLA;
+                    HorasPlanilla:   If(
+                                         IsBlank(r.INGRESO_PLANILLA) Or IsBlank(r.SALIDA_PLANILLA);
+                                         Blank();
+                                         Mod(Value(Left(r.SALIDA_PLANILLA; 2)) - Value(Left(r.INGRESO_PLANILLA; 2)) + 24; 24)
+                                     );
+                    MotivoSalida:    "" & r.MOTIVO_SALIDA;
+                    Horas:         Coalesce(r.HORAS; 0);
+                    DiaLaborado:   If(r.DIA_LABORADO; "Sí"; "No");
+                    HEReales:      Coalesce(r.HE_REALES; 0);
+                    Estado:        "" & r.ESTADO.Value;
+                    DiaDescanso:   If(r.DIA_DESCANSO; "Sí"; "No");
+                    Excepcion:     If(r.EXCEPCION; "Sí"; "No");
+                    Justificacion: "" & r.JUSTIFICACION;
+                    Autorizo:      "" & r.AUTORIZA_EXCEPCION;
+                    VisitaEmpresa: "" & r.VISITA_EMPRESA;
+                    VisitaA:       "" & r.VISITA_A;
+                    Observacion:   "" & r.OBSERVACION
+                }
+            );
+            JSONFormat.Compact
+        )
+    );
+    Set(gColsExp; "Codigo;Nombre;Departamento;DiasLaborados;Horas;HEReales;HEAutorizadas;Diferencia;SinSalida;Excepciones;Denegados");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(colHistResumen; NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Codigo:        r.CODIGO;
+                    Nombre:        r.NOMBRE;
+                    Departamento:  "" & r.DEPARTAMENTO;
+                    DiasLaborados: r.Dias;
+                    Horas:         r.Horas;
+                    HEReales:      r.HEReales;
+                    HEAutorizadas: r.HEAutorizadas;
+                    Diferencia:    r.Diferencia;
+                    SinSalida:     r.SinSalida;
+                    Excepciones:   r.Excepciones;
+                    Denegados:     r.Denegados
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportG)
+
+ ▸ btnArmarExpEvac (Classic/Button, oculto) · REGISTROS (raíz) · Evacuación
+   OnSelect:
+With(
+    { _lista: If(IsBlank(gEvacInicio); colAdentro; colEvacLista) };
+    Set(gNombreExp; "Evacuacion_" & Text(Coalesce(gEvacInicio; Now()); "yyyymmdd_hhmm"));;
+    Set(gHojaExp; "Evacuacion");;
+    Set(gColsExp; "Nombre;Codigo;Tipo;Departamento;Sede;Ingreso;Confirmado");;
+    Set(
+        gJsonExp;
+        JSON(
+            ForAll(
+                Sort(_lista; DEPARTAMENTO & NOMBRE; SortOrder.Ascending) As r;
+                {
+                    Nombre:       r.NOMBRE;
+                    Codigo:       r.CODIGO;
+                    Tipo:         If(r.TIPO = "Visitante" Or r.CATEGORIA.Value = "V"; "Visitante"; "Empleado");
+                    Departamento: "" & r.DEPARTAMENTO;
+                    Sede:         "" & r.AREA.Value;
+                    Ingreso:      Text(r.INGRESO; "dd/mm/yyyy hh:mm");
+                    Confirmado:   If(r.ID in colEvacPresentes.ID; "✔ Presente"; "FALTA")
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportG)
+
+ ▸ btnArmarExpRend (Classic/Button, oculto) · scrRendimientos (raíz) · Análisis global
+   OnSelect:
+Set(gNombreExp; "Rendimiento_" & gGlobalModo & "_" & Text(gGDesde; "yyyymmdd") & "_" & Text(DateAdd(gGHasta; -1; TimeUnit.Days); "yyyymmdd"));;
+Set(gHojaExp; Switch(gGlobalModo; "Set"; "PorSet"; "Atributo"; "PorActividad"; "PersFecha"; "PersonaFecha"; "PersAcum"; "PersonaAcumulado"; "VsMeta"));;
+Set(
+    gColsExp;
+    Switch(
+        gGlobalModo;
+        "Set";       "Set;Cultivo;Generacion;MCT;Programa;TipoOp;Actividad;Subactividad;Personas;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "Atributo";  "Cultivo;Actividad;Subactividad;Programa;Generacion;TipoOp;Trial;MCT;NumSets;Sets;Personas;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "PersFecha"; "Fecha;Set;Codigo;Persona;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Registros;Horas;Materiales;Frutos;Rend;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "PersAcum";  "Set;Codigo;Persona;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;CumplPct;Confiabilidad";
+        "Codigo;Persona;Cultivo;Actividad;Subactividad;Generacion;MCT;Programa;TipoOp;Sets;Dias;Registros;Horas;Materiales;Frutos;RendPromedio;Mediana;MinP25;MetaP75;MaxP90;DifMeta;CumplPct;Estado;Confiabilidad"
+    )
+);;
+Set(
+    gJsonExp;
+    Switch(
+        gGlobalModo;
+        "Set";
+        JSON(
+            ForAll(
+                colAnaGlobalSet As r;
+                {
+                    Set: r.SetName; Cultivo: r.Cultivo; Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp;
+                    Actividad: r.Actividad; Subactividad: r.SubActTxt; Personas: r.Personas; Dias: r.Dias; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "Atributo";
+        JSON(
+            ForAll(
+                colAnaGlobalAtrib As r;
+                {
+                    Cultivo: r.Cultivo; Actividad: r.Actividad; Subactividad: r.SubAct; Programa: r.Program; Generacion: r.Generacion;
+                    TipoOp: r.TipoOp; Trial: r.Trial; MCT: r.Mct; NumSets: r.Sets; Sets: r.SetName; Personas: r.Personas;
+                    Registros: r.Registros; Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "PersFecha";
+        JSON(
+            ForAll(
+                Sort(colAnaGlobalPersFecha; FechaRaw; SortOrder.Ascending) As r;
+                {
+                    Fecha: r.Fecha; Set: r.SetName; Codigo: r.Codigo; Persona: r.Persona; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; Rend: r.Rend;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        "PersAcum";
+        JSON(
+            ForAll(
+                colAnaGlobalPersAcum As r;
+                {
+                    Set: r.SetName; Codigo: r.Codigo; Persona: r.Persona; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Dias: r.Dias; Registros: r.Registros;
+                    Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; CumplPct: Round(r.Cumpl * 100; 0); Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        );
+        JSON(
+            ForAll(
+                Sort(colAnaGlobalSinSet; Cumpl; SortOrder.Ascending) As r;
+                {
+                    Codigo: r.Codigo; Persona: r.Persona; Cultivo: r.Cultivo; Actividad: r.Actividad; Subactividad: r.SubAct;
+                    Generacion: r.Generacion; MCT: r.Mct; Programa: r.Program; TipoOp: r.TipoOp; Sets: r.SetsCant; Dias: r.Dias;
+                    Registros: r.Registros; Horas: r.Horas; Materiales: r.Mat; Frutos: r.Frutos; RendPromedio: r.Rend; Mediana: r.Mediana;
+                    MinP25: r.MinRef; MetaP75: r.MetaRef; MaxP90: r.MaxRef; DifMeta: r.DifMeta; CumplPct: Round(r.Cumpl * 100; 0);
+                    Estado: r.CumpleMeta; Confiabilidad: r.Confiab
+                }
+            );
+            JSONFormat.Compact
+        )
+    )
+);;
+Select(btnEnviarExportR)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 11. ORDEN DE IMPLEMENTACIÓN Y PRUEBAS
+═══════════════════════════════════════════════════════════════════════════════
+  1. SharePoint (sección 1): revisa TU fila de administrador en
+     ACCESOS_USUARIOS, crea CONFIG_PESO_CORREOS con sus filas y DEFAULT,
+     crea la carpeta Personal con Plantilla y Scripts.
+  2. Office Script (10.1) y flujo ExportarPersonal (10.2); agrégalo a la app
+     y quita los dos flujos viejos (10.3).
+  3. Fórmulas de App (sección 2).
+  4. Personal: secciones 3 y 4 y los botones de 10.4 / 10.6.
+  5. REGISTROS: secciones 5 y 6 y btnEnviarExportG.
+  6. scrRendimientos: secciones 7 y 8 y btnEnviarExportR.
+  7. Guarda, publica, cierra y abre la app.
+
+ PRUEBAS
+  A. Personal: toca ☐ Activo en 3 personas → aparece la barra abajo → "👁 Ver
+     seleccionados" → solo salen esas 3 → "Cambiar estado (3)" → título "3
+     persona(s)" → Dar de baja, fecha y motivo → Confirmar. Quedan grises y
+     hay 3 filas nuevas en HISTORIAL_ESTADO_PERSONAL.
+  B. HE: en Análisis toca ⏱ en 4 autorizadas (o "☑ Autorizadas visibles")
+     → "⏱ Horas reales (4)" → 17:00 a 19:30 → Guardar: las 4 quedan con
+     "real 2,5 h" y el acumulado de cada persona cambia por la diferencia.
+  C. Visitantes: 🪪 → elige VIS001 → nombre y DPI → Guardar (sin escanear).
+     Aparece adentro de inmediato. Mientras el popup está abierto se puede
+     escribir sin que el cursor salte al escáner. Salida con el botón o
+     escaneando VIS001.
+  D. Garita · 📋 Asistencia: abre en HOY con todo el personal; los conteos
+     de los 4 botones suman lo de la etiqueta. "❌ No ingresaron" muestra solo
+     quien no vino ni tiene permiso. ‹ › cambia de día. "📝 Ver permisos"
+     muestra la lista de permisos.
+  E. Rendimientos: abre un set que tenga pendientes de ayer: en Finalizar
+     solo salen los de hoy. Análisis del set: un registro abierto ayer y
+     cerrado hoy ya no aparece. Un registro sin materiales tampoco.
+  F. galSetss: abre la pantalla (carga rápido, los más nuevos primero) →
+     ‹ → "Sets creados en 2026" → ‹ → 2025 → 🕒 regresa a 250 días. En modo
+     Búsqueda escribe un set de 2024: aparece.
+  G. Peso: un usuario SIN rendimientos_peso ve los botones de peso
+     deshabilitados/ocultos. Agrégale rendimientos_peso en PermisosExtra,
+     que cierre y abra la app: ya puede registrar. Cambia el correo de
+     Tomato en CONFIG_PESO_CORREOS y registra un peso: llega al nuevo correo.
+  H. Descargas: en cada pantalla baja un Excel y un PDF; ambos quedan en
+     Documentos/Personal del sitio y se abren solos.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 12. LO QUE INTERPRETÉ (revísalo)
+═══════════════════════════════════════════════════════════════════════════════
+  • Activo/Inactivo en lote: la acción (baja o reingreso) se elige en el
+    popup. Si la selección mezcla activos e inactivos, solo se aplica a los
+    que cambian; los demás se saltan y se avisa cuántos.
+  • Horas reales en lote: se aplica la MISMA hora real a todas las
+    seleccionadas (es el caso de grupos que entraron y salieron juntos). Si
+    alguna tuvo otro horario, quítala de la lista del popup y hazla aparte.
+  • "Más de un día abierto" = abierto un día y cerrado otro día. Esos no
+    entran en ningún análisis. El análisis del set ahora usa el mismo
+    máximo de horas que el global (MaxHorasRegistro = 9 h; antes 10 h).
+  • Los registros que quedaron En Proceso de días anteriores se quedan así
+    en la base de datos: ya no aparecen en Finalizar, en las tarjetas ni en
+    Procesos, y no cuentan en análisis.
+  • Asistencia en garita: la lista de personal es de UN día (el "Desde").
+    Los permisos sí muestran todo el rango. Solo cuenta permisos
+    AUTORIZADOS. "Descanso" sale según la jornada (si no tiene, L-V).
+  • En la copia del Detalle dejé CÓDIGO, NOMBRE, DEPARTAMENTO y ESTADO; las
+    horas de ingreso y salida van dentro del ESTADO (no como columnas).
+  • El administrador ahora sale solo de ACCESOS_USUARIOS (Rol =
+    Administrador). Si alguien pierde el acceso, se corrige en la lista, no
+    en la app.
+  • PDF: se convierte dentro de SharePoint (sin OneDrive). El Excel
+    intermedio se borra y queda solo el PDF.
