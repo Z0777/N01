@@ -1,0 +1,2065 @@
+═══════════════════════════════════════════════════════════════════════════════
+ SISTEMA DE PERSONAL — ACCESOS, CELULAR, GARITA, VISITANTES, HE Y PERMISOS
+ (09/11/2026) · Pantallas: Personal · REGISTROS · scrRendimientos
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Fórmulas SIN "=" al inicio. Solo aparecen controles que se AGREGAN,
+ MODIFICAN o ELIMINAN.
+═══════════════════════════════════════════════════════════════════════════════
+
+ÍNDICE
+  0. Respuesta: ¿btnRecalcCatalogo se elimina completo?
+  1. SharePoint: columnas y listas nuevas
+  2. Fórmulas de App y App.StartScreen
+  3. Roles y accesos (quién ve qué)
+  4. REGISTROS · KPIs, lista de adentro y celular
+  5. REGISTROS · Escáner (bloqueo mientras guarda) y regla de 6 días con
+     autorización del encargado por Teams/correo
+  6. REGISTROS · Visitantes con gafetes QR fijos (individual o grupo)
+  7. PERSONAL · Personal: filtro por área, activar/desactivar con historial
+  8. PERSONAL · Horas extras: autorización por área, alerta de 6 h, horas
+     reales y vista de celular
+  9. PERSONAL · Permisos: IGSS/Médico sin hora de regreso, evidencia,
+     visibilidad y celular
+ 10. RENDIMIENTOS · accesos
+ 11. Flujo de Power Automate "SolicitarAutorizacionIngreso"
+ 12. Orden de implementación y pruebas
+ 13. Lo que interpreté (revísalo)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 0. ¿btnRecalcCatalogo SE ELIMINA COMPLETO?
+═══════════════════════════════════════════════════════════════════════════════
+ Son dos cosas distintas:
+  • En Power Apps: SÍ, elimina el BOTÓN btnRecalcCatalogo completo (Personal,
+    raíz). Nadie lo usa y escribía claves con un formato viejo.
+  • En SharePoint: NO borres la lista RENDIMIENTOS_CATALOGO. Solo borra las
+    FILAS que tengan la columna Nivel vacía (son las que dejó ese botón):
+      RENDIMIENTOS_CATALOGO → Editar en vista de cuadrícula → filtra la
+      columna Nivel por "(vacío)" → selecciona esas filas → Eliminar.
+    Las demás filas (Nivel 1 a 8) son las metas buenas y se quedan.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. SHAREPOINT: COLUMNAS Y LISTAS NUEVAS
+═══════════════════════════════════════════════════════════════════════════════
+ Después de crear todo: Power Apps → Datos → cada lista → ⋯ → Actualizar.
+ Las listas nuevas se agregan con Datos → Agregar datos → SharePoint.
+
+ 1.1 CATALOGO_PERSONAL1 (agregar columnas)
+   AREA_GENERAL      Una línea de texto   NURSERY · CROP · SITE
+   SUBAREA           Una línea de texto   SSD · VTI · COCINA · LAVANDERIA · MANTENIMIENTO …
+   FECHA_BAJA        Fecha (solo fecha)
+   FECHA_REINGRESO   Fecha (solo fecha)
+   Llena AREA_GENERAL y SUBAREA a todo el personal (Editar en cuadrícula).
+   DEPARTAMENTO se queda igual.
+
+ 1.2 HISTORIAL_ESTADO_PERSONAL (lista NUEVA)
+   Title (= CODIGO) · Nombre (texto) · Departamento (texto) · Accion (texto:
+   Baja / Reingreso) · Fecha (fecha) · Motivo (texto varias líneas) ·
+   RegistradoPor (texto) · FechaRegistro (fecha y hora)
+
+ 1.3 ACCESOS_USUARIOS (agregar columna)
+   AREAS_VISIBLES    Una línea de texto
+     Vacío o "TODAS" = ve todo. Si no, lista separada por ";" de áreas,
+     departamentos o subáreas. Ejemplos: "NURSERY" · "SSD;VTI" ·
+     "SITE" · "MANTENIMIENTO;COCINA".
+
+ 1.4 CONFIG_AREAS_HORAS_EXTRAS (agregar FILAS, no columnas)
+   La columna CorreoResponsable ya existe. Agrega una fila por cada subárea
+   que tenga su propio encargado, con Title = nombre exacto de la SUBAREA
+   (ej. "SSD", "VTI", "COCINA", "LAVANDERIA") y su CorreoResponsable,
+   Activa = "SI". Orden en que se busca el encargado de una persona:
+     1) CorreoSupervisor de la persona (catálogo)
+     2) fila de su SUBAREA  3) fila de su DEPARTAMENTO  4) fila de su AREA_GENERAL
+
+ 1.5 SOLICITUDES_HORAS_EXTRAS (agregar columnas)
+   HoraInicioReal (texto "hh:mm") · HoraFinReal (texto) · HorasReales
+   (número, 2 decimales) · RegistroRealPor (texto) · FechaRegistroReal
+   (fecha y hora)
+   Verifica que la columna de opción Estado tenga la opción "Pendiente".
+
+ 1.6 SOLICITUDES_PERMISOS (agregar columnas)
+   SinHoraRegreso (Sí/No, predeterminado No) · FechaRegresoReal (fecha y
+   hora) · HorasReales (número, 2 decimales)
+   Datos adjuntos: deben estar ACTIVADOS (Configuración de la lista →
+   Configuración avanzada → Datos adjuntos: Habilitado). Ahí queda la
+   evidencia.
+
+ 1.7 REGIST (agregar columnas)
+   VISITA_DPI (texto) · VISITA_GRUPO (texto)
+
+ 1.8 GAFETES_VISITA (lista NUEVA)
+   Title (= código impreso en el gafete, ej. VIS001) · Estado (texto:
+   Libre / Asignado) · Nombre · DPI · Empresa · VisitaA · Motivo · Placa
+   (todas texto) · VigenteHasta (fecha) · GrupoVisita (texto) ·
+   AsignadoPor (texto) · FechaAsignacion (fecha y hora)
+   Crea una fila por gafete impreso: Title = VIS001, VIS002… Estado = Libre.
+   Los códigos deben empezar con "VIS" (PrefijoVisita).
+   ¿Por qué una lista aparte y no CATALOGO_PERSONAL1? Si los gafetes están
+   en el catálogo de personal, cuentan como "personal activo", aparecen en
+   programación, evaluaciones, horas extras y en el total de la garita.
+
+ 1.9 AUTORIZACIONES_INGRESO (lista NUEVA)
+   Title (= CODIGO) · Codigo · Nombre · Departamento · SubArea (texto) ·
+   Fecha (fecha) · Motivo (texto) · NotaGarita (texto) · Estado (texto:
+   Pendiente / Aprobado / Rechazado) · CorreoEncargado (texto) ·
+   RespondidoPor (texto) · Comentario (texto varias líneas) ·
+   FechaRespuesta (fecha y hora) · SolicitadoPor (texto)
+
+ 1.10 Zona horaria y permisos de las listas
+   • Las listas nuevas: los usuarios de garita deben poder agregar y editar
+     en GAFETES_VISITA y AUTORIZACIONES_INGRESO.
+   • HISTORIAL_ESTADO_PERSONAL: solo quien tenga personal_editar.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. FÓRMULAS DE APP Y App.StartScreen
+═══════════════════════════════════════════════════════════════════════════════
+
+ 2.1 AGREGAR (al final de Fórmulas de App)
+
+tiposPermisoAbiertos = ["IGSS"; "Médico"];;
+
+gEsSoloProcesos01 = fxPuede("procesos01") And Not(fxPuede("personal") Or fxPuede("horasextras") Or fxPuede("permisos") Or fxPuede("rendimientos") Or fxPuede("garita"));;
+
+fxVeArea(area: Text; depto: Text; sub: Text): Boolean =
+    varAdmin Or
+    IsBlank(Trim(gAccUsuario.AREAS_VISIBLES)) Or
+    Upper(Trim(gAccUsuario.AREAS_VISIBLES)) = "TODAS" Or
+    With(
+        { _v: ";" & Upper(Substitute(Substitute(gAccUsuario.AREAS_VISIBLES; " ;"; ";"); "; "; ";")) & ";" };
+        (";" & Upper(Trim(area)) & ";") in _v Or
+        (";" & Upper(Trim(depto)) & ";") in _v Or
+        (";" & Upper(Trim(sub)) & ";") in _v
+    );;
+
+ 2.2 catPermisos (REEMPLAZAR completo; se agregan 5 claves nuevas)
+
+catPermisos =
+Table(
+    { Clave: "personal";              Grupo: "Personal";       Etiqueta: "Ver personal";                  Descripcion: "Menú Personal: lista de personas de sus áreas y su ficha." };
+    { Clave: "personal_editar";       Grupo: "Personal";       Etiqueta: "Dar de baja / reactivar";       Descripcion: "Botón Activo/Inactivo en cada persona, con historial." };
+    { Clave: "matriz";                Grupo: "Personal";       Etiqueta: "Matriz de competencia";         Descripcion: "Abrir la matriz al tocar una persona." };
+    { Clave: "evaluar";               Grupo: "Personal";       Etiqueta: "Autoevaluación y Encargado";    Descripcion: "Botones btnEvalAuto y btnEvalEnc." };
+    { Clave: "evaluar_resp";          Grupo: "Personal";       Etiqueta: "Evaluación de Responsable";     Descripcion: "Botón btnEvalResp." };
+    { Clave: "prog";                  Grupo: "Programación";   Etiqueta: "Programar personal";            Descripcion: "Vista Programación." };
+    { Clave: "calendario";            Grupo: "Programación";   Etiqueta: "Distribución diaria";           Descripcion: "Vista Distribución diaria con descargas." };
+    { Clave: "ganttpers";             Grupo: "Programación";   Etiqueta: "Gantt de personal";             Descripcion: "Vista Gantt de personal." };
+    { Clave: "tiempo";                Grupo: "Programación";   Etiqueta: "Línea de tiempo";               Descripcion: "Vista Línea de tiempo por set." };
+    { Clave: "horasextras";           Grupo: "Horas extras";   Etiqueta: "Solicitar horas extras";        Descripcion: "Pestaña Solicitar. Si no tiene he_autorizar, queda Pendiente." };
+    { Clave: "he_autorizar";          Grupo: "Horas extras";   Etiqueta: "Autorizar horas extras";        Descripcion: "Lo que solicita queda Autorizado. Pestañas Análisis e Historial por persona." };
+    { Clave: "he_reporte";            Grupo: "Horas extras";   Etiqueta: "Acumulado y reporte";           Descripcion: "Pestaña Acumulado, descargas y reporte semanal." };
+    { Clave: "permisos";              Grupo: "Permisos";       Etiqueta: "Solicitar permisos";            Descripcion: "Formulario de permisos. Si no tiene permisos_autorizar, queda Pendiente." };
+    { Clave: "permisos_ver";          Grupo: "Permisos";       Etiqueta: "Ver lista de permisos";         Descripcion: "Lista de permisos de sus áreas (conPermLista)." };
+    { Clave: "permisos_autorizar";    Grupo: "Permisos";       Etiqueta: "Autorizar permisos";            Descripcion: "Botones ✔/✖; lo que registra queda autorizado." };
+    { Clave: "jornada";               Grupo: "Configuración";  Etiqueta: "Jornadas y límites";            Descripcion: "Vista Jornadas y pestaña Reglas y Áreas de HE." };
+    { Clave: "accesos";               Grupo: "Configuración";  Etiqueta: "Administrar accesos";           Descripcion: "Vista Accesos: usuarios, roles y permisos." };
+    { Clave: "garita";                Grupo: "Ingreso/Salida"; Etiqueta: "Panel de garita";               Descripcion: "Escáner, lista de adentro, visitantes con gafete y su salida." };
+    { Clave: "garita_permisos";       Grupo: "Ingreso/Salida"; Etiqueta: "Ver permisos en garita";        Descripcion: "Pestaña 📝 Permisos (solo autorizados)." };
+    { Clave: "garita_excepcion";      Grupo: "Ingreso/Salida"; Etiqueta: "Permitir ingreso manual";       Descripcion: "Dejar pasar sin esperar la aprobación del encargado." };
+    { Clave: "garita_evacuacion";     Grupo: "Ingreso/Salida"; Etiqueta: "Evacuación";                    Descripcion: "Pestaña Evacuación." };
+    { Clave: "garita_historial";      Grupo: "Ingreso/Salida"; Etiqueta: "Historial";                     Descripcion: "Pestaña Historial." };
+    { Clave: "garita_exportar";       Grupo: "Ingreso/Salida"; Etiqueta: "Exportar historial";            Descripcion: "Botones Excel/PDF del Historial." };
+    { Clave: "procesos01";            Grupo: "Pantallas";      Etiqueta: "Pantalla procesos01";           Descripcion: "Abre directo la pantalla procesos01." };
+    { Clave: "rendimientos";          Grupo: "Rendimientos";   Etiqueta: "Registrar labores";             Descripcion: "Elegir set y marcar inicio/fin. Sin botones de análisis." };
+    { Clave: "rendimientos_procesos"; Grupo: "Rendimientos";   Etiqueta: "Procesos de semilla";           Descripcion: "Botón 🧪 Procesos (registro diario)." };
+    { Clave: "rendimientos_admin";    Grupo: "Rendimientos";   Etiqueta: "Administrar registros";         Descripcion: "Pestañas Individual/General y 🛠 Corregir datos." };
+    { Clave: "rendimientos_peso";     Grupo: "Rendimientos";   Etiqueta: "Registrar peso";                Descripcion: "Peso, último peso y última cosecha." };
+    { Clave: "rendimientos_analisis"; Grupo: "Rendimientos";   Etiqueta: "Análisis";                      Descripcion: "Pestañas de análisis y botón 📊 Análisis global." };
+    { Clave: "rendimientos_metas";    Grupo: "Rendimientos";   Etiqueta: "Recalcular metas";              Descripcion: "Recalcular metas P75." }
+);;
+
+ Lo demás de Fórmulas de App está correcto.
+
+ 2.3 App.StartScreen (REEMPLAZAR)
+
+If(gEsSoloGarita; REGISTROS; gEsSoloProcesos01; procesos01; gEsSoloRendimientos; scrRendimientos; Personal)
+
+ 2.4 Configuración de la app (para que sea responsiva en celular)
+   Configuración → Pantalla → "Ajustar a la pantalla" = Desactivado y
+   "Bloquear relación de aspecto" = Desactivado. Sin esto, App.Width no
+   cambia en el celular y nada de lo responsivo funciona.
+
+ 2.5 Pantalla procesos01 (no venía en el archivo)
+   Cualquier botón que regrese a Personal u otra pantalla:
+     Visible: Not(gEsSoloProcesos01)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. ROLES Y ACCESOS
+═══════════════════════════════════════════════════════════════════════════════
+ Los roles se configuran en SharePoint (ROLES_PERMISOS) sin republicar.
+ Actualiza / crea estas filas (columna Permisos):
+
+  Title                 Permisos
+  Administrador         *
+  EncargadoArea         personal;matriz;evaluar;evaluar_resp;prog;calendario;ganttpers;tiempo;horasextras;he_autorizar;he_reporte;permisos;permisos_ver;permisos_autorizar;rendimientos;rendimientos_analisis;rendimientos_procesos
+  SolicitanteHE         horasextras;permisos
+  Garita                garita;garita_permisos
+  RegistroActividades   rendimientos
+  EncargadoProcesos     rendimientos;rendimientos_procesos
+  Procesos01            procesos01
+  Peso (SPA)            rendimientos;rendimientos_peso
+
+ Solo el Administrador (*) tiene: personal_editar, jornada, accesos,
+ garita_evacuacion, garita_historial, garita_exportar, garita_excepcion,
+ rendimientos_admin, rendimientos_metas.
+
+ En ACCESOS_USUARIOS de cada encargado llena AREAS_VISIBLES (ej. NURSERY, o
+ SSD;VTI). Con eso en Personal, Horas extras y Permisos solo ve su gente.
+
+ Resultado al abrir la app:
+   • Garita → REGISTROS, solo pestañas Escáner y Permisos, sin "← App".
+   • Procesos01 → pantalla procesos01.
+   • RegistroActividades / EncargadoProcesos → Rendimientos (sets, inicio,
+     fin; el encargado además ve 🧪 Procesos).
+   • SolicitanteHE → Personal, solo Inicio, Horas Extras y Permisos; lo que
+     solicita queda Pendiente y le llega correo al encargado del área.
+   • EncargadoArea → Personal completo de su área (sin Jornadas ni Accesos).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. REGISTROS · KPIs, LISTA DE ADENTRO Y CELULAR
+═══════════════════════════════════════════════════════════════════════════════
+ Tarjetas: EN SITIO (todos adentro) · EMPLEADOS · VISITANTES ·
+ CON PERMISO (ya salieron con permiso hoy) · TOTAL ACTIVOS (personal activo
+ del catálogo). "Abiertos día anterior" sale de las tarjetas, pero esas
+ personas siguen en la lista, marcadas en rojo.
+
+─────────────────────────────────────────────────────────────────
+ galGarKpi  (Gallery horizontal)  ·  conGarScan > conGarDer
+─────────────────────────────────────────────────────────────────
+ TemplateSize:
+Max(110; (Self.Width - 6 * Self.TemplatePadding) / 5)
+ Items:
+Table(
+    { Titulo: "EN SITIO";      Filtro: "Todos";     Valor: CountRows(colAdentro); Hex: "#0E2018"; HexSoft: "#E9ECE8" };
+    { Titulo: "EMPLEADOS";     Filtro: "Empleado";  Valor: CountRows(Filter(colAdentro; Not(TIPO = "Visitante" Or CATEGORIA.Value = "V"))); Hex: "#2F9E44"; HexSoft: "#E8F5EC" };
+    { Titulo: "VISITANTES";    Filtro: "Visitante"; Valor: CountRows(Filter(colAdentro; TIPO = "Visitante" Or CATEGORIA.Value = "V")); Hex: "#2563EB"; HexSoft: "#E6EDFD" };
+    {
+        Titulo: "CON PERMISO";
+        Filtro: "Permiso";
+        Valor:  CountRows(
+                    Filter(
+                        ForAll(
+                            Distinct(colPermHoy; Upper(Trim(Codigo))) As _p;
+                            {
+                                Fuera: Not(_p.Value in ForAll(colAdentro; Upper(Trim(CODIGO)))) And
+                                       !IsBlank(LookUp(colHoyGar; Upper(Trim(CODIGO)) = _p.Value And ESTADO.Value = "AFUERA"))
+                            }
+                        );
+                        Fuera
+                    )
+                );
+        Hex: "#7C3AED"; HexSoft: "#F1EAFE"
+    };
+    { Titulo: "TOTAL ACTIVOS"; Filtro: "Total";     Valor: CountRows(colPersGar); Hex: "#B45309"; HexSoft: "#FBF1DC" }
+)
+
+─────────────────────────────────────────────────────────────────
+ btnKpiFiltro  (Classic/Button)  ·  galGarKpi
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Switch(
+    ThisItem.Filtro;
+    "Permiso";
+        If(fxPuede("garita_permisos") Or fxPuede("garita_historial"); Set(gGarTab; "Perm");; Select(btnPermFCargar_1));
+    "Total";
+        Notify("Personal activo: " & CountRows(colPersGar) & " · Empleados en sitio: " & CountRows(Filter(colAdentro; Not(TIPO = "Visitante" Or CATEGORIA.Value = "V"))); NotificationType.Information);
+    Set(gFiltroAdentro; If(gFiltroAdentro = ThisItem.Filtro; "Todos"; ThisItem.Filtro))
+);;
+If(gGarTab = "Scan"; SetFocus(txtScan))
+
+─────────────────────────────────────────────────────────────────
+ galAdentro  (Gallery)  ·  conGarDer
+─────────────────────────────────────────────────────────────────
+ Items:
+Sort(
+    Filter(
+        colAdentro;
+        Switch(
+            Coalesce(gFiltroAdentro; "Todos");
+            "Empleado";  Not(TIPO = "Visitante" Or CATEGORIA.Value = "V");
+            "Visitante"; TIPO = "Visitante" Or CATEGORIA.Value = "V";
+            true
+        );
+        IsBlank(Trim(txtGarBuscar.Text)) Or StartsWith(NOMBRE; Trim(txtGarBuscar.Text)) Or StartsWith(AREA.Value; Trim(txtGarBuscar.Text)) Or StartsWith(CODIGO; Upper(Trim(txtGarBuscar.Text)))
+    );
+    INGRESO;
+    SortOrder.Descending
+)
+
+ lblAdNombre (Label) · galAdentro > conFilaAd
+   Text:
+ThisItem.NOMBRE & If(ThisItem.FECHA < Today(); "  ⚠ abierto desde " & Text(ThisItem.FECHA; "dd/mm"); "")
+   Color:
+If(ThisItem.FECHA < Today(); ColorValue(hexDanger); ColorValue(hexInk))
+
+─────────────────────────────────────────────────────────────────
+ conGarIzq  (GroupContainer)  ·  conGarScan          (oculto en celular)
+─────────────────────────────────────────────────────────────────
+ Visible:
+App.Width >= bpTablet
+
+─────────────────────────────────────────────────────────────────
+ Pestañas de garita  ·  conGarita > conGarHeader
+─────────────────────────────────────────────────────────────────
+ btnGarTabPerm   Visible:  fxPuede("garita_permisos") Or fxPuede("garita_historial")
+ (btnGarTabScan, btnGarTabEvac, btnGarTabHist y btnGarVolver ya tienen su
+  permiso: con el rol Garita solo verá Escáner y Permisos.)
+ En celular, solo íconos:
+   btnGarTabScan   Text: If(App.Width < bpTablet; "📷"; "📷 Ingreso / Salida")
+                   Width: If(App.Width < bpTablet; 48; 140)
+   btnGarTabEvac   Text: If(App.Width < bpTablet; "🚨"; "🚨 Evacuación")
+                   Width: If(App.Width < bpTablet; 48; 140)
+   btnGarTabHist   Text: If(App.Width < bpTablet; "🗂"; "🗂 Historial")
+                   Width: If(App.Width < bpTablet; 48; 140)
+   btnGarTabPerm   Text: If(App.Width < bpTablet; "📝"; "📝 Permisos")
+                   Width: If(App.Width < bpTablet; 48; 140)
+   btnGarVolver    Text: If(App.Width < bpTablet; "←"; "← App")
+                   Width: If(App.Width < bpTablet; 48; 140)
+   lblGarTitulo    Visible: App.Width >= bpTablet
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. REGISTROS · ESCÁNER Y REGLA DE 6 DÍAS CON AUTORIZACIÓN
+═══════════════════════════════════════════════════════════════════════════════
+ • Mientras se guarda una lectura, txtScan queda bloqueado: no se puede
+   escanear otro código encima y no se juntan dos códigos en el cuadro.
+ • Más rápido: el resumen de asistencia ya no se consulta a SharePoint en
+   cada lectura (se usa la copia local).
+ • Sin jornada asignada: se permiten 6 días (como ya estaba).
+ • Si supera los 6 días, o entra en su día de descanso (solo si tiene jornada
+   asignada), queda BLOQUEADO. Garita toca "📨 Solicitar autorización": se
+   guarda la solicitud y al encargado del área le llega la aprobación en
+   Teams (app Aprobaciones) y por correo. Cuando el encargado aprueba, la
+   persona vuelve a escanear y entra (en máx. 30 s). Si rechaza, se le
+   muestra a garita.
+ • Si la persona salió con permiso IGSS/Médico "sin hora de regreso":
+   - regresa el mismo día → el permiso se cierra con la hora real de regreso;
+   - regresa otro día → el permiso toma las horas que le faltaron de
+     jornada ese día.
+
+─────────────────────────────────────────────────────────────────
+ txtScan  (Classic/TextInput)  ·  conGarIzq
+─────────────────────────────────────────────────────────────────
+ DisplayMode:
+If(gBusyScan Or varPopVisita Or varPopExcepcion; DisplayMode.View; DisplayMode.Edit)
+ HintText:
+If(gBusyScan; "⏳ Guardando… espere"; "📷 Escanee su gafete…")
+ (OnChange: está correcto)
+
+─────────────────────────────────────────────────────────────────
+ tmrFocoScan  (Timer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ Duration: 300
+ OnTimerEnd:
+If(gGarTab = "Scan" And Not(gBusyScan) And Not(varPopVisita) And Not(varPopExcepcion) And Not(gModoBusqueda) And Not(gModoCamara); SetFocus(txtScan))
+
+─────────────────────────────────────────────────────────────────
+ btnCargarGarita  (Classic/Button, oculto)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Set(gFechaCarga; Today());;
+Concurrent(
+    ClearCollect(colPersGar; ShowColumns(Filter(CATALOGO_PERSONAL1; Activo = "SI"); ID; CODIGO; Nombre; DEPARTAMENTO; AREA_GENERAL; SUBAREA; Categoria; SEDE; GrupoJornada; MaxDiasConsecutivos; MaxDiasSemana; ExcepcionHasta; CorreoSupervisor));
+    ClearCollect(colResGar; ASISTENCIA_RESUMEN);
+    ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));
+    ClearCollect(colHoyGar; Filter(REGIST; FECHA = Today()));
+    ClearCollect(colPermHoy; Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; FechaInicio < DateAdd(Today(); 1; TimeUnit.Days); FechaFin >= Today()));
+    ClearCollect(colPermAbiertos; Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; SinHoraRegreso = true; FechaInicio >= DateAdd(Today(); -7; TimeUnit.Days)));
+    ClearCollect(colAutHoy; Filter(AUTORIZACIONES_INGRESO; Fecha = Today()));
+    ClearCollect(colGafetes; GAFETES_VISITA);
+    ClearCollect(colConfigAreasHE; Filter(CONFIG_AREAS_HORAS_EXTRAS; Activa = "SI"));
+    ClearCollect(colGruposJornada; Filter(CONFIG_GRUPOS_JORNADA; Activo = true))
+);;
+RemoveIf(colPermAbiertos; !IsBlank(FechaRegresoReal));;
+Clear(colSemGar);;
+ForAll(
+    Sequence(6; 1) As d;
+    Collect(colSemGar; ShowColumns(Filter(REGIST; FECHA = DateAdd(Today(); -d.Value; TimeUnit.Days)); CODIGO; FECHA; DIA_LABORADO; ESTADO; HORAS))
+);;
+SetFocus(txtScan)
+
+─────────────────────────────────────────────────────────────────
+ tmrSyncGarita  (Timer)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ OnTimerEnd:
+If(
+    Not(gBusyScan) And (fxPuede("garita") Or fxPuede("garita_evacuacion"));
+    If(
+        gFechaCarga <> Today();
+        Select(btnCargarGarita);
+        Concurrent(
+            ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));
+            ClearCollect(colHoyGar; Filter(REGIST; FECHA = Today()));
+            ClearCollect(colPermHoy; Filter(SOLICITUDES_PERMISOS; Estado = "Autorizado"; FechaInicio < DateAdd(Today(); 1; TimeUnit.Days); FechaFin >= Today()));
+            ClearCollect(colAutHoy; Filter(AUTORIZACIONES_INGRESO; Fecha = Today()));
+            ClearCollect(colGafetes; GAFETES_VISITA)
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ btnProcesarScan  (Classic/Button, oculto)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    Not(gBusyScan) And Not(IsBlank(Trim(gScanCodigo)));
+    Set(gBusyScan; true);;
+    Set(gCodScan; Upper(Trim(gScanCodigo)));;
+    Set(gScanCodigo; "");;
+    Set(gExcepcion; false);;
+    Set(gJustifExc; "");;
+    Set(gAutorizaExc; "");;
+    Set(gMsgScan; "");;
+    Set(gPersonaScan; Blank());;
+    Set(gGafeteScan; Blank());;
+    Set(gPermAbierto; Blank());;
+    Set(gHorasPermReal; 0);;
+    Set(gAutHoy; Blank());;
+    Set(gRegAbierto; LookUp(colAdentro; Upper(Trim(CODIGO)) = gCodScan));;
+    Set(gOlvido; !IsBlank(gRegAbierto) And DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Hours) >= HorasMaxTurnoAbierto);;
+    If(
+        StartsWith(gCodScan; PrefijoVisita);
+        Set(gGafeteScan; LookUp(colGafetes; Upper(Trim(Title)) = gCodScan));;
+        Set(
+            gAccionScan;
+            If(
+                IsBlank(gGafeteScan); "ERROR";
+                !IsBlank(gRegAbierto) And gRegAbierto.FECHA < Today(); "VISITA_CIERRE_NUEVA";
+                !IsBlank(gRegAbierto) And DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) < 1; "AVISO";
+                !IsBlank(gRegAbierto); "VISITA_SALIDA";
+                gGafeteScan.Estado = "Asignado" And gGafeteScan.VigenteHasta >= Today(); "VISITA_REINGRESO";
+                "VISITA_NUEVA"
+            )
+        );;
+        If(gAccionScan = "ERROR"; Set(gMsgScan; "El gafete " & gCodScan & " no está registrado en GAFETES_VISITA."));;
+        If(gAccionScan = "AVISO"; Set(gMsgScan; "El visitante acaba de ingresar. No se duplicó."));
+        Set(gPersonaScan; LookUp(colPersGar; Upper(Trim(CODIGO)) = gCodScan));;
+        If(
+            IsBlank(gPersonaScan);
+            Set(gAccionScan; "ERROR");;
+            Set(gMsgScan; "El código " & gCodScan & " no existe o está inactivo en el catálogo de personal.");
+            !IsBlank(gRegAbierto) And Not(gOlvido) And DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) < AntiReboteMin;
+            Set(gAccionScan; "AVISO");;
+            Set(gMsgScan; "Ya tiene INGRESO a las " & Text(gRegAbierto.INGRESO; "hh:mm") & ". No se duplicó. Para marcar salida espere " & AntiReboteMin & " min.");
+            Set(gResumenScan; LookUp(colResGar; Title = gCodScan));;
+            Set(gCfgCat; LookUp(colConfigAreasHE; Title = gPersonaScan.DEPARTAMENTO));;
+            Set(gGrupoScan; LookUp(colGruposJornada; Title = Coalesce(gPersonaScan.GrupoJornada; "L-V")));;
+            Set(
+                gCorreoAlertaScan;
+                Coalesce(
+                    gPersonaScan.CorreoSupervisor;
+                    LookUp(colConfigAreasHE; Title = gPersonaScan.SUBAREA).CorreoResponsable;
+                    gCfgCat.CorreoResponsable;
+                    LookUp(colConfigAreasHE; Title = gPersonaScan.AREA_GENERAL).CorreoResponsable;
+                    ""
+                )
+            );;
+            Set(gPermisoHoy; LookUp(colPermHoy; Upper(Trim(Codigo)) = gCodScan));;
+            Set(gAutHoy; First(Sort(Filter(colAutHoy; Upper(Trim(Codigo)) = gCodScan); Created; SortOrder.Descending)));;
+            Set(gPermAbierto; First(Sort(Filter(colPermAbiertos; Upper(Trim(Codigo)) = gCodScan); FechaInicio; SortOrder.Descending)));;
+            If(
+                !IsBlank(gPermAbierto);
+                With(
+                    { _dP: Date(Year(gPermAbierto.FechaInicio); Month(gPermAbierto.FechaInicio); Day(gPermAbierto.FechaInicio)) };
+                    Set(
+                        gHorasPermReal;
+                        If(
+                            _dP = Today();
+                            With(
+                                { _sal: First(Sort(Filter(colHoyGar; Upper(Trim(CODIGO)) = gCodScan And ESTADO.Value = "AFUERA" And !IsBlank(MOTIVO_SALIDA)); SALIDA; SortOrder.Descending)).SALIDA };
+                                If(IsBlank(_sal); 0; Round(DateDiff(_sal; Now(); TimeUnit.Minutes) / 60; 2))
+                            );
+                            Max(
+                                0;
+                                fxHorasEsperadas(gGrupoScan.DiasLaborales; gGrupoScan.HorasDia; gGrupoScan.HorasUltimoDia; _dP) -
+                                Sum(Filter(colSemGar; Upper(Trim(CODIGO)) = gCodScan And FECHA = _dP); Coalesce(HORAS; 0))
+                            )
+                        )
+                    )
+                )
+            );;
+            Set(gFechaRefScan; If(!IsBlank(gRegAbierto) And Not(gOlvido); gRegAbierto.FECHA; Today()));;
+            ClearCollect(colDiaScan; Filter(colHoyGar; Upper(Trim(CODIGO)) = gCodScan; FECHA = gFechaRefScan));;
+            If(
+                !IsBlank(gRegAbierto) And Not(gOlvido);
+                Set(gAccionScan; "SALIDA");
+                With(
+                    {
+                        _ultSal:   First(Sort(Filter(colDiaScan; ESTADO.Value = "AFUERA"); SALIDA; SortOrder.Descending));
+                        _maxCons:  Coalesce(gPersonaScan.MaxDiasConsecutivos; gCfgCat.MaxDiasConsecutivos; MaxDiasConsecDefault);
+                        _maxSem:   Coalesce(gPersonaScan.MaxDiasSemana; gCfgCat.MaxDiasSemana; MaxDiasSemanaDefault);
+                        _excVig:   !IsBlank(gPersonaScan.ExcepcionHasta) And gPersonaScan.ExcepcionHasta >= Today();
+                        _mismoDia: !IsEmpty(colDiaScan);
+                        _descanso: !IsBlank(gPersonaScan.GrupoJornada) And Not(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()));
+                        _ultBase:  gResumenScan.UltimoDiaLaborado;
+                        _consBase: Coalesce(gResumenScan.DiasConsecutivos; 0)
+                    };
+                    With(
+                        {
+                            _ultEf:  If(gOlvido And (IsBlank(_ultBase) Or gRegAbierto.FECHA > _ultBase); gRegAbierto.FECHA; _ultBase);
+                            _consEf: If(
+                                         gOlvido And (IsBlank(_ultBase) Or gRegAbierto.FECHA > _ultBase);
+                                         If(_ultBase = DateAdd(gRegAbierto.FECHA; -1; TimeUnit.Days); _consBase + 1; 1);
+                                         _consBase
+                                     );
+                            _dias7:  CountRows(
+                                         Distinct(
+                                             Filter(colSemGar; Upper(Trim(CODIGO)) = gCodScan; DIA_LABORADO = true Or ESTADO.Value = "SIN SALIDA" Or ESTADO.Value = "ADENTRO");
+                                             FECHA
+                                         )
+                                     )
+                        };
+                        With(
+                            { _racha: If(_ultEf = DateAdd(Today(); -1; TimeUnit.Days); _consEf; 0) };
+                            With(
+                                { _limite: Not(_mismoDia) And Not(_excVig) And (_racha >= _maxCons Or _dias7 >= _maxSem Or _descanso) };
+                                Set(gUltEf; _ultEf);;
+                                Set(gConsEf; _consEf);;
+                                Set(gRachaScan; If(_mismoDia; Max(_consBase; 1); _racha + 1));;
+                                Set(gDias7Scan; _dias7 + 1);;
+                                Set(gMotivoBloq; If(_descanso; "Día de descanso (jornada " & gPersonaScan.GrupoJornada & ")"; "Límite de días: " & _racha & " consecutivos (máx. " & _maxCons & ") · " & _dias7 & " en los 6 días anteriores (máx. " & _maxSem & ")"));;
+                                If(
+                                    !IsBlank(_ultSal) And DateDiff(_ultSal.SALIDA; Now(); TimeUnit.Minutes) < AntiReboteMin;
+                                    Set(gAccionScan; "AVISO");;
+                                    Set(gMsgScan; "Registró SALIDA a las " & Text(_ultSal.SALIDA; "hh:mm") & ". No se registró ingreso (espere " & AntiReboteMin & " min).");
+
+                                    _limite And gAutHoy.Estado <> "Aprobado";
+                                    Set(gAccionScan; "BLOQUEO");;
+                                    Set(
+                                        gMsgScan;
+                                        gPersonaScan.Nombre & " · " & gMotivoBloq & ". Necesita autorización del encargado." &
+                                        Switch(
+                                            gAutHoy.Estado;
+                                            "Pendiente"; " 📨 La solicitud ya se envió a las " & Text(gAutHoy.Created; "hh:mm") & ", esperando respuesta.";
+                                            "Rechazado"; " ⛔ El encargado RECHAZÓ el ingreso" & If(IsBlank(gAutHoy.Comentario); "."; ": " & gAutHoy.Comentario);
+                                            ""
+                                        )
+                                    );
+
+                                    If(
+                                        _limite;
+                                        Set(gExcepcion; true);;
+                                        Set(gJustifExc; "Autorizado por encargado: " & gMotivoBloq & If(IsBlank(gAutHoy.Comentario); ""; " · " & gAutHoy.Comentario));;
+                                        Set(gAutorizaExc; Coalesce(gAutHoy.RespondidoPor; "Encargado"))
+                                    );;
+                                    Set(gAccionScan; If(gOlvido; "CIERRE_E_INGRESO"; "INGRESO"))
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    );;
+    If(
+        gAccionScan in ["INGRESO"; "SALIDA"; "CIERRE_E_INGRESO"];
+        Set(gUltimoScan; { Nombre: gPersonaScan.Nombre; Tipo: "PROCESANDO"; Hora: Now(); Hex: "#475569"; Mensaje: If(gAccionScan = "SALIDA"; "Registrando salida…"; "Registrando ingreso…") })
+    );;
+    Select(btnEjecutarScan)
+)
+
+─────────────────────────────────────────────────────────────────
+ btnEjecutarScan  (Classic/Button, oculto)  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ OnSelect (REEMPLAZAR COMPLETO):
+Set(gAhoraScan; Now());;
+Set(gHoraPlanilla; Text(Time(RoundDown((Hour(gAhoraScan) * 60 + Minute(gAhoraScan) + 30) / 60; 0); 0; 0); "hh:mm"));;
+Set(
+    gMotivoSalida;
+    If(
+        IsBlank(gPermisoHoy);
+        "";
+        "Permiso " & gPermisoHoy.TipoPermiso &
+        If(gPermisoHoy.DiaCompleto; " (día completo)"; " " & Text(gPermisoHoy.FechaInicio; "hh:mm") & "-" & Text(gPermisoHoy.FechaFin; "hh:mm")) &
+        If(IsBlank(Trim(gPermisoHoy.Motivo)); ""; " · " & Trim(gPermisoHoy.Motivo))
+    )
+);;
+Set(gRegNuevo; Blank());;
+If(
+    gAccionScan = "CIERRE_E_INGRESO";
+    Concurrent(
+        Patch(REGIST; {ID: gRegAbierto.ID}; { ESTADO: {Value: "SIN SALIDA"}; DIA_LABORADO: true; OBSERVACION: "Salida no marcada. Cerrado automáticamente al registrar ingreso del " & Text(Now(); "dd/mm/yyyy hh:mm") });
+        Set(
+            gResNuevo;
+            Patch(
+                ASISTENCIA_RESUMEN;
+                Coalesce(LookUp(colResGar; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                {
+                    Title:             gCodScan;
+                    Nombre:            gPersonaScan.Nombre;
+                    UltimoDiaLaborado: gUltEf;
+                    DiasConsecutivos:  gConsEf;
+                    DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(IsBlank(gResumenScan.UltimoDiaLaborado) Or gUltEf <> gResumenScan.UltimoDiaLaborado; 1; 0)
+                }
+            )
+        )
+    );;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    RemoveIf(colResGar; Title = gCodScan);;
+    Collect(colResGar; gResNuevo);;
+    Set(gResumenScan; gResNuevo);;
+    Set(gAccionScan; "INGRESO")
+);;
+If(
+    gAccionScan = "INGRESO";
+    IfError(
+        Concurrent(
+            Set(
+                gRegNuevo;
+                Patch(
+                    REGIST;
+                    Defaults(REGIST);
+                    {
+                        Title:              gCodScan & " - " & Text(Today(); "yyyymmdd");
+                        FECHA:              Today();
+                        CODIGO:             gCodScan;
+                        NOMBRE:             gPersonaScan.Nombre;
+                        TIPO:               "Empleado";
+                        AREA:               {Value: If(IsBlank(gPersonaScan.SEDE); gSedeGarita; gPersonaScan.SEDE)};
+                        DEPARTAMENTO:       gPersonaScan.DEPARTAMENTO;
+                        CATEGORIA:          {Value: gPersonaScan.Categoria.Value};
+                        GRUPO_JORNADA:      If(IsBlank(gPersonaScan.GrupoJornada); "L-V"; gPersonaScan.GrupoJornada);
+                        INGRESO:            gAhoraScan;
+                        INGRESO_PLANILLA:   gHoraPlanilla;
+                        ESTADO:             {Value: "ADENTRO"};
+                        DIA_LABORADO:       false;
+                        DIA_CONSECUTIVO:    gRachaScan;
+                        DIA_DESCANSO:       !IsBlank(gPersonaScan.GrupoJornada) And Not(fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()));
+                        EXCEPCION:          gExcepcion;
+                        JUSTIFICACION:      gJustifExc;
+                        AUTORIZA_EXCEPCION: gAutorizaExc;
+                        REGISTRA_INGRESO:   gCorreoUsuario
+                    }
+                )
+            );
+            Set(
+                gResNuevo;
+                Patch(
+                    ASISTENCIA_RESUMEN;
+                    Coalesce(LookUp(colResGar; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                    { Title: gCodScan; Nombre: gPersonaScan.Nombre; EstadoSitio: "ADENTRO"; UltimoIngreso: Now() }
+                )
+            )
+        );
+        Set(gRegNuevo; Blank())
+    );;
+    If(
+        IsBlank(gRegNuevo.ID);
+        Set(gAccionScan; "ERROR");;
+        Set(gMsgScan; "No se pudo guardar el ingreso de " & gPersonaScan.Nombre & ". Revise la conexión y escanee de nuevo.");
+        Collect(colAdentro; gRegNuevo);;
+        Collect(colHoyGar; gRegNuevo);;
+        RemoveIf(colResGar; Title = gCodScan);;
+        Collect(colResGar; gResNuevo);;
+        If(
+            !IsBlank(gPermAbierto);
+            IfError(
+                Patch(SOLICITUDES_PERMISOS; {ID: gPermAbierto.ID}; { FechaRegresoReal: gAhoraScan; HorasReales: gHorasPermReal });
+                Notify("⚠️ El ingreso se guardó, pero no se pudo cerrar el permiso abierto."; NotificationType.Warning)
+            );;
+            RemoveIf(colPermAbiertos; ID = gPermAbierto.ID)
+        );;
+        If(
+            gExcepcion And gCorreoAlertaScan <> "";
+            IfError(
+                Office365Outlook.SendEmailV2(
+                    gCorreoAlertaScan;
+                    "⛔ Ingreso por excepción: " & gPersonaScan.Nombre;
+                    "<div style='font-family:Segoe UI'><p><b>" & EncodeHTML(gPersonaScan.Nombre) & "</b> (" & gCodScan & ") ingresó el " & Text(Now(); "dd/mm/yyyy hh:mm") & " superando el límite de días laborados.</p>" &
+                    "<p>Día consecutivo: <b>" & gRachaScan & "</b> · Días en 7: <b>" & gDias7Scan & "</b></p>" &
+                    "<p>Justificación: <i>" & EncodeHTML(gJustifExc) & "</i><br>Autorizó: <b>" & EncodeHTML(gAutorizaExc) & "</b><br>Registró: " & gCorreoUsuario & "</p></div>";
+                    { Importance: "High" }
+                );
+                Notify("No se pudo enviar el aviso al supervisor."; NotificationType.Warning)
+            )
+        );;
+        Set(
+            gUltimoScan;
+            {
+                Nombre:  gPersonaScan.Nombre;
+                Tipo:    "INGRESO";
+                Hora:    Now();
+                Hex:     If(gExcepcion; "#E8A93C"; "#2F9E44");
+                Mensaje: gPersonaScan.DEPARTAMENTO & " · día " & gRachaScan & " consecutivo" &
+                         If(IsBlank(gPersonaScan.GrupoJornada) Or fxEsDiaLaboral(gGrupoScan.DiasLaborales; Today()); ""; " · DÍA DE DESCANSO (autorizado)") &
+                         If(IsBlank(gPermAbierto); ""; " · regresa de permiso " & gPermAbierto.TipoPermiso & " (" & Text(gHorasPermReal; "[$-es]0,0") & " h)") &
+                         If(gExcepcion; " · INGRESO POR EXCEPCIÓN"; "") &
+                         If(IsBlank(gPermisoHoy); ""; " · 📝 permiso " & gPermisoHoy.TipoPermiso & " " & Text(gPermisoHoy.FechaInicio; "hh:mm") & "-" & Text(gPermisoHoy.FechaFin; "hh:mm"))
+            }
+        )
+    )
+);;
+If(
+    gAccionScan = "SALIDA";
+    With(
+        {
+            _h:     Round(DateDiff(gRegAbierto.INGRESO; Now(); TimeUnit.Minutes) / 60; 2);
+            _hPrev: Sum(Filter(colDiaScan; ID <> gRegAbierto.ID And ESTADO.Value = "AFUERA"); Coalesce(HORAS; 0));
+            _esp:   fxHorasEsperadas(gGrupoScan.DiasLaborales; gGrupoScan.HorasDia; gGrupoScan.HorasUltimoDia; gRegAbierto.FECHA)
+        };
+        With(
+            {
+                _hDia:      _hPrev + _h;
+                _yaContado: gResumenScan.UltimoDiaLaborado = gRegAbierto.FECHA
+            };
+            With(
+                { _heSeg: Round(Max(0; _hDia - _esp) - Max(0; _hPrev - _esp); 2) };
+                Set(gRegSal; Blank());;
+                IfError(
+                    Concurrent(
+                        Set(
+                            gRegSal;
+                            Patch(
+                                REGIST;
+                                {ID: gRegAbierto.ID};
+                                {
+                                    SALIDA:          gAhoraScan;
+                                    SALIDA_PLANILLA: gHoraPlanilla;
+                                    MOTIVO_SALIDA:   gMotivoSalida;
+                                    ESTADO:          {Value: "AFUERA"};
+                                    HORAS:           _h;
+                                    DIA_LABORADO:    _hDia >= HorasMinDiaLaborado;
+                                    HE_REALES:       _heSeg;
+                                    REGISTRA_SALIDA: gCorreoUsuario
+                                }
+                            )
+                        );
+                        Set(
+                            gResNuevo;
+                            Patch(
+                                ASISTENCIA_RESUMEN;
+                                Coalesce(LookUp(colResGar; Title = gCodScan); Defaults(ASISTENCIA_RESUMEN));
+                                {
+                                    Title:             gCodScan;
+                                    Nombre:            gPersonaScan.Nombre;
+                                    EstadoSitio:       "AFUERA";
+                                    UltimaSalida:      Now();
+                                    HorasSitioAcum:    Coalesce(gResumenScan.HorasSitioAcum; 0) + _h;
+                                    HEDetectadasAcum:  Coalesce(gResumenScan.HEDetectadasAcum; 0) + _heSeg;
+                                    DiasLaboradosAcum: Coalesce(gResumenScan.DiasLaboradosAcum; 0) + If(_hDia >= HorasMinDiaLaborado And Not(_yaContado); 1; 0);
+                                    DiasConsecutivos:  If(
+                                                           _hDia >= HorasMinDiaLaborado And Not(_yaContado);
+                                                           If(gResumenScan.UltimoDiaLaborado = DateAdd(gRegAbierto.FECHA; -1; TimeUnit.Days); Coalesce(gResumenScan.DiasConsecutivos; 0) + 1; 1);
+                                                           Coalesce(gResumenScan.DiasConsecutivos; 0)
+                                                       );
+                                    UltimoDiaLaborado: If(_hDia >= HorasMinDiaLaborado; gRegAbierto.FECHA; gResumenScan.UltimoDiaLaborado)
+                                }
+                            )
+                        )
+                    );
+                    Set(gRegSal; Blank())
+                );;
+                If(
+                    IsBlank(gRegSal.ID);
+                    Set(gAccionScan; "ERROR");;
+                    Set(gMsgScan; "No se pudo guardar la salida de " & gPersonaScan.Nombre & ". Escanee de nuevo.");
+                    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+                    RemoveIf(colHoyGar; ID = gRegAbierto.ID);;
+                    Collect(colHoyGar; gRegSal);;
+                    RemoveIf(colResGar; Title = gCodScan);;
+                    Collect(colResGar; gResNuevo);;
+                    Set(
+                        gUltimoScan;
+                        {
+                            Nombre:  gPersonaScan.Nombre;
+                            Tipo:    "SALIDA";
+                            Hora:    Now();
+                            Hex:     If(gMotivoSalida = ""; "#2563EB"; "#7C3AED");
+                            Mensaje: If(gMotivoSalida = ""; ""; "📝 " & gMotivoSalida & " · ") &
+                                     Text(_h; "[$-es]0,0") & " h en este tramo · día: " & Text(_hDia; "[$-es]0,0") & " h" &
+                                     If(_hDia >= HorasMinDiaLaborado; " · ✔ día laborado"; " · ✖ aún no completa " & HorasMinDiaLaborado & " h") &
+                                     If(_heSeg > 0; " · HE detectadas: " & Text(_heSeg; "[$-es]0,0") & " h"; "")
+                        }
+                    )
+                )
+            )
+        )
+    )
+);;
+If(
+    gAccionScan = "VISITA_CIERRE_NUEVA";
+    Patch(REGIST; {ID: gRegAbierto.ID}; { ESTADO: {Value: "SIN SALIDA"}; OBSERVACION: "Salida no marcada. Cerrado al volver a escanear el " & Text(Now(); "dd/mm/yyyy hh:mm") });;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    Set(gAccionScan; If(gGafeteScan.Estado = "Asignado" And gGafeteScan.VigenteHasta >= Today(); "VISITA_REINGRESO"; "VISITA_NUEVA"))
+);;
+If(
+    gAccionScan = "VISITA_REINGRESO";
+    Set(
+        gRegNuevo;
+        IfError(
+            Patch(
+                REGIST;
+                Defaults(REGIST);
+                {
+                    Title:            gCodScan & " - " & Text(Today(); "yyyymmdd");
+                    FECHA:            Today();
+                    CODIGO:           gCodScan;
+                    NOMBRE:           gGafeteScan.Nombre;
+                    TIPO:             "Visitante";
+                    AREA:             {Value: gSedeGarita};
+                    DEPARTAMENTO:     "VISITANTE";
+                    CATEGORIA:        {Value: "V"};
+                    INGRESO:          gAhoraScan;
+                    INGRESO_PLANILLA: gHoraPlanilla;
+                    ESTADO:           {Value: "ADENTRO"};
+                    DIA_LABORADO:     false;
+                    VISITA_EMPRESA:   gGafeteScan.Empresa;
+                    VISITA_A:         gGafeteScan.VisitaA;
+                    VISITA_MOTIVO:    gGafeteScan.Motivo;
+                    VISITA_PLACA:     gGafeteScan.Placa;
+                    VISITA_DPI:       gGafeteScan.DPI;
+                    VISITA_GRUPO:     gGafeteScan.GrupoVisita;
+                    REGISTRA_INGRESO: gCorreoUsuario
+                }
+            );
+            Blank()
+        )
+    );;
+    If(
+        IsBlank(gRegNuevo.ID);
+        Set(gAccionScan; "ERROR");;
+        Set(gMsgScan; "No se pudo guardar el ingreso del visitante " & gGafeteScan.Nombre & ". Escanee de nuevo.");
+        Collect(colAdentro; gRegNuevo);;
+        Collect(colHoyGar; gRegNuevo);;
+        Set(gUltimoScan; { Nombre: gGafeteScan.Nombre; Tipo: "INGRESO"; Hora: Now(); Hex: "#2563EB"; Mensaje: "Visitante · gafete " & gCodScan & " · " & Coalesce(gGafeteScan.Empresa; "") & " · vigente hasta " & Text(gGafeteScan.VigenteHasta; "dd/mm") })
+    )
+);;
+If(
+    gAccionScan = "VISITA_NUEVA";
+    Set(gVisManual; false);;
+    Set(gCodVisita; gCodScan);;
+    Clear(colVisGrupo);;
+    Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+    Set(varPopVisita; true)
+);;
+If(
+    gAccionScan = "VISITA_SALIDA";
+    Set(gRegSal; Patch(REGIST; {ID: gRegAbierto.ID}; { SALIDA: gAhoraScan; SALIDA_PLANILLA: gHoraPlanilla; ESTADO: {Value: "AFUERA"}; HORAS: Round(DateDiff(gRegAbierto.INGRESO; gAhoraScan; TimeUnit.Minutes) / 60; 2); REGISTRA_SALIDA: gCorreoUsuario }));;
+    RemoveIf(colAdentro; ID = gRegAbierto.ID);;
+    RemoveIf(colHoyGar; ID = gRegAbierto.ID);;
+    Collect(colHoyGar; gRegSal);;
+    If(
+        !IsBlank(gGafeteScan) And (IsBlank(gGafeteScan.VigenteHasta) Or gGafeteScan.VigenteHasta <= Today());
+        Patch(GAFETES_VISITA; {ID: gGafeteScan.ID}; { Estado: "Libre"; Nombre: ""; DPI: ""; Empresa: ""; VisitaA: ""; Motivo: ""; Placa: ""; VigenteHasta: Blank(); GrupoVisita: "" });;
+        ClearCollect(colGafetes; GAFETES_VISITA)
+    );;
+    Set(
+        gUltimoScan;
+        {
+            Nombre:  gRegAbierto.NOMBRE;
+            Tipo:    "SALIDA";
+            Hora:    Now();
+            Hex:     "#2563EB";
+            Mensaje: "Visitante · gafete " & gCodScan & If(!IsBlank(gGafeteScan.VigenteHasta) And gGafeteScan.VigenteHasta > Today(); " · sigue asignado hasta " & Text(gGafeteScan.VigenteHasta; "dd/mm"); " · gafete LIBRE")
+        }
+    )
+);;
+If(gAccionScan = "BLOQUEO"; Set(varPopExcepcion; true));;
+If(gAccionScan = "AVISO"; Set(gUltimoScan; { Nombre: If(IsBlank(gPersonaScan.Nombre); gCodScan; gPersonaScan.Nombre); Tipo: "AVISO"; Hora: Now(); Hex: "#E8A93C"; Mensaje: gMsgScan }));;
+If(gAccionScan = "ERROR"; Set(gUltimoScan; { Nombre: gCodScan; Tipo: "ERROR"; Hora: Now(); Hex: "#DC2626"; Mensaje: gMsgScan }));;
+Set(gBusyScan; varPopVisita Or varPopExcepcion);;
+If(Not(gBusyScan); SetFocus(txtScan); varPopVisita; SetFocus(txtVisNombre))
+
+─────────────────────────────────────────────────────────────────
+ Popup conPopExcepcion  ·  REGISTROS (raíz)
+─────────────────────────────────────────────────────────────────
+ lblExcTit (Label)
+   Text: "⛔ Ingreso no permitido — " & gPersonaScan.Nombre
+ lblExcSinPermiso (Label)
+   Text: "Garita no puede dejar pasar. Solicita la autorización al encargado del área."
+ txtExcNota (Classic/TextInput) · AGREGAR en conExcCard, debajo de lblExcMsg
+   HintText: "Nota para el encargado (opcional): qué dice la persona"
+   Height: 60 · Mode: TextMode.MultiLine
+ btnSolicitarAut (Classic/Button) · AGREGAR en conExcCard, antes de btnPermitirExc
+   Text:  If(gAutHoy.Estado = "Pendiente"; "📨 Ya se solicitó · esperando"; "📨 Solicitar autorización al encargado")
+   Fill:  colGreen · Color: ColorValue(hexInk) · Height: 44
+   DisplayMode: If(gAutHoy.Estado = "Pendiente"; DisplayMode.Disabled; DisplayMode.Edit)
+   OnSelect:
+Set(
+    gAutNueva;
+    IfError(
+        Patch(
+            AUTORIZACIONES_INGRESO;
+            Defaults(AUTORIZACIONES_INGRESO);
+            {
+                Title:           gCodScan;
+                Codigo:          gCodScan;
+                Nombre:          gPersonaScan.Nombre;
+                Departamento:    gPersonaScan.DEPARTAMENTO;
+                SubArea:         gPersonaScan.SUBAREA;
+                Fecha:           Today();
+                Motivo:          gMotivoBloq;
+                NotaGarita:      Trim(txtExcNota.Text);
+                Estado:          "Pendiente";
+                CorreoEncargado: gCorreoAlertaScan;
+                SolicitadoPor:   gCorreoUsuario
+            }
+        );
+        Blank()
+    )
+);;
+If(
+    IsBlank(gAutNueva.ID);
+    Notify("❌ No se pudo guardar la solicitud. Intenta de nuevo."; NotificationType.Error);
+    Collect(colAutHoy; gAutNueva);;
+    If(
+        gCorreoAlertaScan = "";
+        Notify("⚠️ Solicitud guardada, pero el área no tiene encargado (CorreoSupervisor o CONFIG_AREAS_HORAS_EXTRAS)."; NotificationType.Warning);
+        IfError(
+            SolicitarAutorizacionIngreso.Run(
+                Text(gAutNueva.ID);
+                gCorreoAlertaScan;
+                gPersonaScan.Nombre & " (" & gCodScan & ")";
+                gPersonaScan.DEPARTAMENTO & If(IsBlank(gPersonaScan.SUBAREA); ""; " / " & gPersonaScan.SUBAREA);
+                gMotivoBloq & If(IsBlank(Trim(txtExcNota.Text)); ""; " · Nota de garita: " & Trim(txtExcNota.Text))
+            );
+            Notify("⚠️ La solicitud quedó guardada, pero no se pudo enviar la aprobación."; NotificationType.Warning)
+        )
+    );;
+    Set(
+        gRegNuevo;
+        Patch(
+            REGIST;
+            Defaults(REGIST);
+            {
+                Title:            gCodScan & " - " & Text(Today(); "yyyymmdd");
+                FECHA:            Today();
+                CODIGO:           gCodScan;
+                NOMBRE:           gPersonaScan.Nombre;
+                TIPO:             "Empleado";
+                AREA:             {Value: If(IsBlank(gPersonaScan.SEDE); gSedeGarita; gPersonaScan.SEDE)};
+                DEPARTAMENTO:     gPersonaScan.DEPARTAMENTO;
+                CATEGORIA:        {Value: gPersonaScan.Categoria.Value};
+                INGRESO:          Now();
+                ESTADO:           {Value: "DENEGADO"};
+                DIA_LABORADO:     false;
+                OBSERVACION:      gMotivoBloq & " · Autorización solicitada a " & gCorreoAlertaScan;
+                REGISTRA_INGRESO: gCorreoUsuario
+            }
+        )
+    );;
+    Collect(colHoyGar; gRegNuevo);;
+    Set(gUltimoScan; { Nombre: gPersonaScan.Nombre; Tipo: "DENEGADO"; Hora: Now(); Hex: "#DC2626"; Mensaje: "📨 Autorización solicitada al encargado. Cuando apruebe, vuelva a escanear." });;
+    Set(varPopExcepcion; false);;
+    Set(gBusyScan; false);;
+    Reset(txtExcNota);;
+    SetFocus(txtScan)
+)
+
+ btnNoPermitirExc (Classic/Button) · conExcCard
+   Text: "Cerrar · no ingresa"
+   (OnSelect: está correcto)
+ btnPermitirExc, txtExcJustif, txtExcAutoriza: están correctos (solo los ve
+   quien tiene garita_excepcion, es decir, el administrador).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. REGISTROS · VISITANTES CON GAFETES QR FIJOS
+═══════════════════════════════════════════════════════════════════════════════
+ Cómo funciona:
+  • Cada gafete impreso (VIS001…) existe en GAFETES_VISITA.
+  • Llega una persona: garita escanea el gafete (o toca 🪪) → se abre el
+    popup con ese gafete. Escribe nombre y DPI, los datos generales (empresa,
+    a quién visita, motivo, placa, "vigente hasta") y Guardar.
+  • Llega un grupo de la misma empresa: en el popup, por cada persona elige
+    gafete + nombre + DPI y toca ➕. Los datos generales se escriben una sola
+    vez y se guardan para todos.
+  • Un gafete que está adentro o asignado vigente NO aparece en la lista.
+  • Salida: escanear el gafete o tocar "Salida" en la lista.
+  • Si "vigente hasta" es un día futuro, el gafete sigue asignado y al día
+    siguiente basta escanearlo para que entre con sus datos. El último día,
+    al salir, el gafete queda LIBRE. Los registros en REGIST se conservan.
+
+─────────────────────────────────────────────────────────────────
+ btnNuevoVisitante  (Classic/Button)  ·  conGarIzq > Container9
+─────────────────────────────────────────────────────────────────
+ Text: If(App.Width < bpTablet; "🪪"; "🪪 Visitante(s)")
+ OnSelect:
+Set(gVisManual; true);;
+Set(gCodVisita; "");;
+Clear(colVisGrupo);;
+Set(gBusyScan; true);;
+Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+Set(varPopVisita; true)
+
+─────────────────────────────────────────────────────────────────
+ conVisCard  (GroupContainer)  ·  conPopVisita
+─────────────────────────────────────────────────────────────────
+ Height:  Min(720; Parent.Height - 20)
+ Width:   Min(560; Parent.Width - 20)
+ X:       (Parent.Width - Self.Width) / 2
+ Y:       (Parent.Height - Self.Height) / 2
+ LayoutOverflowY: LayoutOverflow.Scroll
+ Orden de hijos (arrastra en la vista de árbol):
+   lblVisTit → conVisPersona (nuevo) → galVisGrupo (nuevo) → lblVisGenerales
+   (nuevo) → txtVisEmpresa → txtVisA → drpVisMotivo → txtVisMotivo →
+   txtVisPlaca → dpVisHasta (nuevo) → conVisBtns
+
+ lblVisTit (Label)
+   Text: "🪪 Registrar visitante(s)" & If(CountRows(colVisGrupo) > 0; " · " & CountRows(colVisGrupo) & " en la lista"; "")
+
+ conVisPersona (GroupContainer AutoLayout horizontal) · AGREGAR debajo de lblVisTit
+   Height: 44 · FillPortions: 0 · LayoutGap: 6 · LayoutAlignItems: LayoutAlignItems.Center
+   Hijos:
+   • drpVisGafete (ModernCombobox) · Width: 130 · SelectMultiple: false
+       InputTextPlaceholder: "Gafete"
+       Items:
+Sort(
+    Filter(
+        colGafetes;
+        (Estado <> "Asignado" Or IsBlank(VigenteHasta) Or VigenteHasta < Today() Or Upper(Trim(Title)) = gCodVisita) And
+        Not(Upper(Trim(Title)) in ForAll(colAdentro; Upper(Trim(CODIGO)))) And
+        Not(Upper(Trim(Title)) in colVisGrupo.Codigo)
+    );
+    Title;
+    SortOrder.Ascending
+)
+       ItemDisplayText: ThisItem.Title
+       DefaultSelectedItems: Filter(colGafetes; Upper(Trim(Title)) = gCodVisita)
+   • txtVisNombre (Classic/TextInput) · MOVER aquí · FillPortions: 1
+       HintText: "Nombre completo *"
+   • txtVisDPI (Classic/TextInput) · AGREGAR · Width: 140 · MaxLength: 13
+       HintText: "DPI"
+   • btnVisAgregar (Classic/Button) · AGREGAR · Width: 44 · Text: "➕"
+       Fill: colGreen · Color: ColorValue(hexInk)
+       OnSelect:
+If(
+    IsBlank(drpVisGafete.Selected.Title);
+    Notify("Elige el gafete."; NotificationType.Error);
+    Len(Trim(txtVisNombre.Text)) < 3;
+    Notify("Escribe el nombre."; NotificationType.Error);
+    Collect(colVisGrupo; { Codigo: Upper(Trim(drpVisGafete.Selected.Title)); Nombre: Upper(Trim(txtVisNombre.Text)); DPI: Trim(txtVisDPI.Text) });;
+    Set(gCodVisita; "");;
+    Reset(drpVisGafete);;
+    Reset(txtVisNombre);;
+    Reset(txtVisDPI);;
+    SetFocus(txtVisNombre)
+)
+
+ galVisGrupo (Gallery vertical) · AGREGAR debajo de conVisPersona
+   Items: colVisGrupo · Height: If(IsEmpty(colVisGrupo); 0; Min(140; 36 * CountRows(colVisGrupo))) · TemplateSize: 34
+   Hijos de la plantilla:
+   • lblVisGrupoFila (Label) · Width: Parent.TemplateWidth - 40 · Size: 10
+       Text: ThisItem.Codigo & " · " & ThisItem.Nombre & If(IsBlank(ThisItem.DPI); ""; " · DPI " & ThisItem.DPI)
+   • icoVisQuitar (ModernIcon) · X: Parent.TemplateWidth - 36 · Icon: "Delete"
+       IconColor: ColorValue(hexDanger)
+       OnSelect: RemoveIf(colVisGrupo; Codigo = ThisItem.Codigo)
+
+ lblVisGenerales (Label) · AGREGAR debajo de galVisGrupo
+   Text: "Datos generales (se aplican a todos los de la lista)"
+   Size: 10 · Color: ColorValue(hexMuted) · Height: 22
+
+ dpVisHasta (ModernDatePicker) · AGREGAR antes de conVisBtns
+   DefaultDate: Today() · Format: "dd/mm/yyyy"
+   Placeholder: "Gafete vigente hasta"
+
+ txtVisEmpresa, txtVisA, drpVisMotivo, txtVisMotivo, txtVisPlaca: están
+ correctos (solo cambian de orden).
+
+─────────────────────────────────────────────────────────────────
+ btnGuardarVisita  (Classic/Button)  ·  conVisCard > conVisBtns
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+If(
+    IsEmpty(colVisGrupo) And !IsBlank(drpVisGafete.Selected.Title) And Len(Trim(txtVisNombre.Text)) >= 3;
+    Collect(colVisGrupo; { Codigo: Upper(Trim(drpVisGafete.Selected.Title)); Nombre: Upper(Trim(txtVisNombre.Text)); DPI: Trim(txtVisDPI.Text) })
+);;
+If(
+    IsEmpty(colVisGrupo);
+    Notify("⚠️ Elige el gafete y escribe el nombre del visitante."; NotificationType.Error);
+    IsBlank(drpVisMotivo.Selected.Value);
+    Notify("⚠️ Selecciona el motivo de la visita."; NotificationType.Error);
+    CountRows(Filter(colVisGrupo; Codigo in ForAll(colAdentro; Upper(Trim(CODIGO))))) > 0;
+    Notify("⚠️ Un gafete de la lista ya está en uso adentro. Quítalo de la lista."; NotificationType.Error);
+    Set(gVisGrupoId; If(CountRows(colVisGrupo) > 1; "G" & Text(Now(); "yymmddhhmmss"); ""));;
+    Set(gVisHasta; Coalesce(dpVisHasta.SelectedDate; Today()));;
+    Set(gAhoraVis; Now());;
+    Set(gVisMotivoTxt; drpVisMotivo.Selected.Value & If(IsBlank(Trim(txtVisMotivo.Text)); ""; " · " & Trim(txtVisMotivo.Text)));;
+    Set(gErrVis; "");;
+    IfError(
+        Patch(
+            GAFETES_VISITA;
+            ForAll(colVisGrupo As _v; { ID: LookUp(colGafetes; Upper(Trim(Title)) = _v.Codigo).ID });
+            ForAll(
+                colVisGrupo As _v;
+                {
+                    Estado:          "Asignado";
+                    Nombre:          _v.Nombre;
+                    DPI:             _v.DPI;
+                    Empresa:         Trim(txtVisEmpresa.Text);
+                    VisitaA:         Trim(txtVisA.Text);
+                    Motivo:          gVisMotivoTxt;
+                    Placa:           Upper(Trim(txtVisPlaca.Text));
+                    VigenteHasta:    gVisHasta;
+                    GrupoVisita:     gVisGrupoId;
+                    AsignadoPor:     gCorreoUsuario;
+                    FechaAsignacion: gAhoraVis
+                }
+            )
+        );
+        Set(gErrVis; FirstError.Message)
+    );;
+    If(
+        gErrVis = "";
+        IfError(
+            Collect(
+                REGIST;
+                ForAll(
+                    colVisGrupo As _v;
+                    {
+                        Title:            _v.Codigo & " - " & Text(Today(); "yyyymmdd");
+                        FECHA:            Today();
+                        CODIGO:           _v.Codigo;
+                        NOMBRE:           _v.Nombre;
+                        TIPO:             "Visitante";
+                        AREA:             {Value: gSedeGarita};
+                        DEPARTAMENTO:     "VISITANTE";
+                        CATEGORIA:        {Value: "V"};
+                        INGRESO:          gAhoraVis;
+                        ESTADO:           {Value: "ADENTRO"};
+                        DIA_LABORADO:     false;
+                        VISITA_EMPRESA:   Trim(txtVisEmpresa.Text);
+                        VISITA_A:         Trim(txtVisA.Text);
+                        VISITA_MOTIVO:    gVisMotivoTxt;
+                        VISITA_PLACA:     Upper(Trim(txtVisPlaca.Text));
+                        VISITA_DPI:       _v.DPI;
+                        VISITA_GRUPO:     gVisGrupoId;
+                        REGISTRA_INGRESO: gCorreoUsuario
+                    }
+                )
+            );
+            Set(gErrVis; FirstError.Message)
+        )
+    );;
+    If(
+        gErrVis <> "";
+        Notify("❌ No se pudo registrar: " & gErrVis; NotificationType.Error);
+        Concurrent(
+            ClearCollect(colGafetes; GAFETES_VISITA);
+            ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));
+            ClearCollect(colHoyGar; Filter(REGIST; FECHA = Today()))
+        );;
+        Set(
+            gUltimoScan;
+            {
+                Nombre:  If(CountRows(colVisGrupo) > 1; CountRows(colVisGrupo) & " visitantes"; First(colVisGrupo).Nombre);
+                Tipo:    "INGRESO";
+                Hora:    Now();
+                Hex:     "#2563EB";
+                Mensaje: "Gafete(s) " & Concat(colVisGrupo; Codigo; ", ") & " · " & drpVisMotivo.Selected.Value & " · hasta " & Text(gVisHasta; "dd/mm")
+            }
+        );;
+        Clear(colVisGrupo);;
+        Set(varPopVisita; false);;
+        Set(gBusyScan; false);;
+        Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+        SetFocus(txtScan)
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ btnCancelarVisita  (Classic/Button)  ·  conVisCard > conVisBtns
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Clear(colVisGrupo);;
+Set(varPopVisita; false);;
+Set(gBusyScan; false);;
+Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+SetFocus(txtScan)
+
+─────────────────────────────────────────────────────────────────
+ btnSalidaVis  (Classic/Button)  ·  galAdentro > conFilaAd > conColSalida
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+With(
+    { _r: ThisItem; _g: LookUp(colGafetes; Upper(Trim(Title)) = Upper(Trim(ThisItem.CODIGO))) };
+    Set(
+        gRegSal;
+        Patch(
+            REGIST;
+            {ID: _r.ID};
+            { SALIDA: Now(); ESTADO: {Value: "AFUERA"}; HORAS: Round(DateDiff(_r.INGRESO; Now(); TimeUnit.Minutes) / 60; 2); REGISTRA_SALIDA: gCorreoUsuario }
+        )
+    );;
+    If(
+        !IsBlank(_g) And (IsBlank(_g.VigenteHasta) Or _g.VigenteHasta <= Today());
+        Patch(GAFETES_VISITA; {ID: _g.ID}; { Estado: "Libre"; Nombre: ""; DPI: ""; Empresa: ""; VisitaA: ""; Motivo: ""; Placa: ""; VigenteHasta: Blank(); GrupoVisita: "" });;
+        ClearCollect(colGafetes; GAFETES_VISITA)
+    );;
+    RemoveIf(colAdentro; ID = _r.ID);;
+    RemoveIf(colHoyGar; ID = _r.ID);;
+    Collect(colHoyGar; gRegSal);;
+    Set(gUltimoScan; { Nombre: _r.NOMBRE; Tipo: "SALIDA"; Hora: Now(); Hex: "#2563EB"; Mensaje: "Visitante · gafete " & _r.CODIGO & If(!IsBlank(_g.VigenteHasta) And _g.VigenteHasta > Today(); " · sigue asignado hasta " & Text(_g.VigenteHasta; "dd/mm"); " · gafete LIBRE") })
+);;
+SetFocus(txtScan)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. PERSONAL · LISTA DE PERSONAL: ÁREA, ACTIVO / INACTIVO E HISTORIAL
+═══════════════════════════════════════════════════════════════════════════════
+ • Filtro por área (NURSERY / CROP / SITE) y por estado (Activos /
+   Inactivos / Todos). Los inactivos NO desaparecen: se ven en gris y se
+   pueden reactivar.
+ • Botón ✔ Activo / ⛔ Inactivo en cada tarjeta (solo personal_editar):
+   pide fecha y motivo, actualiza el catálogo (FECHA_BAJA o FECHA_REINGRESO)
+   y guarda cada cambio en HISTORIAL_ESTADO_PERSONAL.
+ • Cada encargado ve solo las áreas de su AREAS_VISIBLES.
+
+─────────────────────────────────────────────────────────────────
+ Personal  (Pantalla)
+─────────────────────────────────────────────────────────────────
+ OnVisible (REEMPLAZAR):
+Set(gloVista; "home");;
+Set(gloVistaPedida; "home");;
+Set(gloPaso; 1);;
+Set(varNavAbierto; App.Width >= bpTablet);;
+Set(varHEFormCel; false);;
+Set(varPermListaCel; false);;
+Set(gTermRegistro; LookUp(TERMINOS_ACEPTACION; Title = gCorreoUsuario And VersionTerminos = TerminosVersion));;
+Set(varPopTerminos; IsBlank(gTermRegistro));;
+ClearCollect(colActividades; ListaActividades);;
+ClearCollect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = 1));;
+ForAll(Sequence(7; 2) As _nv; Collect(colRendCat; Filter(RENDIMIENTOS_CATALOGO; Nivel = _nv.Value)))
+
+─────────────────────────────────────────────────────────────────
+ Filtros  ·  conPersonal > Container97  (AGREGAR después de Label127)
+─────────────────────────────────────────────────────────────────
+ drpPersArea (ModernCombobox)
+   Items: ["TODAS"; "NURSERY"; "CROP"; "SITE"]
+   DefaultSelectedItems: ["TODAS"]
+   SelectMultiple: false · Width: If(App.Width < bpTablet; 110; 150)
+ drpPersEstado (ModernCombobox)
+   Items: ["Todos"; "Activos"; "Inactivos"]
+   DefaultSelectedItems: ["Todos"]
+   SelectMultiple: false · Width: If(App.Width < bpTablet; 100; 130)
+
+─────────────────────────────────────────────────────────────────
+ galPersonas  (Gallery)  ·  conPersonal > Container78_1
+─────────────────────────────────────────────────────────────────
+ Items:
+Sort(
+    Filter(
+        CATALOGO_PERSONAL1;
+        Switch(Coalesce(drpPersEstado.Selected.Value; "Todos"); "Activos"; Activo = "SI"; "Inactivos"; Activo <> "SI"; true);
+        IsBlank(drpPersArea.Selected.Value) Or drpPersArea.Selected.Value = "TODAS" Or AREA_GENERAL = drpPersArea.Selected.Value;
+        IsBlank(Trim(txtBuscarPersona.Text)) Or Trim(txtBuscarPersona.Text) in Nombre Or Trim(txtBuscarPersona.Text) in CODIGO;
+        fxVeArea(AREA_GENERAL; DEPARTAMENTO; SUBAREA)
+    );
+    Nombre;
+    SortOrder.Ascending
+)
+ WrapCount:
+If(App.Width >= bpDesktop; 4; App.Width >= bpTablet; 3; 2)
+
+ celCal_1 (GroupContainer) · galPersonas
+   Fill: If(ThisItem.Activo = "SI"; RGBA(255; 255; 255; 1); ColorValue("#ECEFEA"))
+ lblNombrePer (Label) · galPersonas > celCal_1
+   Color: If(ThisItem.Activo = "SI"; ColorValue(hexInk); ColorValue(hexFaint))
+ Label119 (Label) · galPersonas > celCal_1
+   Text:
+ThisItem.DEPARTAMENTO & If(IsBlank(ThisItem.SUBAREA); ""; " · " & ThisItem.SUBAREA) &
+If(ThisItem.Activo = "SI"; ""; " · INACTIVO" & If(IsBlank(ThisItem.FECHA_BAJA); ""; " desde " & Text(ThisItem.FECHA_BAJA; "dd/mm/yyyy")))
+
+ btnEstadoPer (Classic/Button) · AGREGAR en galPersonas, ENCIMA de btnPersona
+   X: 6 · Y: 6 · Width: 92 · Height: 26 · Size: 9 · BorderThickness: 0
+   Text:  If(ThisItem.Activo = "SI"; "✔ Activo"; "⛔ Inactivo")
+   Fill:  If(ThisItem.Activo = "SI"; ColorValue(hexLeafSoft); ColorValue(hexDangerSoft))
+   Color: If(ThisItem.Activo = "SI"; ColorValue(hexLeafDark); ColorValue(hexDanger))
+   Visible: fxPuede("personal_editar")
+   OnSelect:
+Set(gPerEstadoSel; ThisItem);;
+Reset(dpEstadoFecha);;
+Reset(txtEstadoMotivo);;
+Set(varPopEstadoPer; true)
+
+─────────────────────────────────────────────────────────────────
+ conPopEstadoPer  (GroupContainer ManualLayout)  ·  AGREGAR en Personal
+                  (raíz), arriba en la vista de árbol
+─────────────────────────────────────────────────────────────────
+ Visible: varPopEstadoPer · X: 0 · Y: 0 · Width: Parent.Width · Height: Parent.Height
+ Fill: RGBA(16; 30; 44; 0,55)
+ Hijos:
+   btnEstadoScrim (Classic/Button) · X 0 · Y 0 · Width Parent.Width · Height Parent.Height
+     Text "" · Fill/HoverFill/PressedFill RGBA(0; 0; 0; 0) · BorderThickness 0
+     OnSelect: Set(varPopEstadoPer; false)
+   conEstadoCard (GroupContainer AutoLayout vertical) — encima del scrim
+     Width: Min(420; Parent.Width - 24) · Height: 330
+     X: (Parent.Width - Self.Width) / 2 · Y: (Parent.Height - Self.Height) / 2
+     Fill: RGBA(255; 255; 255; 1) · LayoutGap: 8 · Padding (4): 16
+     LayoutAlignItems: LayoutAlignItems.Stretch
+     Hijos:
+     • lblEstadoTit (Label) · FontWeight Bold · Size 14 · Height 50
+         Text: If(gPerEstadoSel.Activo = "SI"; "⛔ Dar de BAJA a "; "✔ REACTIVAR a ") & gPerEstadoSel.Nombre & " (" & gPerEstadoSel.CODIGO & ")"
+     • dpEstadoFecha (ModernDatePicker) · DefaultDate: Today() · Format: "dd/mm/yyyy"
+     • txtEstadoMotivo (Classic/TextInput) · Mode: TextMode.MultiLine · Height: 80
+         HintText: If(gPerEstadoSel.Activo = "SI"; "Motivo de la baja (renuncia, fin de contrato…)"; "Motivo del reingreso")
+     • conEstadoBtns (GroupContainer horizontal) · Height 44 · FillPortions 0 · LayoutGap 8
+         - btnEstadoCancelar (Classic/Button) · Width 120 · Text "Cancelar"
+             OnSelect: Set(varPopEstadoPer; false)
+         - btnEstadoConfirmar (Classic/Button) · FillPortions 1 · Fill colGreen · Color ColorValue(hexInk)
+             Text: If(gPerEstadoSel.Activo = "SI"; "Confirmar baja"; "Confirmar reingreso")
+             OnSelect:
+With(
+    { _baja: gPerEstadoSel.Activo = "SI"; _f: Coalesce(dpEstadoFecha.SelectedDate; Today()) };
+    If(
+        Len(Trim(txtEstadoMotivo.Text)) < 3;
+        Notify("⚠️ Escribe el motivo."; NotificationType.Error);
+        Set(
+            gPerEstadoOk;
+            IfError(
+                Patch(
+                    CATALOGO_PERSONAL1;
+                    {ID: gPerEstadoSel.ID};
+                    {
+                        Activo:          If(_baja; "NO"; "SI");
+                        FECHA_BAJA:      If(_baja; _f; gPerEstadoSel.FECHA_BAJA);
+                        FECHA_REINGRESO: If(_baja; gPerEstadoSel.FECHA_REINGRESO; _f)
+                    }
+                );
+                Blank()
+            )
+        );;
+        If(
+            IsBlank(gPerEstadoOk.ID);
+            Notify("❌ No se pudo actualizar el estado. Revisa la conexión."; NotificationType.Error);
+            IfError(
+                Patch(
+                    HISTORIAL_ESTADO_PERSONAL;
+                    Defaults(HISTORIAL_ESTADO_PERSONAL);
+                    {
+                        Title:         gPerEstadoSel.CODIGO;
+                        Nombre:        gPerEstadoSel.Nombre;
+                        Departamento:  gPerEstadoSel.DEPARTAMENTO;
+                        Accion:        If(_baja; "Baja"; "Reingreso");
+                        Fecha:         _f;
+                        Motivo:        Trim(txtEstadoMotivo.Text);
+                        RegistradoPor: User().FullName;
+                        FechaRegistro: Now()
+                    }
+                );
+                Notify("⚠️ El estado cambió, pero no se guardó el historial."; NotificationType.Warning)
+            );;
+            Notify(If(_baja; "⛔ " & gPerEstadoSel.Nombre & " quedó INACTIVO desde " & Text(_f; "dd/mm/yyyy"); "✔ " & gPerEstadoSel.Nombre & " reactivado desde " & Text(_f; "dd/mm/yyyy")); NotificationType.Success);;
+            Set(varPopEstadoPer; false);;
+            Refresh(CATALOGO_PERSONAL1);;
+            ClearCollect(colPersonal; CATALOGO_PERSONAL1)
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. PERSONAL · HORAS EXTRAS
+═══════════════════════════════════════════════════════════════════════════════
+ • Quien tiene he_autorizar: lo que solicita queda Autorizado (como hoy).
+ • Quien solo tiene horasextras: queda Pendiente y le llega un correo al
+   encargado del área de cada persona (con copia al solicitante).
+ • Si con esta solicitud alguien llega o pasa de 6 h en la semana
+   (AlertaHESemanaDefault o el umbral de su área), llega una alerta al
+   encargado con copia al solicitante.
+ • Botón ⏱ en el análisis para registrar la hora real de inicio y fin; se
+   calculan las horas reales y el acumulado se ajusta a lo real.
+ • En celular: primero se eligen las personas y un botón abre el formulario
+   de horas extras en pantalla completa. Pestañas solo con íconos.
+
+─────────────────────────────────────────────────────────────────
+ Pestañas  ·  conVista_HorasExtras > cntpestañashoras
+─────────────────────────────────────────────────────────────────
+ btnTabGrupal_1        Text:  If(App.Width < bpTablet; "⌚"; "⌚ Solicitar Horas Extras")
+                       Width: If(App.Width < bpTablet; 48; 190)
+ btnTabAnaSetFecha_1   Text:  If(App.Width < bpTablet; "📋"; "📋 Análisis y Autorizaciones") & " (" & CountRows(Filter(colSolicitudesHE; Estado.Value = "Pendiente")) & ")"
+                       Width: If(App.Width < bpTablet; 70; 230)
+ btnTabAnaSetAcum_1    Text:  If(App.Width < bpTablet; "📊"; "📊 Acumulado (Autorizadas)")
+                       Width: If(App.Width < bpTablet; 48; 180)
+ btnTabGeneral1_1      Text:  If(App.Width < bpTablet; "⚙️"; "⚙️ Reglas y Áreas")
+                       Width: If(App.Width < bpTablet; 48; 130)
+ btnReporteSemanalHE   Text:  If(App.Width < bpTablet; "📧"; "📧 Reporte HE frecuentes")
+                       Width: If(App.Width < bpTablet; 48; 190)
+ btnTabIndividual_1    Text:  If(App.Width < bpTablet; "👤"; "👤 Historial por Persona")
+                       Width: If(App.Width < bpTablet; 48; 170)
+                       Visible: fxPuede("he_autorizar")
+ (Los demás Visible ya están bien: Análisis = he_autorizar, Acumulado y
+  Reporte = he_reporte, Reglas = jornada.)
+
+─────────────────────────────────────────────────────────────────
+ galPersonalInicio_1  (Gallery)  ·  Container29_1-cntPersonal
+─────────────────────────────────────────────────────────────────
+ Items:
+Sort(
+    Filter(
+        PersonalActivo;
+        txtBuscarPersonal_1.Text = "" Or StartsWith(Nombre; txtBuscarPersonal_1.Text) Or StartsWith(CODIGO; txtBuscarPersonal_1.Text);
+        drpFiltroAreaHE.Selected.Title = "TODAS LAS ÁREAS" Or IsBlank(drpFiltroAreaHE.Selected.Title) Or DEPARTAMENTO = drpFiltroAreaHE.Selected.Title;
+        !gVerSoloSeleccionados Or CODIGO in colSeleccionados.Codigo;
+        fxVeArea(AREA_GENERAL; DEPARTAMENTO; SUBAREA)
+    );
+    Nombre;
+    SortOrder.Ascending
+)
+
+─────────────────────────────────────────────────────────────────
+ Vista de celular (formulario en pantalla completa, sin copiar el contenedor)
+─────────────────────────────────────────────────────────────────
+ Container29_1-cntPersonal (GroupContainer) · conTab_Grupal_1 > Container1_7
+   Visible: App.Width >= bpTablet Or Not(varHEFormCel)
+ Container155-cntHorasExtras (GroupContainer) · conTab_Grupal_1 > Container1_7
+   Visible: CountRows(colSeleccionados) > 0 And (App.Width >= bpTablet Or varHEFormCel)
+   Width:   If(App.Width < bpTablet; Parent.Width; 400)
+ btnHEAbrirCel (Classic/Button) · AGREGAR en conTab_Grupal_1, ARRIBA de Container1_7
+   Text:  "⌚ Llenar horas extras (" & CountRows(colSeleccionados) & " persona(s)) ›"
+   Height: 44 · FillPortions: 0 · Fill: colGreen · Color: ColorValue(hexInk)
+   Visible: App.Width < bpTablet And CountRows(colSeleccionados) > 0 And Not(varHEFormCel)
+   OnSelect: Set(varHEFormCel; true)
+ btnHEVolverCel (Classic/Button) · AGREGAR como PRIMER hijo de conHeader155
+   Text: "‹" · Width: 40 · Visible: App.Width < bpTablet
+   OnSelect: Set(varHEFormCel; false)
+
+─────────────────────────────────────────────────────────────────
+ btnEnviarSolicitud155  (Classic/Button)  ·  Container155-cntHorasExtras > Container157
+─────────────────────────────────────────────────────────────────
+ Text:
+If(fxPuede("he_autorizar"); "✅ Guardar y autorizar"; "📩 Enviar solicitud")
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    IsBlank(gActividad);
+    Notify("⚠️ Selecciona primero una actividad."; NotificationType.Error);
+    With(
+        {
+            _fecha:     dpFechaReq155.SelectedDate;
+            _h:         Round((varHoraFinMin - varHoraIniMin) / 60; 2);
+            _semStr:    Year(dpFechaReq155.SelectedDate) & "-W" & Text(ISOWeekNum(dpFechaReq155.SelectedDate); "00");
+            _subActVal: If(gActividad in ActividadesConSub; Coalesce(drpSubActividad_1.Selected.Value; ""); "");
+            _ahora:     Now();
+            _usr:       User().FullName;
+            _aut:       fxPuede("he_autorizar")
+        };
+        ClearCollect(
+            colHEEnvio;
+            ForAll(
+                colSeleccionados As s;
+                With(
+                    {
+                        _d:  LookUp(colDispHE; Codigo = s.Codigo);
+                        _pc: LookUp(colPersonal; CODIGO = s.Codigo)
+                    };
+                    {
+                        Nombre: s.Nombre;
+                        Codigo: s.Codigo;
+                        Area:   s.Departamento;
+                        Rol:    s.Categoria.Value;
+                        Semana: Round(Coalesce(_d.Semana; 0) + _h; 2);
+                        Umbral: Coalesce(_d.Umbral; AlertaHESemanaDefault);
+                        Correo: Coalesce(
+                                    _pc.CorreoSupervisor;
+                                    LookUp(colConfigAreasHE; Title = _pc.SUBAREA).CorreoResponsable;
+                                    LookUp(colConfigAreasHE; Title = s.Departamento).CorreoResponsable;
+                                    LookUp(colConfigAreasHE; Title = _pc.AREA_GENERAL).CorreoResponsable;
+                                    ""
+                                )
+                    }
+                )
+            )
+        );;
+        Set(gHEErr; false);;
+        IfError(
+                Collect(
+                    SOLICITUDES_HORAS_EXTRAS;
+                    ForAll(
+                        colHEEnvio As _p;
+                        {
+                            Title:                 _p.Codigo & " - " & Text(_fecha; "dd/mm/yyyy");
+                            FechaRequerida:        _fecha;
+                            Codigo:                _p.Codigo;
+                            NombrePersona:         _p.Nombre;
+                            Area:                  _p.Area;
+                            Rol:                   _p.Rol;
+                            Actividad:             gActividad;
+                            SubActividad:          _subActVal;
+                            HoraInicio:            txtHoraInicio155.Text;
+                            HoraFin:               txtHoraFin155.Text;
+                            HorasSolicitadas:      _h;
+                            Justificacion:         Trim(txtJustificacion155.Text);
+                            SolicitadoPor:         _usr;
+                            FechaHoraSolicitud:    _ahora;
+                            Estado:                { Value: If(_aut; "Autorizado"; "Pendiente") };
+                            AutorizadoPor:         If(_aut; _usr; "");
+                            FechaHoraAutorizacion: If(_aut; _ahora; Blank());
+                            SemanaAnio:            _semStr
+                        }
+                    )
+                );
+                Set(gHEErr; true)
+        );;
+        If(
+            gHEErr;
+            Notify("❌ No se pudieron guardar las solicitudes. Revisa la conexión e intenta de nuevo."; NotificationType.Error);
+
+            If(
+                _aut;
+                ForAll(
+                    colHEEnvio As _p;
+                    With(
+                        { _acum: LookUp(BD_HORAS_EXTRAS_ACUMULADAS; Codigo = _p.Codigo) };
+                        Patch(
+                            BD_HORAS_EXTRAS_ACUMULADAS;
+                            Coalesce(_acum; Defaults(BD_HORAS_EXTRAS_ACUMULADAS));
+                            {
+                                Title:                   _p.Codigo;
+                                Codigo:                  _p.Codigo;
+                                NombrePersona:           _p.Nombre;
+                                Area:                    _p.Area;
+                                Rol:                     _p.Rol;
+                                TotalHorasAutorizadas:   Coalesce(_acum.TotalHorasAutorizadas; 0) + _h;
+                                TotalSesiones:           Coalesce(_acum.TotalSesiones; 0) + 1;
+                                UltimaFechaAutorizacion: _ahora;
+                                UltimoAutorizador:       _usr
+                            }
+                        )
+                    )
+                )
+            );;
+            If(
+                Not(_aut);
+                ForAll(
+                    Distinct(Filter(colHEEnvio; Correo <> ""); Correo) As c;
+                    IfError(
+                        Office365Outlook.SendEmailV2(
+                            c.Value;
+                            "📩 Horas extras pendientes de autorizar · " & Text(_fecha; "dd/mm/yyyy");
+                            "<div style='font-family:Segoe UI;font-size:13px'><p><b>" & EncodeHTML(_usr) & "</b> solicitó horas extras que necesitan tu autorización:</p>" &
+                            "<p>Fecha: <b>" & Text(_fecha; "dd/mm/yyyy") & "</b> · Horario: " & txtHoraInicio155.Text & " – " & txtHoraFin155.Text & " (" & _h & " h)<br>" &
+                            "Actividad: " & EncodeHTML(gActividad) & If(_subActVal = ""; ""; " · " & EncodeHTML(_subActVal)) & "<br>" &
+                            "Justificación: <i>" & EncodeHTML(Trim(txtJustificacion155.Text)) & "</i></p>" &
+                            "<table style='border-collapse:collapse;font-size:12px'><tr style='background:#0E2018;color:#fff'><th style='padding:6px'>Código</th><th style='padding:6px'>Nombre</th><th style='padding:6px'>Área</th><th style='padding:6px'>HE semana (con esta)</th></tr>" &
+                            Concat(
+                                Filter(colHEEnvio; Correo = c.Value);
+                                "<tr><td style='border:1px solid #ddd;padding:5px'>" & Codigo & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Nombre) & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Area) & "</td><td style='border:1px solid #ddd;padding:5px;text-align:right'>" & Semana & " h</td></tr>"
+                            ) &
+                            "</table><p>Autorízalas en la app: Personal → Horas Extras → Análisis y Autorizaciones.</p></div>";
+                            { Cc: User().Email; Importance: "Normal" }
+                        );
+                        Notify("⚠️ No se pudo avisar a " & c.Value; NotificationType.Warning)
+                    )
+                )
+            );;
+            ForAll(
+                Distinct(Filter(colHEEnvio; Semana >= Umbral And Correo <> ""); Correo) As c;
+                IfError(
+                    Office365Outlook.SendEmailV2(
+                        c.Value;
+                        "⚠️ Horas extras: personal en el límite semanal · " & Text(_fecha; "dd/mm/yyyy");
+                        "<div style='font-family:Segoe UI;font-size:13px'><p>Con esta solicitud, estas personas llegan o pasan el límite semanal de horas extras:</p>" &
+                        "<table style='border-collapse:collapse;font-size:12px'><tr style='background:#0E2018;color:#fff'><th style='padding:6px'>Código</th><th style='padding:6px'>Nombre</th><th style='padding:6px'>Área</th><th style='padding:6px'>HE semana</th><th style='padding:6px'>Límite</th></tr>" &
+                        Concat(
+                            Filter(colHEEnvio; Correo = c.Value And Semana >= Umbral);
+                            "<tr><td style='border:1px solid #ddd;padding:5px'>" & Codigo & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Nombre) & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Area) & "</td><td style='border:1px solid #ddd;padding:5px;text-align:right'><b>" & Semana & " h</b></td><td style='border:1px solid #ddd;padding:5px;text-align:right'>" & Umbral & " h</td></tr>"
+                        ) &
+                        "</table><p>Actividad: " & EncodeHTML(gActividad) & " · Solicitó: " & EncodeHTML(_usr) & " · Estado: " & If(_aut; "Autorizado"; "Pendiente") & "</p>" &
+                        "<p style='color:#6B7A6F'>Aviso automático: no bloquea la solicitud.</p></div>";
+                        { Cc: User().Email; Importance: "High" }
+                    );
+                    Notify("⚠️ No se pudo enviar la alerta a " & c.Value; NotificationType.Warning)
+                )
+            );;
+            If(
+                CountRows(Filter(colHEEnvio; Correo = "")) > 0;
+                Notify("ℹ️ " & CountRows(Filter(colHEEnvio; Correo = "")) & " persona(s) sin encargado con correo en su área (CONFIG_AREAS_HORAS_EXTRAS). No se envió aviso para ellas."; NotificationType.Warning)
+            );;
+            ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));;
+            ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS);;
+            Notify(
+                If(
+                    _aut;
+                    "✅ " & CountRows(colHEEnvio) & " solicitudes guardadas y autorizadas por " & _usr & ".";
+                    "📩 " & CountRows(colHEEnvio) & " solicitudes enviadas. Quedan pendientes hasta que el encargado las autorice."
+                );
+                NotificationType.Success
+            );;
+            Clear(colSeleccionados);;
+            Reset(txtJustificacion155);;
+            Set(varHEFormCel; false);;
+            Select(btnCalcDispHE)
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ Análisis y Autorizaciones  ·  conVista_AnaSet_1-Este
+─────────────────────────────────────────────────────────────────
+ btnAutorizarLote / btnRechazarLote (Classic/Button) · conBarraChecklistHE
+   Visible: fxPuede("he_autorizar")
+ galAnalisisHE (Gallery) · congalAnalisisHE
+   Items:
+Sort(
+    Filter(
+        colSolicitudesHE;
+        IsBlank(varFiltroEstatusAna) Or varFiltroEstatusAna = "TODOS" Or Estado.Value = varFiltroEstatusAna;
+        IsBlank(dpFiltroFechaAna.SelectedDate) Or FechaRequerida = dpFiltroFechaAna.SelectedDate;
+        drpFiltroAreaAna.Selected.Title = "TODAS" Or IsBlank(drpFiltroAreaAna.Selected.Title) Or Area = drpFiltroAreaAna.Selected.Title;
+        txtBuscarAnaHE.Text = "" Or StartsWith(NombrePersona; txtBuscarAnaHE.Text) Or StartsWith(Codigo; txtBuscarAnaHE.Text) Or StartsWith(Actividad; txtBuscarAnaHE.Text) Or StartsWith(Rol; txtBuscarAnaHE.Text);
+        fxVeArea(LookUp(colPersonal; CODIGO = Codigo; AREA_GENERAL); Area; LookUp(colPersonal; CODIGO = Codigo; SUBAREA))
+    );
+    FechaHoraSolicitud;
+    SortOrder.Descending
+)
+ lblHorasPedidasAna (Label) · galAnalisisHE > Container33_7
+   Text:
+ThisItem.HorasSolicitadas & " h" & If(IsBlank(ThisItem.HorasReales); ""; " · real " & Text(ThisItem.HorasReales; "[$-es]0,0#") & " h")
+ btnHERealFila (Classic/Button) · AGREGAR al final de galAnalisisHE > Container33_7
+   Text: "⏱" · Width: 40 · Height: 30
+   Visible: fxPuede("horasextras") And ThisItem.Estado.Value = "Autorizado"
+   OnSelect:
+Set(gHESel; ThisItem);;
+Reset(txtHEIniReal);;
+Reset(txtHEFinReal);;
+Set(varPopHEReal; true)
+
+─────────────────────────────────────────────────────────────────
+ conPopHEReal  (GroupContainer ManualLayout)  ·  AGREGAR en Personal (raíz),
+               arriba en la vista de árbol
+─────────────────────────────────────────────────────────────────
+ Visible: varPopHEReal · X 0 · Y 0 · Width Parent.Width · Height Parent.Height
+ Fill: RGBA(16; 30; 44; 0,55)
+ Hijos:
+   btnHERealScrim (Classic/Button) · transparente, tamaño de pantalla
+     OnSelect: Set(varPopHEReal; false)
+   conHERealCard (GroupContainer AutoLayout vertical) — encima del scrim
+     Width: Min(400; Parent.Width - 24) · Height: 330
+     X: (Parent.Width - Self.Width) / 2 · Y: (Parent.Height - Self.Height) / 2
+     Fill: RGBA(255; 255; 255; 1) · LayoutGap 8 · Padding (4) 16 · LayoutAlignItems Stretch
+     • lblHERealTit (Label) · FontWeight Bold · Height 44
+         Text: "⏱ Horas reales · " & gHESel.NombrePersona & " · " & Text(gHESel.FechaRequerida; "dd/mm/yyyy")
+     • lblHERealProg (Label) · Size 10 · Color ColorValue(hexMuted)
+         Text: "Programado: " & gHESel.HoraInicio & " – " & gHESel.HoraFin & " (" & gHESel.HorasSolicitadas & " h)"
+     • conHERealHoras (GroupContainer horizontal) · Height 44 · FillPortions 0 · LayoutGap 8
+         - txtHEIniReal (Classic/TextInput) · FillPortions 1 · HintText "Inicio real hh:mm"
+             Default: Coalesce(gHESel.HoraInicioReal; gHESel.HoraInicio)
+         - txtHEFinReal (Classic/TextInput) · FillPortions 1 · HintText "Fin real hh:mm"
+             Default: Coalesce(gHESel.HoraFinReal; gHESel.HoraFin)
+     • lblHERealCalc (Label) · FontWeight Bold · Size 14
+         Text:
+If(
+    IsMatch(txtHEIniReal.Text; "\d{2}:\d{2}") And IsMatch(txtHEFinReal.Text; "\d{2}:\d{2}");
+    "Horas reales: " & Text(Round(Mod((Value(Left(txtHEFinReal.Text; 2)) * 60 + Value(Right(txtHEFinReal.Text; 2))) - (Value(Left(txtHEIniReal.Text; 2)) * 60 + Value(Right(txtHEIniReal.Text; 2))) + 1440; 1440) / 60; 2); "[$-es]0,00") & " h";
+    "Escribe las horas en formato hh:mm (ej. 17:30)"
+)
+     • conHERealBtns (GroupContainer horizontal) · Height 44 · FillPortions 0 · LayoutGap 8
+         - btnHERealCancelar (Classic/Button) · Width 120 · Text "Cancelar"
+             OnSelect: Set(varPopHEReal; false)
+         - btnHERealGuardar (Classic/Button) · FillPortions 1 · Text "💾 Guardar horas reales"
+             Fill colGreen · Color ColorValue(hexInk)
+             OnSelect:
+With(
+    {
+        _i: Value(Left(txtHEIniReal.Text; 2)) * 60 + Value(Right(txtHEIniReal.Text; 2));
+        _f: Value(Left(txtHEFinReal.Text; 2)) * 60 + Value(Right(txtHEFinReal.Text; 2))
+    };
+    With(
+        {
+            _hr:    Round(Mod(_f - _i + 1440; 1440) / 60; 2);
+            _antes: Coalesce(gHESel.HorasReales; gHESel.HorasSolicitadas)
+        };
+        If(
+            Not(IsMatch(txtHEIniReal.Text; "\d{2}:\d{2}") And IsMatch(txtHEFinReal.Text; "\d{2}:\d{2}"));
+            Notify("⚠️ Escribe las horas en formato hh:mm (ej. 17:30)."; NotificationType.Error);
+
+            _hr > gHESel.HorasSolicitadas + 0,01 And Not(fxPuede("he_autorizar"));
+            Notify("⚠️ Las horas reales (" & _hr & " h) superan las autorizadas (" & gHESel.HorasSolicitadas & " h). Solo el encargado puede guardarlas."; NotificationType.Error);
+
+            Patch(
+                SOLICITUDES_HORAS_EXTRAS;
+                {ID: gHESel.ID};
+                { HoraInicioReal: txtHEIniReal.Text; HoraFinReal: txtHEFinReal.Text; HorasReales: _hr; RegistroRealPor: User().FullName; FechaRegistroReal: Now() }
+            );;
+            With(
+                { _acum: LookUp(BD_HORAS_EXTRAS_ACUMULADAS; Codigo = gHESel.Codigo) };
+                If(!IsBlank(_acum); Patch(BD_HORAS_EXTRAS_ACUMULADAS; _acum; { TotalHorasAutorizadas: Coalesce(_acum.TotalHorasAutorizadas; 0) + _hr - _antes }))
+            );;
+            ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));;
+            ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS);;
+            Set(varPopHEReal; false);;
+            Notify("✅ Horas reales guardadas: " & Text(_hr; "[$-es]0,00") & " h (antes " & Text(_antes; "[$-es]0,00") & " h)."; NotificationType.Success)
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. PERSONAL · PERMISOS
+═══════════════════════════════════════════════════════════════════════════════
+ • IGSS / Médico: casilla "Sin hora de regreso". Se guarda solo la hora de
+   salida; al volver a marcar en garita se cierra el permiso con las horas
+   reales (mismo día: salida → regreso; otro día: lo que faltó de jornada).
+ • Evidencia: botón 📎 en cada permiso; se suben archivos como datos adjuntos
+   del permiso. El encargado los abre desde el mismo botón.
+ • Si no se autoriza al guardar, le llega correo al encargado del área.
+ • La lista (conPermLista) solo la ven quienes tienen permisos_ver o
+   permisos_autorizar; los demás ven "No disponible para su usuario".
+ • En celular se ve el formulario y un botón abre la lista.
+
+─────────────────────────────────────────────────────────────────
+ Formulario  ·  conVista_Permisos > conPermForm
+─────────────────────────────────────────────────────────────────
+ conPermForm (GroupContainer)
+   Visible: App.Width >= bpTablet Or Not(varPermListaCel)
+   Width:   If(App.Width < bpTablet; Parent.Width; 380)
+ btnPermVerLista (Classic/Button) · AGREGAR debajo de lblPermFormTit
+   Text: "📋 Ver lista de permisos ›" · Height 40 · Fill colGreen · Color ColorValue(hexInk)
+   Visible: App.Width < bpTablet And (fxPuede("permisos_ver") Or fxPuede("permisos_autorizar"))
+   OnSelect: Set(varPermListaCel; true);; Select(btnPermFCargar)
+ tglPermSinRegreso (Classic/Toggle) · AGREGAR debajo de tglPermDiaCompleto
+   Default: false · Height: 25 · Width: 240
+   TrueText: "Sin hora de regreso" · FalseText: "Con hora de regreso"
+   Visible: drpPermTipo.Selected.Value in tiposPermisoAbiertos And Not(tglPermDiaCompleto.Value)
+ conPermFechaFin (GroupContainer)
+   Visible: Not(tglPermSinRegreso.Visible And tglPermSinRegreso.Value)
+ lblPermResumen (Label)
+   Text:
+With(
+    {
+        _dia:     tglPermDiaCompleto.Value;
+        _abierto: tglPermSinRegreso.Visible And tglPermSinRegreso.Value;
+        _hi:      Value(Left(txtPermHoraIni.Text; 2)) * 60 + Value(Right(txtPermHoraIni.Text; 2));
+        _hf:      Value(Left(txtPermHoraFin.Text; 2)) * 60 + Value(Right(txtPermHoraFin.Text; 2))
+    };
+    With(
+        {
+            _ini: If(_dia; dpPermDesde.SelectedDate; DateAdd(dpPermDesde.SelectedDate; _hi; TimeUnit.Minutes));
+            _fin: If(_dia; DateAdd(dpPermHasta.SelectedDate; 1439; TimeUnit.Minutes); DateAdd(dpPermHasta.SelectedDate; _hf; TimeUnit.Minutes))
+        };
+        If(
+            IsBlank(dpPermDesde.SelectedDate); "⚠️ Selecciona la fecha.";
+            _abierto; "🕒 Sale " & Text(_ini; "dd/mm/yyyy hh:mm") & " · regreso sin hora: se toma cuando vuelva a marcar en garita.";
+            IsBlank(dpPermHasta.SelectedDate); "⚠️ Selecciona las fechas.";
+            _fin <= _ini; "⚠️ La fecha/hora final debe ser mayor a la inicial.";
+            "🕒 " & Text(_ini; "dd/mm/yyyy hh:mm") & " → " & Text(_fin; "dd/mm/yyyy hh:mm") & " · " &
+            If(_dia; (DateDiff(dpPermDesde.SelectedDate; dpPermHasta.SelectedDate; TimeUnit.Days) + 1) & " día(s)"; Round(DateDiff(_ini; _fin; TimeUnit.Minutes) / 60; 2) & " h")
+        )
+    )
+)
+
+ btnGuardarPermiso (Classic/Button) · conPermForm
+   OnSelect (REEMPLAZAR COMPLETO):
+With(
+    {
+        _p:       gPermPersona;
+        _dia:     tglPermDiaCompleto.Value;
+        _abierto: tglPermSinRegreso.Visible And tglPermSinRegreso.Value;
+        _hi:      Value(Left(txtPermHoraIni.Text; 2)) * 60 + Value(Right(txtPermHoraIni.Text; 2));
+        _hf:      Value(Left(txtPermHoraFin.Text; 2)) * 60 + Value(Right(txtPermHoraFin.Text; 2));
+        _aut:     fxPuede("permisos_autorizar")
+    };
+    With(
+        {
+            _ini:       If(_dia; dpPermDesde.SelectedDate; DateAdd(dpPermDesde.SelectedDate; _hi; TimeUnit.Minutes));
+            _fin:       If(
+                            _abierto; DateAdd(dpPermDesde.SelectedDate; 1439; TimeUnit.Minutes);
+                            _dia;     DateAdd(dpPermHasta.SelectedDate; 1439; TimeUnit.Minutes);
+                            DateAdd(dpPermHasta.SelectedDate; _hf; TimeUnit.Minutes)
+                        );
+            _hDia:      Coalesce(LookUp(colGruposJornada; Title = Coalesce(_p.GrupoJornada; "L-V")).HorasDia; JornadaEfectiva);
+            _correoEnc: Coalesce(
+                            _p.CorreoSupervisor;
+                            LookUp(colConfigAreasHE; Title = _p.SUBAREA).CorreoResponsable;
+                            LookUp(colConfigAreasHE; Title = _p.DEPARTAMENTO).CorreoResponsable;
+                            LookUp(colConfigAreasHE; Title = _p.AREA_GENERAL).CorreoResponsable;
+                            ""
+                        )
+        };
+        If(
+            !IsBlank(LookUp(SOLICITUDES_PERMISOS; Codigo = _p.CODIGO And Estado <> "Rechazado" And FechaInicio < _fin And FechaFin > _ini));
+            Notify("⚠️ " & _p.Nombre & " ya tiene un permiso que se cruza con ese horario."; NotificationType.Error);
+            Set(
+                gPermNuevo;
+                IfError(
+                    Patch(
+                        SOLICITUDES_PERMISOS;
+                        Defaults(SOLICITUDES_PERMISOS);
+                        {
+                            Title:             _p.CODIGO & " - " & Text(_ini; "dd/mm/yyyy");
+                            Codigo:            _p.CODIGO;
+                            NombrePersona:     _p.Nombre;
+                            Departamento:      _p.DEPARTAMENTO;
+                            TipoPermiso:       drpPermTipo.Selected.Value;
+                            FechaInicio:       _ini;
+                            FechaFin:          _fin;
+                            DiaCompleto:       _dia;
+                            SinHoraRegreso:    _abierto;
+                            Horas:             If(
+                                                   _abierto; 0;
+                                                   _dia; (DateDiff(dpPermDesde.SelectedDate; dpPermHasta.SelectedDate; TimeUnit.Days) + 1) * _hDia;
+                                                   Round(DateDiff(_ini; _fin; TimeUnit.Minutes) / 60; 2)
+                                               );
+                            Motivo:            Trim(txtPermMotivo.Text);
+                            Estado:            If(_aut; "Autorizado"; "Pendiente");
+                            SolicitadoPor:     User().FullName;
+                            FechaSolicitud:    Now();
+                            AutorizadoPor:     If(_aut; User().FullName; "");
+                            FechaAutorizacion: If(_aut; Now(); Blank())
+                        }
+                    );
+                    Blank()
+                )
+            );;
+            If(
+                IsBlank(gPermNuevo.ID);
+                Notify("❌ No se pudo guardar el permiso. Revisa la conexión."; NotificationType.Error);
+                If(
+                    Not(_aut) And _correoEnc <> "";
+                    IfError(
+                        Office365Outlook.SendEmailV2(
+                            _correoEnc;
+                            "📩 Permiso pendiente de autorizar · " & _p.Nombre;
+                            "<div style='font-family:Segoe UI;font-size:13px'>" &
+                            "<p><b>" & EncodeHTML(User().FullName) & "</b> solicitó un permiso que necesita tu autorización:</p>" &
+                            "<p>Persona: <b>" & EncodeHTML(_p.Nombre) & "</b> (" & _p.CODIGO & ") · " & EncodeHTML(_p.DEPARTAMENTO) & "<br>" &
+                            "Tipo: <b>" & EncodeHTML(drpPermTipo.Selected.Value) & "</b><br>" &
+                            "Desde: " & Text(_ini; "dd/mm/yyyy hh:mm") & If(_abierto; " · regreso sin hora"; " · Hasta: " & Text(_fin; "dd/mm/yyyy hh:mm")) & "<br>" &
+                            "Motivo: <i>" & EncodeHTML(Trim(txtPermMotivo.Text)) & "</i></p>" &
+                            "<p>Autorízalo en la app: Personal → Permisos.</p></div>";
+                            { Cc: User().Email; Importance: "Normal" }
+                        );
+                        Notify("⚠️ El permiso se guardó, pero no se pudo avisar al encargado."; NotificationType.Warning)
+                    )
+                );;
+                Select(btnCargarPermisos);;
+                Set(gPermPersona; Blank());;
+                Reset(txtPermMotivo);; Reset(dpPermDesde);; Reset(dpPermHasta);; Reset(drpPermTipo);; Reset(tglPermSinRegreso);;
+                Notify(If(_aut; "✅ Permiso registrado y autorizado."; "📩 Solicitud enviada al encargado, pendiente de autorización."); NotificationType.Success)
+            )
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ Lista  ·  conVista_Permisos > conPermLista
+─────────────────────────────────────────────────────────────────
+ conPermLista (GroupContainer)
+   Visible: (fxPuede("permisos_ver") Or fxPuede("permisos_autorizar")) And (App.Width >= bpTablet Or varPermListaCel)
+ lblPermNoDisp (Label) · AGREGAR en conVista_Permisos, después de conPermLista
+   Text: "🔒 La lista de permisos no está disponible para su usuario."
+   Visible: Not(fxPuede("permisos_ver") Or fxPuede("permisos_autorizar")) And App.Width >= bpTablet
+   FillPortions: 1 · Align: Align.Center · Color: ColorValue(hexMuted) · Size: 13
+ btnPermVerForm (Classic/Button) · AGREGAR como PRIMER hijo de conPermFiltros
+   Text: "‹" · Width: 44 · Visible: App.Width < bpTablet
+   OnSelect: Set(varPermListaCel; false)
+ btnPermFCargar   Text: If(App.Width < bpTablet; "🔄"; "🔄 Cargar")   Width: If(App.Width < bpTablet; 44; 120)
+ btnPermExcel     Text: If(App.Width < bpTablet; "📥"; "📥 Excel")    Width: If(App.Width < bpTablet; 44; 100)
+ btnPermPDF       Text: If(App.Width < bpTablet; "📄"; "📄 PDF")      Width: If(App.Width < bpTablet; 44; 90)
+ dpPermFDesde / dpPermFHasta   Width: If(App.Width < bpTablet; 100; 120)
+
+ galPermisos (Gallery) · conPermLista
+   Items:
+Sort(
+    Filter(
+        colPermisos;
+        IsBlank(drpPermFEstado.Selected.Value) Or drpPermFEstado.Selected.Value = "Todos" Or Estado = drpPermFEstado.Selected.Value;
+        IsBlank(Trim(txtPermFBuscar.Text)) Or StartsWith(NombrePersona; Trim(txtPermFBuscar.Text)) Or StartsWith(Codigo; Trim(txtPermFBuscar.Text));
+        fxVeArea(LookUp(colPersonal; CODIGO = Codigo; AREA_GENERAL); Departamento; LookUp(colPersonal; CODIGO = Codigo; SUBAREA))
+    );
+    FechaInicio;
+    SortOrder.Descending
+)
+ lblPerHasta (Label) · galPermisos > conFilaPerm01
+   Text:
+If(
+    ThisItem.SinHoraRegreso;
+    If(IsBlank(ThisItem.FechaRegresoReal); "⏳ Regreso sin hora"; "Regresó " & Text(ThisItem.FechaRegresoReal; "dd/mm hh:mm"));
+    Text(ThisItem.FechaFin; If(ThisItem.DiaCompleto; "dd/mm/yyyy"; "dd/mm hh:mm"))
+)
+ lblPerHoras (Label) · galPermisos > conFilaPerm01
+   Text:
+If(
+    ThisItem.SinHoraRegreso;
+    If(IsBlank(ThisItem.HorasReales); "—"; Text(ThisItem.HorasReales; "[$-es]0,0#") & " h real");
+    Text(ThisItem.Horas; "[$-es]0,0#") & " h"
+)
+ btnPermEvid (Classic/Button) · AGREGAR como PRIMER hijo de galPermisos > conFilaPerm01 > conPerAcc
+   Text: "📎" · Width: 36 · Height: 28 · Fill: RGBA(255; 255; 255; 1) · BorderColor: colGreen · BorderThickness: 1
+   OnSelect:
+Set(gPermEvidSel; LookUp(SOLICITUDES_PERMISOS; ID = ThisItem.ID));;
+ResetForm(frmPermEvid);;
+Set(varPopEvid; true)
+
+─────────────────────────────────────────────────────────────────
+ conPopEvid  (GroupContainer ManualLayout)  ·  AGREGAR en Personal (raíz),
+             arriba en la vista de árbol
+─────────────────────────────────────────────────────────────────
+ Visible: varPopEvid · X 0 · Y 0 · Width Parent.Width · Height Parent.Height
+ Fill: RGBA(16; 30; 44; 0,55)
+ Hijos:
+   btnEvidScrim (Classic/Button) · transparente, tamaño de pantalla
+     OnSelect: Set(varPopEvid; false)
+   conEvidCard (GroupContainer AutoLayout vertical) — encima del scrim
+     Width: Min(520; Parent.Width - 24) · Height: Min(480; Parent.Height - 40)
+     X: (Parent.Width - Self.Width) / 2 · Y: (Parent.Height - Self.Height) / 2
+     Fill: RGBA(255; 255; 255; 1) · LayoutGap 8 · Padding (4) 16 · LayoutAlignItems Stretch
+     • lblEvidTit (Label) · FontWeight Bold · Height 50
+         Text: "📎 Evidencia · " & gPermEvidSel.NombrePersona & " · " & gPermEvidSel.TipoPermiso & " · " & Text(gPermEvidSel.FechaInicio; "dd/mm/yyyy")
+     • frmPermEvid (Formulario de edición) · FillPortions 1
+         DataSource: SOLICITUDES_PERMISOS
+         Item: gPermEvidSel
+         DefaultMode: FormMode.Edit
+         DisplayMode: If(fxPuede("permisos") Or fxPuede("permisos_autorizar"); DisplayMode.Edit; DisplayMode.View)
+         Campos: Editar campos → quita todos → + Agregar campo → "Datos adjuntos".
+         OnSuccess:
+Notify("✅ Evidencia guardada."; NotificationType.Success);;
+Set(varPopEvid; false);;
+Select(btnCargarPermisos)
+         OnFailure:
+Notify("❌ " & frmPermEvid.Error; NotificationType.Error)
+     • conEvidBtns (GroupContainer horizontal) · Height 44 · FillPortions 0 · LayoutGap 8
+         - btnEvidCerrar (Classic/Button) · Width 120 · Text "Cerrar"
+             OnSelect: ResetForm(frmPermEvid);; Set(varPopEvid; false)
+         - btnEvidGuardar (Classic/Button) · FillPortions 1 · Text "💾 Guardar evidencia"
+             Fill colGreen · Color ColorValue(hexInk)
+             Visible: fxPuede("permisos") Or fxPuede("permisos_autorizar")
+             OnSelect: SubmitForm(frmPermEvid)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 10. RENDIMIENTOS · ACCESOS
+═══════════════════════════════════════════════════════════════════════════════
+ btnVerProcesos (Classic/Button) · conRaiz_Sets > conHeaderST
+   Visible: (gVista = "Sets") And fxPuede("rendimientos_procesos")
+ (btnAnaGlobal = rendimientos_analisis, btnMantDatos = rendimientos_admin y
+  las pestañas de análisis ya tienen su permiso: el rol RegistroActividades
+  solo ve sets, inicio y fin.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 11. FLUJO "SolicitarAutorizacionIngreso" (Power Automate)
+═══════════════════════════════════════════════════════════════════════════════
+ Crear: make.powerautomate.com → Crear → Flujo de nube instantáneo →
+ desencadenador "Cuando Power Apps llama a un flujo (V2)" →
+ nombre: SolicitarAutorizacionIngreso
+
+  1. Power Apps (V2) · 5 entradas de TEXTO, en este orden:
+       idSolicitud · correoEncargado · persona · area · motivo
+  2. "Responder a una aplicación o flujo de Power Apps"
+       Salida Texto:  ok = ok
+     (Va AQUÍ, al inicio, para que la app no se quede esperando.)
+  3. "Iniciar y esperar una aprobación"
+       Tipo: Aprobar/Rechazar: primero en responder
+       Título: Autorizar ingreso: [persona]
+       Asignado a: [correoEncargado]
+       Detalles: Área: [area] · Motivo: [motivo] · Fecha: (expresión)
+                 formatDateTime(convertFromUtc(utcNow(),'Central America Standard Time'),'dd/MM/yyyy HH:mm')
+     El encargado la recibe en Teams (app Aprobaciones) y por correo, y
+     puede aprobar o rechazar desde ahí.
+  4. SharePoint · "Obtener elemento"
+       Sitio: el de la app · Lista: AUTORIZACIONES_INGRESO
+       Id: (expresión) int(triggerBody()?['text'])
+  5. SharePoint · "Actualizar elemento"
+       Sitio y lista igual · Id: el del paso 4 · Título: Title del paso 4
+       Estado: (expresión)
+         if(equals(outputs('Iniciar_y_esperar_una_aprobación')?['body/outcome'],'Approve'),'Aprobado','Rechazado')
+       RespondidoPor: "Respuestas Nombre del respondedor" (contenido dinámico)
+       Comentario: "Respuestas Comentarios" (contenido dinámico)
+       FechaRespuesta: (expresión) utcNow()
+     (Si el nombre del paso 3 es otro, ajusta el nombre dentro de outputs().)
+  6. Guardar. En Power Apps Studio → Power Automate → + Agregar flujo →
+     SolicitarAutorizacionIngreso.
+  7. Flujo → Detalles → "Usuarios con permisos de solo ejecución" → para
+     SharePoint y Aprobaciones elige "Usar esta conexión" → Guardar.
+ Nota: la primera vez que se usan Aprobaciones en el entorno, Power Automate
+ tarda unos minutos en prepararlas.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 12. ORDEN DE IMPLEMENTACIÓN Y PRUEBAS
+═══════════════════════════════════════════════════════════════════════════════
+  1. SharePoint (sección 1): columnas, listas nuevas, filas de subáreas en
+     CONFIG_AREAS_HORAS_EXTRAS, gafetes VIS001…, adjuntos en permisos.
+     Llena AREA_GENERAL / SUBAREA del personal y AREAS_VISIBLES de los
+     encargados. Power Apps → Datos → actualizar cada lista y agregar las
+     nuevas.
+  2. Power Automate (sección 11): crea SolicitarAutorizacionIngreso y
+     agrégalo a la app ANTES de pegar btnSolicitarAut (si no, marca error).
+  3. Fórmulas de App y StartScreen (sección 2). Configuración → Pantalla →
+     "Ajustar a la pantalla" APAGADO.
+  4. ROLES_PERMISOS (sección 3) y asigna el rol a cada usuario en
+     ACCESOS_USUARIOS.
+  5. REGISTROS (secciones 4, 5 y 6) en este orden: btnCargarGarita →
+     tmrSyncGarita → btnProcesarScan → btnEjecutarScan → txtScan /
+     tmrFocoScan → KPIs → visitantes → conPopExcepcion.
+  6. Personal (secciones 7, 8 y 9). Scr. Rendimientos (sección 10).
+  7. Guarda, publica y abre la app de nuevo (los usuarios también deben
+     cerrar y abrir para ver la versión nueva).
+
+ PRUEBAS
+  A. Garita
+     • Escanea 2 gafetes muy rápido: el segundo no entra mientras el primero
+       guarda (la caja se pone gris) y luego se procesa solo.
+     • KPIs: TOTAL ACTIVOS = personas activas del catálogo; EN SITIO; CON
+       PERMISO cuenta a quien tiene permiso hoy y ya salió; tocarla abre la
+       pestaña de permisos. Un registro abierto de ayer aparece en la lista
+       con "⚠ abierto desde" en rojo, pero no suma en los KPIs.
+     • En celular (o la ventana angosta) no aparece el panel izquierdo y las
+       pestañas quedan solo con íconos.
+     • Persona con 6 días seguidos (o en descanso de su jornada): sale el
+       aviso, escribe nota → "Solicitar autorización". Al encargado le llega
+       en Teams y correo; al aprobar, el siguiente escaneo deja entrar.
+  B. Visitantes
+     • Escanea VIS001 libre → popup → agrega 3 personas (nombre + DPI) con
+       VIS001, VIS002, VIS003 → datos comunes una vez → Guardar. Los tres
+       quedan adentro y los gafetes "Asignado".
+     • Un gafete asignado ya no aparece en la lista para otra visita.
+     • Salida por escaneo o con el botón: si VigenteHasta es hoy, el gafete
+       queda Libre; si es otro día, sigue asignado y al volver a escanearlo
+       entra sin popup con sus mismos datos.
+  C. Personal
+     • Filtra NURSERY / Inactivos. Da de baja a alguien: queda gris, con
+       fecha, y aparece la fila en HISTORIAL_ESTADO_PERSONAL. Reactívalo.
+     • Usuario con AREAS_VISIBLES = "SSD": solo ve personal de SSD en
+       Personal, HE y permisos.
+  D. Horas extras
+     • Usuario SolicitanteHE: la solicitud queda Pendiente y le llega correo
+       al encargado. Encargado: queda Autorizada directo.
+     • Solicitud que deja a alguien con ≥ 6 h en la semana: alerta al
+       encargado con copia al solicitante.
+     • ⏱ en una solicitud autorizada: 17:00–19:30 → 2,50 h reales; el
+       acumulado se ajusta.
+     • Celular: elige personas → botón verde → formulario → ‹ regresa.
+  E. Permisos
+     • IGSS sin hora de regreso, sale 9:00. Regresa en garita a las 13:10 el
+       mismo día → el permiso queda con regreso 13:10 y 4,17 h reales.
+     • Si regresa al día siguiente, se guardan las horas que le faltaron de
+       la jornada del día del permiso.
+     • 📎 → sube una foto o PDF → Guardar → vuelve a abrir: el archivo está.
+     • Usuario SolicitanteHE: ve el formulario y el aviso "no disponible"
+       en lugar de la lista.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 13. LO QUE INTERPRETÉ (revísalo)
+═══════════════════════════════════════════════════════════════════════════════
+  • El menú "Personal" para encargados es de CONSULTA. Dar de baja o
+    reactivar es solo con personal_editar (Administrador). Si quieres que un
+    encargado también lo haga, agrega personal_editar a su rol.
+  • En celular el panel izquierdo de la garita (cámara, foco, nuevo
+    visitante) se oculta. El escaneo sigue funcionando con el lector y la
+    caja de texto; para cámara se usa una tableta.
+  • Los gafetes de visita viven en GAFETES_VISITA (no en el catálogo) para
+    no inflar el total de personal. Los registros de entrada y salida siguen
+    en REGIST como antes.
+  • AREAS_VISIBLES vacío = el usuario ve todas las áreas. Revisa que los
+    encargados lo tengan lleno.
+  • La regla de 6 días aplica a todos (MaxDiasSemana / racha). El bloqueo
+    por día de descanso solo aplica a quien tiene GrupoJornada asignado;
+    sin jornada solo cuenta el límite de días.
+  • Si el encargado no responde la aprobación, la persona sigue bloqueada.
+    El guardia puede usar "Permitir con justificación" solo si su rol lo
+    permite (como hoy).
+  • Permiso sin hora de regreso que no se cierra (la persona no vuelve a
+    marcar): queda "⏳ Regreso sin hora" hasta que regrese. Las horas reales
+    al día siguiente se calculan con las horas de su jornada menos lo que
+    trabajó ese día.
+  • Los tipos de permiso abiertos son los textos exactos "IGSS" y "Médico"
+    de drpPermTipo (tiposPermisoAbiertos). Si en tu lista se escriben
+    distinto, cámbialos en la fórmula de App.
+  • El DPI de las visitas es un dato personal: queda en GAFETES_VISITA y
+    REGIST. Dale acceso a esas listas solo a garita y administración.
