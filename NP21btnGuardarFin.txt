@@ -1,0 +1,605 @@
+═══════════════════════════════════════════════════════════════════════════════
+ CORRECCIÓN DEL ERROR DE "Patch" EN LOTE (Table / Se esperaba Record)
+ btnGuardarFin y los demás botones que guardan varios registros a la vez
+ (09/11/2026)
+═══════════════════════════════════════════════════════════════════════════════
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Fórmulas SIN "=" al inicio. Cada OnSelect va COMPLETO para copiar y pegar.
+
+ ¿POR QUÉ SALE EL ERROR?
+ ───────────────────────
+ No es porque ID sea de solo lectura: el ID solo se usa para encontrar la
+ fila, no se escribe.
+ El problema es la forma de Patch "en tabla":
+     Patch(Lista; TablaDeIDs; TablaDeCambios)
+ Con esa forma, Power Apps exige que la tabla de cambios tenga EXACTAMENTE
+ los tipos de la lista. colFinGuardar es una colección y guarda Estado como
+ un registro de texto {Value: "Finalizado"}, no como columna de opción de
+ SharePoint. Al no coincidir los tipos, Power Apps descarta la forma "tabla"
+ y prueba la forma "registro" → por eso dice "Table… se esperaba Record".
+ (Las versiones recientes de Power Apps revisan los tipos con más rigor; por
+ eso antes podía funcionar y ahora no.)
+
+ LA SOLUCIÓN
+ ───────────
+ Guardar registro por registro dentro de ForAll, con el Patch normal de un
+ registro (el mismo que ya funciona en btnGuardarInd):
+     ForAll(colección As _x; Patch(Lista; {ID: _x.ID}; { cambios }))
+ Esta forma sí convierte {Value: "…"} a la columna de opción y no falla por
+ tipos. ForAll manda los Patch en paralelo, así que sigue siendo rápido.
+
+ ¿DÓNDE MÁS AFECTA? (todos los que guardan "en lote")
+ ────────────────────────────────────────────────────
+   scrRendimientos  btnGuardarFin          ← el del error
+   scrRendimientos  btnMantAplicarSets     (Mantenimiento · 2A, misma forma)
+   scrRendimientos  btnMantAplicarCod      (Mantenimiento · 2B, misma forma)
+   Personal         btnEstadoConfirmar     (activo / inactivo en lote)
+   Personal         btnHERealGuardar       (horas reales en lote)
+   Personal         btnEnviarSolicitud155  (solicitudes de HE, usa Collect)
+   REGISTROS        btnGuardarVisita       (gafetes y visitantes en grupo)
+ Los que guardan un solo registro (btnGuardarInd, btnGuardarInicio,
+ btnSalidaVis, btnEjecutarScan, btnGuardarPermiso, etc.) están correctos.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. scrRendimientos · btnGuardarFin  (Classic/Button) · Finalizar (conTab_Grupal)
+═══════════════════════════════════════════════════════════════════════════════
+ OnSelect (REEMPLAZAR COMPLETO):
+Set(gAhoraFin; Now());;
+ClearCollect(
+    colFinGuardar;
+    ForAll(
+        Filter(
+            galFinPersonal.AllItems;
+            (IsEmpty(colFinSel) Or ThisRecord.ID in colFinSel.ID) And !IsBlank(Trim(Coalesce(LbMateriales.Text; "")))
+        ) As _r;
+        {
+            ID:          _r.ID;
+            FechaInicio: _r.FechaInicio;
+            Mat:         Trim(_r.LbMateriales.Text);
+            Frutos:      If(gActFin in ["Proceso de semilla"; "Cosecha"]; Value(_r.txtFrutosFin.Text); Blank());
+            Coment:      If(tglComentarioGlobal.Checked; txtComentarioGlobal.Text; _r.txtComentarioInd.Text)
+        }
+    )
+);;
+If(
+    IsEmpty(colFinGuardar);
+    Notify("⚠️ Escribe la cantidad de materiales de las personas que vas a cerrar."; NotificationType.Warning);
+
+    Set(gErrFin; "");;
+    IfError(
+        ForAll(
+            colFinGuardar As _g;
+            Patch(
+                REGISTRO_PERSONAL1;
+                { ID: _g.ID };
+                {
+                    FechaFin:           gAhoraFin;
+                    HoraFin:            Text(gAhoraFin; "[$-es]hh:mm");
+                    HorasTotales:       Round(DateDiff(_g.FechaInicio; gAhoraFin; TimeUnit.Minutes) / 60; 2);
+                    MinutosTotales:     DateDiff(_g.FechaInicio; gAhoraFin; TimeUnit.Minutes);
+                    CantidadMateriales: _g.Mat;
+                    NumeroFrutos:       _g.Frutos;
+                    Comentarios:        _g.Coment;
+                    Estado:             { Value: "Finalizado" }
+                }
+            )
+        );
+        Set(gErrFin; FirstError.Message)
+    );;
+    If(
+        gErrFin <> "";
+        Notify("❌ Algunos cierres no se guardaron: " & gErrFin & " · La lista se actualizó con lo que sí quedó."; NotificationType.Error);;
+        ClearCollect(colPendSet; Filter(REGISTRO_PERSONAL1; SetName = gSetActivo.SetName; Estado.Value = "En Proceso"; FechaInicio >= Today()));;
+        ClearCollect(colEnProceso; Filter(REGISTRO_PERSONAL1; Estado.Value = "En Proceso"; FechaInicio >= Today()));;
+        Select(btnArmarActFin);
+
+        RemoveIf(colPendSet; ID in colFinGuardar.ID);;
+        RemoveIf(colEnProceso; ID in colFinGuardar.ID);;
+        Clear(colFinSel);;
+        Set(gFinSoloSel; false);;
+        Notify("✅ " & CountRows(colFinGuardar) & " persona(s) finalizadas en " & gActFin; NotificationType.Success);;
+        If(
+            IsEmpty(colPendSet);
+            Set(gModo; "Inicio");;
+            Set(gVerActividades; false);;
+            Set(gVista; "Sets");
+            Set(gFinVerAnteriores; false);;
+            Set(gVerActividades; false);;
+            Select(btnArmarActFin)
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. scrRendimientos · Mantenimiento de datos
+═══════════════════════════════════════════════════════════════════════════════
+ btnMantAplicarSets (Classic/Button)
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    Not(gMantConfSets);
+    Set(gMantConfSets; true);;
+    Notify("Revisa la vista previa. Toca otra vez para actualizar " & CountRows(colMantSetsUpd) & " registros."; NotificationType.Warning);
+
+    Set(gMantConfSets; false);;
+    Set(gMantErr; "");;
+    IfError(
+        ForAll(
+            colMantSetsUpd As _u;
+            Patch(
+                REGISTRO_PERSONAL1;
+                { ID: _u.ID };
+                {
+                    Cultivo:       _u.nCult;
+                    MTC:           _u.nMct;
+                    Generation:    _u.nGen;
+                    TypeOperation: { Value: _u.nOp };
+                    Field:         _u.nFld;
+                    Greenhouse:    _u.nGH;
+                    Program:       _u.nProg;
+                    TrialIntent:   _u.nTrial
+                }
+            )
+        );
+        Set(gMantErr; FirstError.Message)
+    );;
+    If(
+        gMantErr = "";
+        Notify("✅ " & CountRows(colMantSetsUpd) & " registros completados con los datos de su set. Comprobando…"; NotificationType.Success);;
+        Set(gMantRecalc; true);;
+        Select(btnMantCargar);
+        Notify("❌ Error: " & gMantErr & ". Vuelve a cargar: lo que ya se actualizó dejará de aparecer en la vista previa."; NotificationType.Error)
+    )
+)
+
+ btnMantAplicarCod (Classic/Button)
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    Not(gMantConfCod);
+    Set(gMantConfCod; true);;
+    Notify("Revisa la lista. Toca otra vez para corregir " & CountRows(colMantCodUpd) & " registros."; NotificationType.Warning);
+
+    Set(gMantConfCod; false);;
+    Set(gMantErr; "");;
+    IfError(
+        ForAll(
+            colMantCodUpd As _u;
+            Patch(REGISTRO_PERSONAL1; { ID: _u.ID }; { CODIGO: _u.CodigoNuevo })
+        );
+        Set(gMantErr; FirstError.Message)
+    );;
+    If(
+        gMantErr = "";
+        Notify("✅ " & CountRows(colMantCodUpd) & " registros ahora tienen el código del catálogo. Comprobando…"; NotificationType.Success);;
+        Set(gMantRecalc; true);;
+        Select(btnMantCargar);
+        Notify("❌ Error: " & gMantErr & ". Vuelve a cargar: lo que ya se corrigió dejará de aparecer."; NotificationType.Error)
+    )
+)
+ (Mantenimiento es para cientos de registros: trabaja un mes a la vez, como
+  dice lblMantPaso.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. Personal · btnEstadoConfirmar (Classic/Button) · conPopEstadoPer > conEstadoBtns
+═══════════════════════════════════════════════════════════════════════════════
+ OnSelect (REEMPLAZAR COMPLETO):
+With(
+    {
+        _baja:  gEstadoAccion = "Baja";
+        _f:     Coalesce(dpEstadoFecha.SelectedDate; Today());
+        _mot:   Trim(txtEstadoMotivo.Text);
+        _usr:   User().FullName;
+        _ahora: Now()
+    };
+    ClearCollect(colPerAplicar; Filter(colPerSel; If(_baja; Activo = "SI"; Activo <> "SI")));;
+    If(
+        IsEmpty(colPerAplicar);
+        Notify("⚠️ Ninguna de las personas seleccionadas necesita ese cambio."; NotificationType.Warning);
+
+        Set(gErrEst; "");;
+        IfError(
+            If(
+                _baja;
+                ForAll(colPerAplicar As _a; Patch(CATALOGO_PERSONAL1; { ID: _a.ID }; { Activo: "NO"; FECHA_BAJA: _f }));
+                ForAll(colPerAplicar As _a; Patch(CATALOGO_PERSONAL1; { ID: _a.ID }; { Activo: "SI"; FECHA_REINGRESO: _f }))
+            );
+            Set(gErrEst; FirstError.Message)
+        );;
+        If(
+            gErrEst <> "";
+            Notify("❌ No se pudo cambiar el estado de todas: " & gErrEst; NotificationType.Error);;
+            Refresh(CATALOGO_PERSONAL1);;
+            ClearCollect(colPersonal; CATALOGO_PERSONAL1);
+
+            IfError(
+                ForAll(
+                    colPerAplicar As _a;
+                    Patch(
+                        HISTORIAL_ESTADO_PERSONAL;
+                        Defaults(HISTORIAL_ESTADO_PERSONAL);
+                        {
+                            Title:         _a.CODIGO;
+                            Nombre:        _a.Nombre;
+                            Departamento:  _a.DEPARTAMENTO;
+                            Accion:        If(_baja; "Baja"; "Reingreso");
+                            Fecha:         _f;
+                            Motivo:        _mot;
+                            RegistradoPor: _usr;
+                            FechaRegistro: _ahora
+                        }
+                    )
+                );
+                Notify("⚠️ El estado cambió, pero no se guardó todo el historial."; NotificationType.Warning)
+            );;
+            Notify(
+                If(_baja; "⛔ " & CountRows(colPerAplicar) & " persona(s) dada(s) de baja desde "; "✔ " & CountRows(colPerAplicar) & " persona(s) reactivada(s) desde ") &
+                Text(_f; "dd/mm/yyyy") &
+                If(CountRows(colPerSel) > CountRows(colPerAplicar); " · " & (CountRows(colPerSel) - CountRows(colPerAplicar)) & " ya tenían ese estado"; "");
+                NotificationType.Success
+            );;
+            Clear(colPerSel);;
+            Clear(colPerAplicar);;
+            Set(gPerVerSel; false);;
+            Set(gEstadoAccion; "");;
+            Set(varPopEstadoPer; false);;
+            Refresh(CATALOGO_PERSONAL1);;
+            ClearCollect(colPersonal; CATALOGO_PERSONAL1)
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. Personal · btnHERealGuardar (Classic/Button) · conPopHEReal > conHERealBtns
+═══════════════════════════════════════════════════════════════════════════════
+ OnSelect (REEMPLAZAR COMPLETO):
+With(
+    {
+        _i:     Value(Left(txtHEIniReal.Text; 2)) * 60 + Value(Right(txtHEIniReal.Text; 2));
+        _f:     Value(Left(txtHEFinReal.Text; 2)) * 60 + Value(Right(txtHEFinReal.Text; 2));
+        _usr:   User().FullName;
+        _ahora: Now()
+    };
+    With(
+        { _hr: Round(Mod(_f - _i + 1440; 1440) / 60; 2) };
+        If(
+            Not(IsMatch(txtHEIniReal.Text; "\d{2}:\d{2}") And IsMatch(txtHEFinReal.Text; "\d{2}:\d{2}"));
+            Notify("⚠️ Escribe las horas en formato hh:mm (ej. 17:30)."; NotificationType.Error);
+
+            Not(fxPuede("he_autorizar")) And CountRows(Filter(colHERealSel; _hr > HorasSolicitadas + 0,01)) > 0;
+            Notify("⚠️ " & _hr & " h supera lo autorizado en " & CountRows(Filter(colHERealSel; _hr > HorasSolicitadas + 0,01)) & " solicitud(es). Solo el encargado puede guardarlo."; NotificationType.Error);
+
+            ClearCollect(
+                colHERealCalc;
+                ForAll(colHERealSel As _s; { ID: _s.ID; Codigo: _s.Codigo; Delta: _hr - Coalesce(_s.HorasReales; _s.HorasSolicitadas) })
+            );;
+            Set(gErrHR; "");;
+            IfError(
+                ForAll(
+                    colHERealSel As _s;
+                    Patch(
+                        SOLICITUDES_HORAS_EXTRAS;
+                        { ID: _s.ID };
+                        { HoraInicioReal: txtHEIniReal.Text; HoraFinReal: txtHEFinReal.Text; HorasReales: _hr; RegistroRealPor: _usr; FechaRegistroReal: _ahora }
+                    )
+                );
+                Set(gErrHR; FirstError.Message)
+            );;
+            If(
+                gErrHR <> "";
+                Notify("❌ No se pudieron guardar todas las horas reales: " & gErrHR & " · No se tocó el acumulado; revisa y vuelve a guardar."; NotificationType.Error);;
+                ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));
+
+                ForAll(
+                    GroupBy(colHERealCalc; 'Codigo'; 'Filas') As _g;
+                    With(
+                        { _acum: LookUp(BD_HORAS_EXTRAS_ACUMULADAS; Codigo = _g.Codigo) };
+                        If(
+                            !IsBlank(_acum) And Sum(_g.Filas; Delta) <> 0;
+                            Patch(BD_HORAS_EXTRAS_ACUMULADAS; _acum; { TotalHorasAutorizadas: Coalesce(_acum.TotalHorasAutorizadas; 0) + Sum(_g.Filas; Delta) })
+                        )
+                    )
+                );;
+                Concurrent(
+                    ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));
+                    ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS)
+                );;
+                Notify("✅ Horas reales guardadas: " & Text(_hr; "[$-es]0,00") & " h en " & CountRows(colHERealSel) & " solicitud(es)."; NotificationType.Success);;
+                Clear(colHERealSel);;
+                Clear(colHERealCalc);;
+                Set(gHERealVerSel; false);;
+                Set(varPopHEReal; false)
+            )
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. Personal · btnEnviarSolicitud155 (Classic/Button) · Container155-cntHorasExtras
+═══════════════════════════════════════════════════════════════════════════════
+ (Cambia solo el guardado: Collect en lote → Patch por persona.)
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    IsBlank(gActividad);
+    Notify("⚠️ Selecciona primero una actividad."; NotificationType.Error);
+    With(
+        {
+            _fecha:     dpFechaReq155.SelectedDate;
+            _h:         Round((varHoraFinMin - varHoraIniMin) / 60; 2);
+            _semStr:    Year(dpFechaReq155.SelectedDate) & "-W" & Text(ISOWeekNum(dpFechaReq155.SelectedDate); "00");
+            _subActVal: If(gActividad in ActividadesConSub; Coalesce(drpSubActividad_1.Selected.Value; ""); "");
+            _ahora:     Now();
+            _usr:       User().FullName;
+            _aut:       fxPuede("he_autorizar")
+        };
+        ClearCollect(
+            colHEEnvio;
+            ForAll(
+                colSeleccionados As s;
+                With(
+                    {
+                        _d:  LookUp(colDispHE; Codigo = s.Codigo);
+                        _pc: LookUp(colPersonal; CODIGO = s.Codigo)
+                    };
+                    {
+                        Nombre: s.Nombre;
+                        Codigo: s.Codigo;
+                        Area:   s.Departamento;
+                        Rol:    s.Categoria.Value;
+                        Semana: Round(Coalesce(_d.Semana; 0) + _h; 2);
+                        Umbral: Coalesce(_d.Umbral; AlertaHESemanaDefault);
+                        Correo: Coalesce(
+                                    _pc.CorreoSupervisor;
+                                    LookUp(colConfigAreasHE; Title = _pc.SUBAREA).CorreoResponsable;
+                                    LookUp(colConfigAreasHE; Title = s.Departamento).CorreoResponsable;
+                                    LookUp(colConfigAreasHE; Title = _pc.AREA_GENERAL).CorreoResponsable;
+                                    ""
+                                )
+                    }
+                )
+            )
+        );;
+        Set(gHEErr; false);;
+        IfError(
+            ForAll(
+                colHEEnvio As _p;
+                Patch(
+                    SOLICITUDES_HORAS_EXTRAS;
+                    Defaults(SOLICITUDES_HORAS_EXTRAS);
+                    {
+                        Title:                 _p.Codigo & " - " & Text(_fecha; "dd/mm/yyyy");
+                        FechaRequerida:        _fecha;
+                        Codigo:                _p.Codigo;
+                        NombrePersona:         _p.Nombre;
+                        Area:                  _p.Area;
+                        Rol:                   _p.Rol;
+                        Actividad:             gActividad;
+                        SubActividad:          _subActVal;
+                        HoraInicio:            txtHoraInicio155.Text;
+                        HoraFin:               txtHoraFin155.Text;
+                        HorasSolicitadas:      _h;
+                        Justificacion:         Trim(txtJustificacion155.Text);
+                        SolicitadoPor:         _usr;
+                        FechaHoraSolicitud:    _ahora;
+                        Estado:                { Value: If(_aut; "Autorizado"; "Pendiente") };
+                        AutorizadoPor:         If(_aut; _usr; "");
+                        FechaHoraAutorizacion: If(_aut; _ahora; Blank());
+                        SemanaAnio:            _semStr
+                    }
+                )
+            );
+            Set(gHEErr; true)
+        );;
+        If(
+            gHEErr;
+            Notify("❌ No se pudieron guardar las solicitudes. Revisa la conexión e intenta de nuevo."; NotificationType.Error);
+
+            If(
+                _aut;
+                ForAll(
+                    colHEEnvio As _p;
+                    With(
+                        { _acum: LookUp(BD_HORAS_EXTRAS_ACUMULADAS; Codigo = _p.Codigo) };
+                        Patch(
+                            BD_HORAS_EXTRAS_ACUMULADAS;
+                            Coalesce(_acum; Defaults(BD_HORAS_EXTRAS_ACUMULADAS));
+                            {
+                                Title:                   _p.Codigo;
+                                Codigo:                  _p.Codigo;
+                                NombrePersona:           _p.Nombre;
+                                Area:                    _p.Area;
+                                Rol:                     _p.Rol;
+                                TotalHorasAutorizadas:   Coalesce(_acum.TotalHorasAutorizadas; 0) + _h;
+                                TotalSesiones:           Coalesce(_acum.TotalSesiones; 0) + 1;
+                                UltimaFechaAutorizacion: _ahora;
+                                UltimoAutorizador:       _usr
+                            }
+                        )
+                    )
+                )
+            );;
+            If(
+                Not(_aut);
+                ForAll(
+                    Distinct(Filter(colHEEnvio; Correo <> ""); Correo) As c;
+                    IfError(
+                        Office365Outlook.SendEmailV2(
+                            c.Value;
+                            "📩 Horas extras pendientes de autorizar · " & Text(_fecha; "dd/mm/yyyy");
+                            "<div style='font-family:Segoe UI;font-size:13px'><p><b>" & EncodeHTML(_usr) & "</b> solicitó horas extras que necesitan tu autorización:</p>" &
+                            "<p>Fecha: <b>" & Text(_fecha; "dd/mm/yyyy") & "</b> · Horario: " & txtHoraInicio155.Text & " – " & txtHoraFin155.Text & " (" & _h & " h)<br>" &
+                            "Actividad: " & EncodeHTML(gActividad) & If(_subActVal = ""; ""; " · " & EncodeHTML(_subActVal)) & "<br>" &
+                            "Justificación: <i>" & EncodeHTML(Trim(txtJustificacion155.Text)) & "</i></p>" &
+                            "<table style='border-collapse:collapse;font-size:12px'><tr style='background:#0E2018;color:#fff'><th style='padding:6px'>Código</th><th style='padding:6px'>Nombre</th><th style='padding:6px'>Área</th><th style='padding:6px'>HE semana (con esta)</th></tr>" &
+                            Concat(
+                                Filter(colHEEnvio; Correo = c.Value);
+                                "<tr><td style='border:1px solid #ddd;padding:5px'>" & Codigo & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Nombre) & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Area) & "</td><td style='border:1px solid #ddd;padding:5px;text-align:right'>" & Semana & " h</td></tr>"
+                            ) &
+                            "</table><p>Autorízalas en la app: Personal → Horas Extras → Análisis y Autorizaciones.</p></div>";
+                            { Cc: User().Email; Importance: "Normal" }
+                        );
+                        Notify("⚠️ No se pudo avisar a " & c.Value; NotificationType.Warning)
+                    )
+                )
+            );;
+            ForAll(
+                Distinct(Filter(colHEEnvio; Semana >= Umbral And Correo <> ""); Correo) As c;
+                IfError(
+                    Office365Outlook.SendEmailV2(
+                        c.Value;
+                        "⚠️ Horas extras: personal en el límite semanal · " & Text(_fecha; "dd/mm/yyyy");
+                        "<div style='font-family:Segoe UI;font-size:13px'><p>Con esta solicitud, estas personas llegan o pasan el límite semanal de horas extras:</p>" &
+                        "<table style='border-collapse:collapse;font-size:12px'><tr style='background:#0E2018;color:#fff'><th style='padding:6px'>Código</th><th style='padding:6px'>Nombre</th><th style='padding:6px'>Área</th><th style='padding:6px'>HE semana</th><th style='padding:6px'>Límite</th></tr>" &
+                        Concat(
+                            Filter(colHEEnvio; Correo = c.Value And Semana >= Umbral);
+                            "<tr><td style='border:1px solid #ddd;padding:5px'>" & Codigo & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Nombre) & "</td><td style='border:1px solid #ddd;padding:5px'>" & EncodeHTML(Area) & "</td><td style='border:1px solid #ddd;padding:5px;text-align:right'><b>" & Semana & " h</b></td><td style='border:1px solid #ddd;padding:5px;text-align:right'>" & Umbral & " h</td></tr>"
+                        ) &
+                        "</table><p>Actividad: " & EncodeHTML(gActividad) & " · Solicitó: " & EncodeHTML(_usr) & " · Estado: " & If(_aut; "Autorizado"; "Pendiente") & "</p>" &
+                        "<p style='color:#6B7A6F'>Aviso automático: no bloquea la solicitud.</p></div>";
+                        { Cc: User().Email; Importance: "High" }
+                    );
+                    Notify("⚠️ No se pudo enviar la alerta a " & c.Value; NotificationType.Warning)
+                )
+            );;
+            If(
+                CountRows(Filter(colHEEnvio; Correo = "")) > 0;
+                Notify("ℹ️ " & CountRows(Filter(colHEEnvio; Correo = "")) & " persona(s) sin encargado con correo en su área (CONFIG_AREAS_HORAS_EXTRAS). No se envió aviso para ellas."; NotificationType.Warning)
+            );;
+            ClearCollect(colSolicitudesHE; Filter(SOLICITUDES_HORAS_EXTRAS; FechaRequerida >= DateAdd(Today(); -120; TimeUnit.Days)));;
+            ClearCollect(colAcumuladosHE; BD_HORAS_EXTRAS_ACUMULADAS);;
+            Notify(
+                If(
+                    _aut;
+                    "✅ " & CountRows(colHEEnvio) & " solicitudes guardadas y autorizadas por " & _usr & ".";
+                    "📩 " & CountRows(colHEEnvio) & " solicitudes enviadas. Quedan pendientes hasta que el encargado las autorice."
+                );
+                NotificationType.Success
+            );;
+            Clear(colSeleccionados);;
+            Reset(txtJustificacion155);;
+            Set(varHEFormCel; false);;
+            Select(btnCalcDispHE)
+        )
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. REGISTROS · btnGuardarVisita (Classic/Button) · conVisCard > conVisBtns
+═══════════════════════════════════════════════════════════════════════════════
+ (Cambia el guardado de gafetes y de REGIST: en lote → por visitante.)
+ OnSelect (REEMPLAZAR COMPLETO):
+If(
+    IsEmpty(colVisGrupo) And !IsBlank(drpVisGafete.Selected.Title) And Len(Trim(txtVisNombre.Text)) >= 3;
+    Collect(colVisGrupo; { Codigo: Upper(Trim(drpVisGafete.Selected.Title)); Nombre: Upper(Trim(txtVisNombre.Text)); DPI: Trim(txtVisDPI.Text) })
+);;
+If(
+    IsEmpty(colVisGrupo);
+    Notify("⚠️ Elige el gafete y escribe el nombre del visitante."; NotificationType.Error);
+    IsBlank(drpVisMotivo.Selected.Value);
+    Notify("⚠️ Selecciona el motivo de la visita."; NotificationType.Error);
+    CountRows(Filter(colVisGrupo; Codigo in ForAll(colAdentro; Upper(Trim(CODIGO))))) > 0;
+    Notify("⚠️ Un gafete de la lista ya está en uso adentro. Quítalo de la lista."; NotificationType.Error);
+    Set(gVisGrupoId; If(CountRows(colVisGrupo) > 1; "G" & Text(Now(); "yymmddhhmmss"); ""));;
+    Set(gVisHasta; Coalesce(dpVisHasta.SelectedDate; Today()));;
+    Set(gAhoraVis; Now());;
+    Set(gVisMotivoTxt; drpVisMotivo.Selected.Value & If(IsBlank(Trim(txtVisMotivo.Text)); ""; " · " & Trim(txtVisMotivo.Text)));;
+    Set(gErrVis; "");;
+    IfError(
+        ForAll(
+            colVisGrupo As _v;
+            Patch(
+                GAFETES_VISITA;
+                { ID: LookUp(colGafetes; Upper(Trim(Title)) = _v.Codigo).ID };
+                {
+                    Estado:          "Asignado";
+                    Nombre:          _v.Nombre;
+                    DPI:             _v.DPI;
+                    Empresa:         Trim(txtVisEmpresa.Text);
+                    VisitaA:         Trim(txtVisA.Text);
+                    Motivo:          gVisMotivoTxt;
+                    Placa:           Upper(Trim(txtVisPlaca.Text));
+                    VigenteHasta:    gVisHasta;
+                    GrupoVisita:     gVisGrupoId;
+                    AsignadoPor:     gCorreoUsuario;
+                    FechaAsignacion: gAhoraVis
+                }
+            )
+        );
+        Set(gErrVis; FirstError.Message)
+    );;
+    If(
+        gErrVis = "";
+        IfError(
+            ForAll(
+                colVisGrupo As _v;
+                Patch(
+                    REGIST;
+                    Defaults(REGIST);
+                    {
+                        Title:            _v.Codigo & " - " & Text(Today(); "yyyymmdd");
+                        FECHA:            Today();
+                        CODIGO:           _v.Codigo;
+                        NOMBRE:           _v.Nombre;
+                        TIPO:             "Visitante";
+                        AREA:             {Value: gSedeGarita};
+                        DEPARTAMENTO:     "VISITANTE";
+                        CATEGORIA:        {Value: "V"};
+                        INGRESO:          gAhoraVis;
+                        ESTADO:           {Value: "ADENTRO"};
+                        DIA_LABORADO:     false;
+                        VISITA_EMPRESA:   Trim(txtVisEmpresa.Text);
+                        VISITA_A:         Trim(txtVisA.Text);
+                        VISITA_MOTIVO:    gVisMotivoTxt;
+                        VISITA_PLACA:     Upper(Trim(txtVisPlaca.Text));
+                        VISITA_DPI:       _v.DPI;
+                        VISITA_GRUPO:     gVisGrupoId;
+                        REGISTRA_INGRESO: gCorreoUsuario
+                    }
+                )
+            );
+            Set(gErrVis; FirstError.Message)
+        )
+    );;
+    If(
+        gErrVis <> "";
+        Notify("❌ No se pudo registrar: " & gErrVis; NotificationType.Error);
+        Concurrent(
+            ClearCollect(colGafetes; GAFETES_VISITA);
+            ClearCollect(colAdentro; Filter(REGIST; ESTADO.Value = "ADENTRO"));
+            ClearCollect(colHoyGar; Filter(REGIST; FECHA = Today()))
+        );;
+        Set(
+            gUltimoScan;
+            {
+                Nombre:  If(CountRows(colVisGrupo) > 1; CountRows(colVisGrupo) & " visitantes"; First(colVisGrupo).Nombre);
+                Tipo:    "INGRESO";
+                Hora:    Now();
+                Hex:     "#2563EB";
+                Mensaje: "Gafete(s) " & Concat(colVisGrupo; Codigo; ", ") & " · " & drpVisMotivo.Selected.Value & " · hasta " & Text(gVisHasta; "dd/mm")
+            }
+        );;
+        Clear(colVisGrupo);;
+        Set(varPopVisita; false);;
+        Set(gBusyScan; false);;
+        Reset(drpVisGafete);; Reset(txtVisNombre);; Reset(txtVisDPI);; Reset(txtVisEmpresa);; Reset(txtVisA);; Reset(txtVisMotivo);; Reset(txtVisPlaca);; Reset(drpVisMotivo);; Reset(dpVisHasta);;
+        SetFocus(txtScan)
+    )
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. CÓMO PROBAR
+═══════════════════════════════════════════════════════════════════════════════
+  1. Pega btnGuardarFin: el subrayado rojo de Patch debe desaparecer.
+  2. Rendimientos → abre un set → inicia 3 personas → Finalizar → escribe
+     materiales → Guardar. Las 3 salen de la lista y en REGISTRO_PERSONAL1
+     quedan Finalizado con HoraFin, HorasTotales y CantidadMateriales.
+  3. Repite con 1 persona seleccionada (colFinSel): solo se cierra esa.
+  4. Si sale "❌ Algunos cierres no se guardaron…", la lista se recarga con
+     lo que sí quedó; el mensaje dice la columna que falló.
+  5. Prueba también: Mantenimiento 2A y 2B, cambio de estado en lote, horas
+     reales en lote, solicitud de HE y un visitante en grupo.
