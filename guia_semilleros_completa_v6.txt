@@ -1,0 +1,1123 @@
+# Pantalla `Semilleros` — Guía completa de implementación (v6)
+
+Esta guía reemplaza a las anteriores (v4 y v5): contiene TODO lo que falta aplicar, partiendo del YAML que enviaste (que ya tiene los controles de la guía v4). Revisé ese YAML control por control. La guía tiene tres partes:
+
+1. **Resultado de la revisión:** qué está bien ✅ y qué hay que corregir ❌.
+2. **Correcciones:** solo los controles con error, con la fórmula completa.
+3. **Agregados nuevos:** fecha de siembra, fechas reales de trasplante, popup de sets y el tablero de semilleros (tablas Semilleros y Sets, filtros por área y semillero, indicadores y gráfica por cultivo).
+
+Orden recomendado de trabajo: sección 3 (SharePoint y OnVisible) → 4 (correcciones) → 5 (popup de sets) → 6 (fecha de siembra) → 7 (popup de fechas) → 8 (tablero) → 10 (prueba).
+
+Formato: **nombre · tipo · ubicación**, luego **Propiedad** y fórmula. Sintaxis en español (`;`, `;;`, decimal con coma). Si un control está correcto no se repite su código.
+
+---
+
+## 1. Resultado de la revisión
+
+### 1.1 Correctos ✅ (no tocar)
+- **Pantalla:** `OnVisible` (solo se le agregan variables nuevas en la sección 3).
+- **Header:** `lblTitulo_2`, `btnVolver_4`, `btnNurserySelector` (solo se le agrega `Visible` en la sección 8).
+- **Calculadora:** `lblTituloForm_1`, `recDivisor_1`, `conCampo_Nave_2`, `Label7_6`, `cmbGeneracion`, `Label9`, `conSemillas`, `lblLabel_Cantidad_1`, `txtSemillasDevX`, `conSemillas_1`, `lblLabel_Cantidad_2`, `txtPlots`, `conCampo_Nave_3`, `Label7_7`, `conSemillas_2`, `lblLabel_Cantidad_3`, `txtSemPlotF2`, `lblDesglose`, `Container60`, `txtBandejas`, `Label10`, `conCampo_Set_1`, `Label6_1`, `btnAbrirSeleccionSet_1`, `cnbSustrato_1`, `Label5_3`, `cmbSustrato_1`.
+- **Tarjeta de capacidad:** `conTarjetaResumen_2` y todos sus hijos.
+- **Sets sembrados:** `galLotes.OnSelect`, `conSetRowItem_2`, `recColorDotSet_2`, `Icon3_2`, `lblSetNombreGal_2`, `lblSetDetalleGal_2`, `lblSetCiclo_3`.
+- **Selección de set:** `Container40_1`, `TextInput8_1`, `galSetsActivos01_1`, `Container43_1`, `Label25_1`, `Label40_1`, `Label44_1`, `Checkbox2_1`, `Button8_1`.
+- **Vista gráfica:** `conVisualizacion_1`, `conHeaderViz_1`, `lblTituloViz_1`, `btnLimpiar_1`, `btnReubicar`, `conLeyenda_1` (y sus hijos), `galMesas`, `conNaveTemplate_1`, `conNaveHeader_1`, `Container5_1`, `lblNumNave_1`, `lblCapNave_1`, `lblLibres_1`, `btnFinalizarCiclo_1`, `btnReubicarMesa`, `htmlMesa`.
+- **Popup semilleros:** `conPopupNursery`, `conCajaNursery`, `conCajaNurseryHead`, `lblTituloNursery`, `recNurCard`, `lblNurPool`, `lblNurOcup`, `recNurBarFondo`, `recNurBarProg`.
+- **Popup reubicar:** `conPopupReubicar`, `conCajaReubicar`, `conReubHead`, `lblReubTitulo`, `conReubNav`, `btnMesaAnterior`, `lblMesaOrigen`, `btnMesaSiguiente`, `btnSelTodaMesa`, `lblInstruccionReub`, `recPosFondo`, `recPosBandeja`, `lblPosOrden`, `lblSelCount`, `lblMesaDestino`, `cmbMesaDestino`, `lblPosInicio`, `txtPosInicio`, `htmlDestinoPreview`, `conReubBotones`, `btnLimpiarSel`, `btnConfirmarReub`.
+
+### 1.2 Con error ❌ (se corrigen en la sección 2)
+
+| Control | Problema |
+|---|---|
+| `tglPrimeraColumna` | Siempre arranca en 88 celdas. El criterio dice que la 1ª columna libre es **solo para F2 Marcadores** (diseño de platos) |
+| `lblResultadoBandejas` | Fórmula correcta, pero `Height = 22` con `Size = 22` corta el número |
+| `conSemillas_3` | Falta el fondo verde del resultado (el "verdecito" del prototipo) |
+| `galSeleccion` | `WrapCount = 10` (cada fila sale diminuta). Sus hijos usan `ThisItem.Ocupada`, que no existe en `colSelBandejas` → error |
+| `recSelColor` | Copió el borde de `recPosFondo` con `ThisItem.Ocupada` → error |
+| `lblSelItem` | `Visible = ThisItem.Ocupada` → error; fondo de color que tapa el texto |
+| `icoSubirSel` | `Visible = ThisItem.Orden`. Debe ser `Orden > 1`. Falta el ícono |
+| `icoQuitarSel` | `Visible = ThisItem.Orden`. Falta el ícono |
+| `icoCerrarNursery`, `icoCerrarReub` | Ícono moderno sin `Icon` asignado |
+| `galPosiciones` (orden de capas) | `recPosFondo` quedó **encima** de la bandeja y de las etiquetas. Por eso en tu captura solo se ven cuadros naranjas |
+| `lblPosNum` | Tiene fondo de color y solo se ve si está ocupada |
+| `lblPosBandeja` | Muestra la etiqueta completa en grande. Debe mostrar el número de bandeja |
+| `btnPosSel`, `btnNurSel` | Sin colores transparentes en hover/borde: al pasar el mouse se ve un bloque gris |
+| `galNurseries` | `Width = 0`, sin `WrapCount`, `TemplateSize = 120` (las etiquetas llegan a Y 112). Además `recNurCard` y `recNurBarFondo` quedaron encima de lo demás |
+| `lblNurNombre` | Tamaño 10, se pierde |
+| `conReubBody`, `conReubOrigen`, `conReubDestino` | Sin `FillPortions` / `LayoutAlignItems.Stretch`: las galerías no ocupan el espacio |
+| `conPanelIzquierdo2_1` | Perdió `FillPortions = 0`: no respeta su ancho de 600 |
+| `conPanelSets_2` | `galLotes` quedó **arriba** del título y con alto fijo |
+| `Container15_1` | Debe pasar a un popup (lo pediste) |
+| `btnDistribuir` | Siembra siempre con `Today()`; falta la fecha elegida |
+| `lblErrorMsg_1` | Falta validar la fecha de siembra |
+
+### 1.3 Controles a eliminar
+Ninguno adicional. Los que ya quitaste (`cmbNurserySelector`, `conGHSelectorBox_1`, `lblPrefijoGH_1`, `cmbSetActivo_1`, `galFilas`, `htmlFila`) están bien quitados. `Container15_1` **no se elimina**: se mueve al popup (sección 5).
+
+> En tu captura dice "Mesa origen 1 de **1**". Revisa en `NURSERY_CONFIG` el valor de `NumMesas` del semillero que estás probando (debe ser 16 o 15).
+
+---
+
+## 2. Criterios de cálculo (revisión de las 88 celdas)
+
+| Generación | Criterio del Excel | Celdas útiles por bandeja | Fórmula |
+|---|---|---|---|
+| DevX | Siembra variable, múltiplos o no de 8; 1 semilla por celda | 96 (12 columnas) | ⌈ ⌈semillas ÷ 8⌉ ÷ 12 ⌉ |
+| F1 | 8 · 16 · 32 sem/plot; 1 sem/celda → 1 · 2 · 4 columnas | 96 (12 columnas) | ⌈ plots × columnas ÷ 12 ⌉ |
+| **F2 Marcadores** | 880 sem/plot, **primera línea libre por diseño de platos** → 88 sem/bandeja | **88 (11 columnas)** | plots × ⌈ semillas ÷ 88 ⌉ → 880 = 10 band/plot; 1200 = 14 |
+| F3 | 8–16 sem/plot = 1 línea (columna) por plot; 16 = 2 sem/celda | 96 (12 columnas) | ⌈ plots ÷ 12 ⌉ |
+| F4 | Igual que F3 (trasplante 2) | 96 (12 columnas) | ⌈ plots ÷ 12 ⌉ |
+
+La fórmula de `lblResultadoBandejas` ya hace esto. Lo que estaba mal es el **valor inicial** del toggle: ahora se enciende solo en F2 y el usuario puede cambiarlo si un caso especial lo requiere.
+
+Comprobación: DevX 200 semillas → 25 columnas ÷ 12 = **3 bandejas** · F2 15 plots × 880 → **150 bandejas** · F3 150 plots → **13 bandejas**.
+
+---
+
+## 3. SharePoint y pantalla
+
+### 3.1 Lista `NURSERY_ASSIGNMENTS` — columna nueva
+
+| Columna | Tipo | Uso |
+|---|---|---|
+| `FechaTrasplanteReal` | Fecha (solo fecha) | Fecha real del trasplante. `FechaTrasplante` queda como **estimada** y no se borra |
+
+**Fecha disponible** de un set = fecha real si existe; si no, la estimada.
+
+### `Semilleros` · Pantalla · raíz
+**OnVisible**
+```
+=ClearCollect(colNurseryConfig; Sort(NURSERY_CONFIG; ID; SortOrder.Ascending));;
+Set(varNurserySeleccionado; Coalesce(varNurserySeleccionado; First(colNurseryConfig).Nursery));;
+Set(varNumMesas; LookUp(colNurseryConfig; Nursery = varNurserySeleccionado; NumMesas));;
+Set(varPoolSeleccionado; LookUp(colNurseryConfig; Nursery = varNurserySeleccionado).Pool.Value);;
+ClearCollect(colAsigBandejas;
+    Filter(NURSERY_ASSIGNMENTS; Nursery = varNurserySeleccionado And EstadoCiclo.Value = "Active")
+);;
+ClearCollect(colSelBandejas;
+    { IdB: 0; Etiqueta: ""; MesaOrigen: 0; PosOrigen: 0; ColorPunto: ""; Orden: 0 }
+);;
+Clear(colSelBandejas);;
+Set(varSetSeleccionado; Blank());;
+Set(varColorCultivo; "#22A855");;
+Set(varColorPuntoSet; "#2563EB");;
+Set(varLoteResaltado; "");;
+Set(varLoteFechas; Blank());;
+Set(varMostrarPanelAsignar; true);;
+Set(varMostrarPanelSets; false);;
+Set(varMostrarPanelSetsActivos; false);;
+Set(varPopupNursery; false);;
+Set(varPopupReubicar; false);;
+Set(varPopupFechas; false);;
+Set(varVistaResumen; false);;
+Set(varResArea; "Todas las áreas");;
+Set(varResNursery; "Todos los semilleros");;
+Set(varMesaOrigen; 1);;
+Set(varConfirmarFin; false);;
+Set(varProcesando; false)
+```
+
+---
+
+## 4. Correcciones
+
+### 4.1 Calculadora
+
+#### `conSemillas_3` · Contenedor · `conFormAsignar_1`
+**Fill** `=ColorValue("#F1F8EC")` · **BorderColor** `=ColorValue("#D6E8C4")` · **BorderThickness** `=1` · **Height** `=150` · Radios `=8` · `PaddingTop`/`PaddingBottom`/`PaddingLeft`/`PaddingRight` `=8` · **LayoutGap** `=4`
+
+#### `tglPrimeraColumna` · Toggle (moderno) · `conSemillas_3`
+**Checked**
+```
+=cmbGeneracion.Selected.Gen = "F2"
+```
+**Label**
+```
+=If(Self.Checked; "1ª columna libre · 88 celdas útiles"; "Bandeja completa · 96 celdas")
+```
+
+#### `lblResultadoBandejas` · Label · `conSemillas_3`
+Fórmula ✅ correcta. Solo cambia el tamaño:
+**Height** `=44` · **AlignInContainer** `=AlignInContainer.Stretch`
+
+#### `cmbSemPlotF1` · ModernCombobox · `conCampo_Nave_3`
+Fórmulas ✅. Agrega valor inicial para que no calcule 0:
+**DefaultSelectedItems**
+```
+=[16]
+```
+
+#### `lblErrorMsg_1` · Label · `conFormAsignar_1`
+**Text**
+```
+=Switch(
+    true;
+    IsBlank(cmbGeneracion.Selected); "Selecciona la generación";
+    Coalesce(Value(txtBandejas.Text); 0) <= 0; "Ingresa los parámetros de siembra";
+    IsBlank(varSetSeleccionado); "Selecciona el set";
+    IsBlank(cmbSustrato_1.Selected); "Selecciona los litros de sustrato";
+    IsBlank(dpFechaSiembra.SelectedDate); "Selecciona la fecha de siembra";
+    Value(txtBandejas.Text) > varNumMesas * 60 - CountRows(colAsigBandejas);
+        "No caben: hay " & (varNumMesas * 60 - CountRows(colAsigBandejas)) & " posiciones libres en " & varNurserySeleccionado;
+    ""
+)
+```
+
+#### `btnDistribuir` · Classic/Button · `conFormAsignar_1`
+**OnSelect** (usa la fecha elegida en `dpFechaSiembra`; se conserva `Título` como lo tienes)
+```
+=Set(varProcesando; true);;
+With(
+    {
+        req: Value(txtBandejas.Text);
+        susUnit: Value(cmbSustrato_1.Selected.Value);
+        crop: varSetSeleccionado.Crop.Value;
+        gen: cmbGeneracion.Selected.Gen;
+        loteId: Text(GUID());
+        fSiembra: dpFechaSiembra.SelectedDate;
+        densidad: Switch(cmbGeneracion.Selected.Gen;
+            "DevX"; txtSemillasDevX.Text & " semillas";
+            "F1"; txtPlots.Text & " plots · " & cmbSemPlotF1.Selected.Value & " sem/plot";
+            "F2"; txtPlots.Text & " plots · " & txtSemPlotF2.Text & " sem/plot";
+            txtPlots.Text & " plots (1 línea c/u)"
+        )
+    };
+    With(
+        {
+            dias: Switch(crop; "Tomato"; 28; "Pepper"; 30; 18);
+            ocupadas: ForAll(colAsigBandejas As b; (b.NumMesa - 1) * 60 + b.Posicion)
+        };
+        ClearCollect(colLibres;
+            Filter(
+                ForAll(Sequence(varNumMesas * 60) As S;
+                    { Clave: S.Value; NumMesa: RoundUp(S.Value / 60; 0); Posicion: Mod(S.Value - 1; 60) + 1 }
+                );
+                !(Clave in ocupadas.Value)
+            )
+        );;
+        If(
+            CountRows(colLibres) < req;
+            Notify("No caben: hay " & CountRows(colLibres) & " posiciones libres y se requieren " & req; NotificationType.Error);
+            Collect(NURSERY_ASSIGNMENTS;
+                ForAll(Sequence(req) As i;
+                    With(
+                        { p: Index(colLibres; i.Value) };
+                        {
+                            Título: varSetSeleccionado.SetName & "-B" & Text(i.Value; "000");
+                            Nursery: varNurserySeleccionado;
+                            NumMesa: p.NumMesa;
+                            Posicion: p.Posicion;
+                            NumBandejaLote: i.Value;
+                            CantidadBandejas: 1;
+                            Generacion: { Value: gen };
+                            SetName: varSetSeleccionado.SetName;
+                            Crop: { Value: crop };
+                            Densidad: densidad;
+                            SustratoUnit: susUnit;
+                            SustratoTotal: susUnit;
+                            FechaSiembra: fSiembra;
+                            FechaTrasplante: DateAdd(fSiembra; dias; TimeUnit.Days);
+                            DiasTrasplante: dias;
+                            ColorBarra: varColorCultivo;
+                            ColorPunto: varColorPuntoSet;
+                            LoteId: loteId;
+                            EstadoCiclo: { Value: "Active" }
+                        }
+                    )
+                )
+            );;
+            ClearCollect(colAsigBandejas;
+                Filter(NURSERY_ASSIGNMENTS; Nursery = varNurserySeleccionado And EstadoCiclo.Value = "Active")
+            );;
+            Notify(req & " bandejas de " & varSetSeleccionado.SetName & " (" & gen & ") sembradas el " & Text(fSiembra; "dd/mm/yyyy") & " en " & varNurserySeleccionado & ". Sustrato: " & req * susUnit & " L"; NotificationType.Success)
+        )
+    )
+);;
+Set(varProcesando; false)
+```
+
+#### `conFormAsignar_1` · Contenedor · `conPanelIzquierdo_1`
+**Height** `=1010`
+
+---
+
+### 4.2 Panel de sets sembrados
+
+#### `conPanelIzquierdo2_1` · Contenedor · `conMainBody_2`
+**FillPortions** `=0`
+
+#### `conPanelSets_2` · Contenedor · `conPanelIzquierdo2_1`
+**FillPortions** `=1` (borra `Height`).
+En la vista de árbol, **sube `conHeaderSetsPanel_2` para que quede antes de `galLotes`**.
+
+#### `galLotes` · Gallery · `conPanelSets_2`
+**FillPortions** `=1` (borra `Height = 240`)
+**Items** (agrega `Nursery` y `FechaTrasplanteReal`)
+```
+=With(
+    { ids: Distinct(colAsigBandejas; LoteId) };
+    ForAll(ids As L;
+        With(
+            { piezas: Filter(colAsigBandejas; LoteId = L.Value) };
+            With(
+                { f: First(piezas) };
+                {
+                    LoteId: L.Value;
+                    SetName: f.SetName;
+                    Crop: f.Crop.Value;
+                    Gen: f.Generacion.Value;
+                    Nursery: f.Nursery;
+                    Bandejas: Sum(piezas; CantidadBandejas);
+                    Densidad: f.Densidad;
+                    SustratoTotal: Sum(piezas; SustratoTotal);
+                    Mesas: Concat(Sort(Distinct(piezas; NumMesa); Value; SortOrder.Ascending); "M" & Value; ", ");
+                    FechaSiembra: f.FechaSiembra;
+                    FechaTrasplante: f.FechaTrasplante;
+                    FechaTrasplanteReal: f.FechaTrasplanteReal;
+                    Dias: f.DiasTrasplante;
+                    ColorBarra: f.ColorBarra;
+                    ColorPunto: f.ColorPunto
+                }
+            )
+        )
+    )
+)
+```
+
+#### `lblSetCiclo_4` · Label · plantilla de `galLotes`
+**Text**
+```
+="📅 Siembra " & Text(ThisItem.FechaSiembra; "dd/mm/yyyy") & "  ·  Trasplante est. " & Text(ThisItem.FechaTrasplante; "dd/mm/yyyy") &
+If(
+    IsBlank(ThisItem.FechaTrasplanteReal);
+    "  ·  faltan " & Max(0; DateDiff(Today(); ThisItem.FechaTrasplante; TimeUnit.Days)) & " días";
+    "  ·  Real " & Text(ThisItem.FechaTrasplanteReal; "dd/mm/yyyy")
+)
+```
+
+#### `icoFechasLote` · Classic/Icon · **NUEVO** · `Container53_1`, entre `recColorDotSet_2` e `Icon3_2`
+**Icon** `=Icon.Edit` · **Width/Height** `=15` · **Tooltip** `="Cambiar fecha de siembra / registrar trasplante real"`
+**OnSelect**
+```
+=Set(varLoteFechas;
+    {
+        LoteId: ThisItem.LoteId;
+        SetName: ThisItem.SetName;
+        Crop: ThisItem.Crop;
+        Nursery: ThisItem.Nursery;
+        Dias: ThisItem.Dias;
+        FechaSiembra: ThisItem.FechaSiembra;
+        FechaTrasplante: ThisItem.FechaTrasplante;
+        FechaTrasplanteReal: ThisItem.FechaTrasplanteReal
+    }
+);;
+Reset(dpEditSiembra);;
+Reset(dpTrasplanteReal);;
+Reset(tglLiberarBandejas);;
+Set(varPopupFechas; true)
+```
+
+---
+
+### 4.3 Popup de semilleros
+
+#### `icoCerrarNursery` · ModernIcon · `conCajaNurseryHead`
+**Icon** `="Dismiss"`
+
+#### `galNurseries` · Gallery · `conCajaNursery`
+**AlignInContainer** `=AlignInContainer.Stretch` · **FillPortions** `=1` · **WrapCount** `=4` · **TemplateSize** `=160` · **TemplatePadding** `=6` (borra `Width = 0`)
+
+**Orden de capas (obligatorio):** clic derecho → **Reordenar**:
+1. `recNurCard` → **Enviar al fondo**.
+2. En este orden, cada uno → **Traer al frente**: `recNurBarFondo`, `recNurBarProg`, `lblNurNombre`, `lblNurPool`, `lblNurOcup`, `btnNurSel`.
+
+#### `lblNurNombre` · Label · plantilla de `galNurseries`
+**Size** `=16`
+
+#### `btnNurSel` · Classic/Button · plantilla de `galNurseries`
+**X** `=0` · **Y** `=0` · **Color** `=RGBA(0; 0; 0; 0)` · **BorderColor** `=RGBA(0; 0; 0; 0)` · **HoverFill** `=RGBA(12; 56; 76; 0,06)` · **HoverBorderColor** `=RGBA(0; 0; 0; 0)` · **PressedBorderColor** `=RGBA(0; 0; 0; 0)`. `OnSelect` ✅.
+
+---
+
+### 4.4 Popup reubicar
+
+#### `icoCerrarReub` · ModernIcon · `conReubHead`
+**Icon** `="Dismiss"`
+
+#### `conReubBody` · Contenedor · `conCajaReubicar`
+**FillPortions** `=1`
+
+#### `conReubOrigen` · Contenedor · `conReubBody`
+**FillPortions** `=1` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+#### `conReubDestino` · Contenedor · `conReubBody`
+**LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+#### `galPosiciones` · Gallery · `conReubOrigen` — `Items` ✅
+**Orden de capas (obligatorio):** clic derecho → **Reordenar** → **Traer al frente**, en este orden:
+`recPosBandeja`, `lblPosBandeja`, `lblPosNum`, `lblPosOrden`, `btnPosSel`.
+Resultado en la vista de árbol, de arriba hacia abajo: `btnPosSel`, `lblPosOrden`, `lblPosNum`, `lblPosBandeja`, `recPosBandeja`, `recPosFondo`.
+
+#### `lblPosNum` · Label · plantilla de `galPosiciones`
+**Fill** `=RGBA(0; 0; 0; 0)` · **Visible** `=true` · **FontWeight** `=FontWeight.Normal` · **Align** `=Align.Left`
+
+#### `lblPosBandeja` · Label · plantilla de `galPosiciones`
+**Text** `=ThisItem.NumB` · **Color** `=Color.White` · **Size** `=8` · **Fill** `=RGBA(0; 0; 0; 0)`
+
+#### `btnPosSel` · Classic/Button · plantilla de `galPosiciones`
+**X** `=0` · **Y** `=0` · **Color** `=RGBA(0; 0; 0; 0)` · **BorderColor** `=RGBA(0; 0; 0; 0)` · **HoverFill** `=RGBA(12; 56; 76; 0,08)` · **HoverBorderColor** `=RGBA(0; 0; 0; 0)` · **PressedBorderColor** `=RGBA(0; 0; 0; 0)` · **DisabledFill** `=RGBA(0; 0; 0; 0)`. `OnSelect`, `DisplayMode`, `Tooltip` ✅.
+
+#### `galSeleccion` · Gallery · `conReubDestino` — `Items` ✅
+**WrapCount** `=1` · **ShowScrollbar** `=true` · **TemplateSize** `=30`
+
+#### `recSelColor` · Rectangle · plantilla de `galSeleccion`
+**BorderThickness** `=0` (borra la fórmula de `BorderColor`). `Fill` ✅.
+
+#### `lblSelItem` · Label · plantilla de `galSeleccion`
+**Visible** `=true` · **Fill** `=RGBA(0; 0; 0; 0)` · **Align** `=Align.Left` · **FontWeight** `=FontWeight.Semibold`. `Text` ✅.
+
+#### `icoSubirSel` · ModernIcon · plantilla de `galSeleccion`
+**Icon** `="ChevronUp"`
+**Visible**
+```
+=ThisItem.Orden > 1
+```
+`OnSelect` ✅.
+
+#### `icoQuitarSel` · ModernIcon · plantilla de `galSeleccion`
+**Icon** `="Dismiss"` · **Visible** `=true`. `OnSelect` ✅.
+
+---
+
+## 5. Selección de set en popup (reutiliza `Container15_1`)
+
+### `conPopupSets` · Contenedor (diseño manual) · **NUEVO** · raíz de `Semilleros`, debajo de `conPopupReubicar`
+**X** `=0` · **Y** `=0` · **Width** `=Parent.Width` · **Height** `=Parent.Height`
+**Fill** `=RGBA(12; 56; 76; 0,45)`
+**Visible** `=varMostrarPanelSetsActivos`
+
+**Mover:** en la vista de árbol selecciona `Container15_1` → **Cortar** (Ctrl+X) → selecciona `conPopupSets` → **Pegar** (Ctrl+V). Al cortar y pegar se conservan los nombres (`TextInput8_1`, `galSetsActivos01_1`, `Button8_1`…), así sus fórmulas siguen funcionando. Si Power Apps les agrega un sufijo, vuelve a ponerles el nombre original.
+
+### `Container15_1` · Contenedor · ahora dentro de `conPopupSets`
+**Width** `=Min(900; Parent.Width - 40)` · **Height** `=Min(620; Parent.Height - 40)`
+**X** `=(Parent.Width - Self.Width) / 2` · **Y** `=(Parent.Height - Self.Height) / 2`
+**Fill** `=Color.White` · **DropShadow** `=DropShadow.Bold` · Radios `=10`
+**LayoutAlignItems** `=LayoutAlignItems.Stretch` · **Visible** `=true`
+
+### `TextInput8_1` · Classic/TextInput · `Container40_1`
+**HintText** `="Buscar por set, cultivo o campo…"`
+
+### `Button2_1` · Classic/Button · `Container40_1`
+**Text** `="Cerrar"`. `OnSelect` ✅.
+
+### `Container42_1` · Contenedor · `Container15_1`
+**FillPortions** `=1` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+### `galSetsActivos01_1` · Gallery · `Container42_1`
+**FillPortions** `=1`. `Items` ✅.
+
+---
+
+## 6. Fecha de siembra en la calculadora
+
+### `conFechaSiembra` · Contenedor (vertical) · **NUEVO** · `conFormAsignar_1`, después de `cnbSustrato_1` y antes de `lblErrorMsg_1`
+**FillPortions** `=0` · **Height** `=100` · **LayoutGap** `=2` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+### `lblFechaSiembra` · Label · `conFechaSiembra`
+**Text** `="FECHA DE SIEMBRA"` · **Align** `=Align.Center` · **Size** `=9` · **FontWeight** `=FontWeight.Semibold` · **Height** `=22`
+
+### `dpFechaSiembra` · Classic/DatePicker · `conFechaSiembra`
+**DefaultDate** `=Today()` · **Format** `=DateTimeFormat.ShortDate` · **Height** `=36`
+
+### `lblTrasplanteEst` · Label · `conFechaSiembra`
+**Size** `=9` · **FontWeight** `=FontWeight.Semibold` · **Color** `=ColorValue("#1F7A3D")` · **Align** `=Align.Center` · **Height** `=36`
+**Text**
+```
+=If(
+    IsBlank(varSetSeleccionado);
+    "Selecciona el set para calcular el trasplante";
+    With(
+        { dias: Switch(varSetSeleccionado.Crop.Value; "Tomato"; 28; "Pepper"; 30; 18) };
+        "Trasplante estimado: " & Text(DateAdd(dpFechaSiembra.SelectedDate; dias; TimeUnit.Days); "dd/mm/yyyy") & "  (" & dias & " días)"
+    )
+)
+```
+
+---
+
+## 7. Popup de fechas: cambiar la siembra y registrar el trasplante real
+
+Se abre desde el 📅 de cada set (panel de sets o vista de capacidad).
+- Cambiar la fecha de siembra recalcula el trasplante estimado.
+- La fecha real se guarda aparte; la estimada no se borra.
+- Si el trasplante ya se hizo, el interruptor libera las bandejas del semillero (`EstadoCiclo = Finished`).
+
+### `conPopupFechas` · Contenedor (diseño manual) · **NUEVO** · raíz de `Semilleros`, **último** del árbol (queda encima de todo)
+**X** `=0` · **Y** `=0` · **Width** `=Parent.Width` · **Height** `=Parent.Height`
+**Fill** `=RGBA(12; 56; 76; 0,45)` · **Visible** `=varPopupFechas`
+
+### `conCajaFechas` · Contenedor (vertical) · `conPopupFechas`
+**Width** `=Min(460; Parent.Width - 40)` · **Height** `=480`
+**X** `=(Parent.Width - Self.Width) / 2` · **Y** `=(Parent.Height - Self.Height) / 2`
+**Fill** `=Color.White` · **DropShadow** `=DropShadow.Bold` · Radios `=10` · Padding `=16` · **LayoutGap** `=8` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+### `conFechasHead` · Contenedor (horizontal) · `conCajaFechas`
+**Height** `=36` · **FillPortions** `=0` · **LayoutAlignItems** `=LayoutAlignItems.Center`
+
+#### `lblFechasTitulo` · Label · `conFechasHead`
+**FillPortions** `=1` · **FontWeight** `=FontWeight.Bold` · **Size** `=11`
+**Text**
+```
+="📅 Fechas · " & varLoteFechas.SetName & " (" & varLoteFechas.Crop & ") · " & varLoteFechas.Nursery
+```
+
+#### `icoCerrarFechas` · Classic/Icon · `conFechasHead`
+**Icon** `=Icon.Cancel` · **Width/Height** `=24` · **OnSelect** `=Set(varPopupFechas; false)`
+
+### `lblEditSiembra` · Label · `conCajaFechas`
+**Text** `="FECHA DE SIEMBRA"` · **Align** `=Align.Center` · **Size** `=9` · **FontWeight** `=FontWeight.Semibold`
+
+### `dpEditSiembra` · Classic/DatePicker · `conCajaFechas`
+**DefaultDate** `=varLoteFechas.FechaSiembra` · **Format** `=DateTimeFormat.ShortDate`
+
+### `lblEditTrasEst` · Label · `conCajaFechas`
+**Color** `=ColorValue("#1F7A3D")` · **Size** `=9` · **Align** `=Align.Center`
+**Text**
+```
+="Trasplante estimado: " & Text(DateAdd(dpEditSiembra.SelectedDate; varLoteFechas.Dias; TimeUnit.Days); "dd/mm/yyyy") & "  (" & varLoteFechas.Dias & " días después de la siembra)"
+```
+
+### `lblTrasReal` · Label · `conCajaFechas`
+**Text** `="FECHA REAL DE TRASPLANTE (opcional)"` · **Align** `=Align.Center` · **Size** `=9` · **FontWeight** `=FontWeight.Semibold`
+
+### `dpTrasplanteReal` · Classic/DatePicker · `conCajaFechas`
+**DefaultDate** `=varLoteFechas.FechaTrasplanteReal` · **Format** `=DateTimeFormat.ShortDate`
+
+### `lblDifReal` · Label · `conCajaFechas`
+**Size** `=9` · **Color** `=ColorValue("#64748B")` · **Align** `=Align.Center`
+**Text**
+```
+=If(
+    IsBlank(dpTrasplanteReal.SelectedDate);
+    "Sin fecha real: se usa la estimada como fecha disponible.";
+    With(
+        { d: DateDiff(DateAdd(dpEditSiembra.SelectedDate; varLoteFechas.Dias; TimeUnit.Days); dpTrasplanteReal.SelectedDate; TimeUnit.Days) };
+        If(
+            d = 0; "Trasplante en la fecha estimada.";
+            d > 0; "Se trasplantó " & d & " día(s) después de lo estimado.";
+            "Se trasplantó " & -d & " día(s) antes de lo estimado."
+        )
+    )
+)
+```
+
+### `tglLiberarBandejas` · Toggle (moderno) · `conCajaFechas`
+**Checked** `=false`
+**Label** `="Trasplante realizado: liberar las bandejas del semillero"`
+**DisplayMode**
+```
+=If(IsBlank(dpTrasplanteReal.SelectedDate); DisplayMode.Disabled; DisplayMode.Edit)
+```
+
+### `conFechasBotones` · Contenedor (horizontal) · `conCajaFechas`
+**Height** `=42` · **FillPortions** `=0` · **LayoutGap** `=8`
+
+#### `btnCancelarFechas` · Classic/Button · `conFechasBotones`
+**Text** `="Cancelar"` · **FillPortions** `=1` · **OnSelect** `=Set(varPopupFechas; false)`
+
+#### `btnGuardarFechas` · Classic/Button · `conFechasBotones`
+**Text** `=If(varProcesando; "Guardando…"; "Guardar fechas")` · **FillPortions** `=1` · **Fill** `=ColorValue("#38B4E8")`
+**DisplayMode**
+```
+=If(IsBlank(dpEditSiembra.SelectedDate) Or varProcesando; DisplayMode.Disabled; DisplayMode.Edit)
+```
+**OnSelect**
+```
+=Set(varProcesando; true);;
+With(
+    {
+        fS: dpEditSiembra.SelectedDate;
+        fR: dpTrasplanteReal.SelectedDate;
+        liberar: tglLiberarBandejas.Checked And !IsBlank(dpTrasplanteReal.SelectedDate)
+    };
+    Patch(NURSERY_ASSIGNMENTS;
+        ForAll(Filter(NURSERY_ASSIGNMENTS; LoteId = varLoteFechas.LoteId And EstadoCiclo.Value = "Active") As r;
+            {
+                ID: r.ID;
+                FechaSiembra: fS;
+                FechaTrasplante: DateAdd(fS; varLoteFechas.Dias; TimeUnit.Days);
+                FechaTrasplanteReal: fR;
+                EstadoCiclo: { Value: If(liberar; "Finished"; "Active") }
+            }
+        )
+    );;
+    Notify(
+        If(liberar;
+            "Trasplante registrado: " & varLoteFechas.SetName & " liberó sus bandejas";
+            "Fechas de " & varLoteFechas.SetName & " actualizadas");
+        NotificationType.Success
+    )
+);;
+ClearCollect(colAsigBandejas;
+    Filter(NURSERY_ASSIGNMENTS; Nursery = varNurserySeleccionado And EstadoCiclo.Value = "Active")
+);;
+If(varVistaResumen; Select(btnResActualizar));;
+Set(varLoteResaltado; "");;
+Set(varPopupFechas; false);;
+Set(varProcesando; false)
+```
+
+---
+
+## 8. Tablero de semilleros (tablas, filtros, indicadores y gráfica)
+
+Un botón del header oculta la planificación (`conMainBody_2`) y muestra el tablero (`conResumen`):
+
+- **Filtros:** Área y Semillero. Al cambiar el área, el semillero vuelve a "Todos". También se filtra por semillero tocando una fila de la tabla Semilleros (otro toque quita el filtro).
+- **5 indicadores** (sin "Próximo trasplante"): Capacidad instalada, Ocupadas, Disponibles, Solanáceas y Cucurbitáceas.
+- **Tabla Semilleros:** Semillero · Área · Mesas · Capacidad · Ocupadas · Disponibles · Ocupación · Últ. siembra · Próx. trasplante · Libre total · → (abrir en planificación).
+- **Tabla Sets en semilleros:** Set · Cultivo · Gen · Semillero · Mesas · Bandejas · Siembra · Trasplante est. · Trasplante real · Disponible desde · Estado · 📅 (editar fechas).
+- **Gráfica:** bandejas por cultivo, cultivo predominante y uso de la capacidad por familia.
+
+Los indicadores, ambas tablas y la gráfica responden a los dos filtros.
+
+Familias: **Solanáceas** = Tomato, Pepper · **Cucurbitáceas** = Cucumber, Melon, Watermelon.
+"Disponible desde" = fecha real de trasplante si existe; si no, la estimada.
+"Libre total" = la fecha "disponible desde" más lejana de los sets del semillero.
+
+### 8.1 Header
+
+#### `btnVistaResumen` · Classic/Button · **NUEVO** · `conHeader_2`, después de `lblTitulo_2`
+**Text** `=If(varVistaResumen; "🗂 Volver a planificación"; "📋 Tablero de semilleros")`
+**Fill** `=ColorValue("#38B4E8")` · **Color** `=Color.White` · **Width** `=210` · **Height** `=30` · Radios `=4` · **Size** `=10`
+**OnSelect**
+```
+=Set(varVistaResumen; !varVistaResumen);;
+If(varVistaResumen; Select(btnResActualizar))
+```
+
+#### `btnTogglePanel_1` · Classic/Button · `conHeader_2`
+**Visible** `=!varVistaResumen`
+
+#### `btnToggleSets_1` · Classic/Button · `conHeader_2`
+**Visible** `=!varVistaResumen`
+
+#### `btnNurserySelector` · Classic/Button · `conHeader_2`
+**Visible** `=!varVistaResumen`
+
+#### `conMainBody_2` · Contenedor · `conResponsiveWrapper01_2`
+**Visible** `=!varVistaResumen`
+
+### 8.2 Contenedor principal
+
+#### `conResumen` · Contenedor (vertical) · **NUEVO** · `conResponsiveWrapper01_2`, debajo de `conMainBody_2`
+**Width** `=Parent.Width` · **Height** `=Parent.Height - 50 - 3 - 16`
+**Visible** `=varVistaResumen`
+**LayoutAlignItems** `=LayoutAlignItems.Stretch` · **LayoutGap** `=10` · Padding `=8`
+
+### 8.3 Barra de filtros
+
+#### `conResFiltros` · Contenedor (horizontal) · `conResumen`
+**FillPortions** `=0` · **Height** `=50` · **LayoutAlignItems** `=LayoutAlignItems.Center` · **LayoutGap** `=10` · Padding `=8`
+**Fill** `=Color.White` · **BorderColor** `=ColorValue("#DDE2E8")` · **BorderThickness** `=1`
+
+##### `lblResTitulo` · Label · `conResFiltros`
+**Text** `="📋 Tablero de semilleros"` · **FontWeight** `=FontWeight.Bold` · **Size** `=12` · **Width** `=230`
+
+##### `lblResArea` · Label · `conResFiltros`
+**Text** `="Área:"` · **Width** `=50` · **Align** `=Align.Right`
+
+##### `cmbAreaResumen` · ModernCombobox · `conResFiltros`
+**Items** `=colAreas` · **ItemDisplayText** `=ThisItem.Area` · **SelectMultiple** `=false` · **Width** `=210`
+**DefaultSelectedItems**
+```
+=Filter(colAreas; Area = varResArea)
+```
+**OnChange**
+```
+=Set(varResArea; Coalesce(Self.Selected.Area; "Todas las áreas"));;
+Set(varResNursery; "Todos los semilleros");;
+ClearCollect(colResNurOpc; { Nursery: "Todos los semilleros" });;
+Collect(colResNurOpc;
+    ForAll(Filter(colNurseryConfig; varResArea = "Todas las áreas" Or Pool.Value = varResArea) As N;
+        { Nursery: N.Nursery }
+    )
+)
+```
+
+##### `lblResSem` · Label · `conResFiltros`
+**Text** `="Semillero:"` · **Width** `=80` · **Align** `=Align.Right`
+
+##### `cmbNurseryResumen` · ModernCombobox · `conResFiltros`
+**Items** `=colResNurOpc` · **ItemDisplayText** `=ThisItem.Nursery` · **SelectMultiple** `=false` · **Width** `=210`
+**DefaultSelectedItems**
+```
+=Filter(colResNurOpc; Nursery = varResNursery)
+```
+**OnChange**
+```
+=Set(varResNursery; Coalesce(Self.Selected.Nursery; "Todos los semilleros"))
+```
+
+##### `btnResLimpiar` · Classic/Button · `conResFiltros`
+**Text** `="Limpiar filtros"` · **Width** `=130` · **Height** `=30` · Radios `=4`
+**OnSelect**
+```
+=Set(varResArea; "Todas las áreas");;
+Set(varResNursery; "Todos los semilleros");;
+ClearCollect(colResNurOpc; { Nursery: "Todos los semilleros" });;
+Collect(colResNurOpc; ForAll(colNurseryConfig As N; { Nursery: N.Nursery }))
+```
+
+##### `lblResActualizado` · Label · `conResFiltros`
+**FillPortions** `=1` · **Align** `=Align.Right` · **Size** `=9` · **Color** `=ColorValue("#64748B")`
+**Text**
+```
+="Actualizado: " & Text(varResActualizado; "dd/mm/yyyy hh:mm")
+```
+
+##### `btnResActualizar` · Classic/Button · `conResFiltros`
+**Text** `="⟳ Actualizar"` · **Width** `=120` · **Height** `=30` · Radios `=4`
+**OnSelect** (carga cada semillero por separado y arma un resumen de un registro por set)
+```
+=ClearCollect(colNurseryConfig; Sort(NURSERY_CONFIG; ID; SortOrder.Ascending));;
+Clear(colResumen);;
+ForAll(colNurseryConfig As N;
+    Collect(colResumen;
+        Filter(NURSERY_ASSIGNMENTS; Nursery = N.Nursery And EstadoCiclo.Value = "Active")
+    )
+);;
+ClearCollect(colResLotes;
+    ForAll(Distinct(colResumen; LoteId) As L;
+        With(
+            { t: Filter(colResumen; LoteId = L.Value) };
+            With(
+                { f: First(t) };
+                {
+                    LoteId: L.Value;
+                    SetName: f.SetName;
+                    Crop: f.Crop.Value;
+                    Familia: Switch(f.Crop.Value;
+                        "Tomato"; "Solanáceas";
+                        "Pepper"; "Solanáceas";
+                        "Cucumber"; "Cucurbitáceas";
+                        "Melon"; "Cucurbitáceas";
+                        "Watermelon"; "Cucurbitáceas";
+                        "Otros"
+                    );
+                    Gen: f.Generacion.Value;
+                    Nursery: f.Nursery;
+                    Pool: LookUp(colNurseryConfig; Nursery = f.Nursery).Pool.Value;
+                    Bandejas: CountRows(t);
+                    Mesas: Concat(Sort(Distinct(t; NumMesa); Value; SortOrder.Ascending); "M" & Value; ", ");
+                    Densidad: f.Densidad;
+                    FechaSiembra: f.FechaSiembra;
+                    FechaTrasplante: f.FechaTrasplante;
+                    FechaTrasplanteReal: f.FechaTrasplanteReal;
+                    FechaDisponible: Coalesce(f.FechaTrasplanteReal; f.FechaTrasplante);
+                    Dias: f.DiasTrasplante;
+                    ColorBarra: f.ColorBarra;
+                    ColorPunto: f.ColorPunto
+                }
+            )
+        )
+    )
+);;
+ClearCollect(colAreas; { Area: "Todas las áreas" });;
+Collect(colAreas; ForAll(Distinct(colNurseryConfig; Pool.Value) As A; { Area: A.Value }));;
+ClearCollect(colResNurOpc; { Nursery: "Todos los semilleros" });;
+Collect(colResNurOpc;
+    ForAll(Filter(colNurseryConfig; varResArea = "Todas las áreas" Or Pool.Value = varResArea) As N;
+        { Nursery: N.Nursery }
+    )
+);;
+Set(varResActualizado; Now())
+```
+> Cada semillero se consulta aparte (máximo 960 registros), así nunca se pasa el límite de 2000 aunque en total haya hasta 7,560 bandejas. Las tablas y la gráfica trabajan sobre `colResLotes` (un registro por set), por eso los filtros responden al instante.
+
+### 8.4 Indicadores (5)
+
+#### `galResKpis` · Gallery (vertical en blanco) · `conResumen`
+**FillPortions** `=0` · **Height** `=100` · **WrapCount** `=5` · **TemplateSize** `=92` · **TemplatePadding** `=5` · **ShowScrollbar** `=false`
+**Items**
+```
+=With(
+    {
+        nurF: Filter(colNurseryConfig;
+            (varResArea = "Todas las áreas" Or Pool.Value = varResArea) And
+            (varResNursery = "Todos los semilleros" Or Nursery = varResNursery));
+        lotF: Filter(colResLotes;
+            (varResArea = "Todas las áreas" Or Pool = varResArea) And
+            (varResNursery = "Todos los semilleros" Or Nursery = varResNursery))
+    };
+    With(
+        {
+            cap: Sum(nurF; NumMesas) * 60;
+            capTotal: Sum(colNurseryConfig; NumMesas) * 60;
+            usadas: Sum(lotF; Bandejas);
+            sol: Sum(Filter(lotF; Familia = "Solanáceas"); Bandejas);
+            cuc: Sum(Filter(lotF; Familia = "Cucurbitáceas"); Bandejas)
+        };
+        Table(
+            { Titulo: "CAPACIDAD INSTALADA"; Valor: Text(cap); Sub: "de " & capTotal & " totales · " & CountRows(nurF) & " semillero(s)"; Color: "#0C384C" };
+            { Titulo: "OCUPADAS"; Valor: Text(usadas); Sub: If(cap = 0; "0"; Text(Round(usadas / cap * 100; 1))) & "% de ocupación"; Color: "#38B4E8" };
+            { Titulo: "DISPONIBLES"; Valor: Text(cap - usadas); Sub: "faltan " & (cap - usadas) & " para llenarse"; Color: "#22A855" };
+            { Titulo: "SOLANÁCEAS"; Valor: Text(sol); Sub: If(cap = 0; "0"; Text(Round(sol / cap * 100; 1))) & "% de la capacidad"; Color: "#EF4444" };
+            { Titulo: "CUCURBITÁCEAS"; Valor: Text(cuc); Sub: If(cap = 0; "0"; Text(Round(cuc / cap * 100; 1))) & "% de la capacidad"; Color: "#A855F7" }
+        )
+    )
+)
+```
+
+Plantilla de `galResKpis` (posición fija; en el árbol `recKpiFondo` va al fondo):
+- **`recKpiFondo`** · Rectangle · X `=0` · Y `=0` · Width `=Parent.TemplateWidth` · Height `=Parent.TemplateHeight` · **Fill** `=Color.White` · **BorderColor** `=ColorValue("#DDE2E8")` · **BorderThickness** `=1`
+- **`recKpiAcento`** · Rectangle · X `=0` · Y `=0` · Width `=4` · Height `=Parent.TemplateHeight` · **Fill** `=ColorValue(ThisItem.Color)`
+- **`lblKpiTitulo`** · Label · X `=14` · Y `=8` · Width `=Parent.TemplateWidth - 18` · Height `=18` · **Text** `=ThisItem.Titulo` · **Size** `=8` · **FontWeight** `=FontWeight.Semibold` · **Color** `=ColorValue("#64748B")`
+- **`lblKpiValor`** · Label · X `=14` · Y `=26` · Width `=Parent.TemplateWidth - 18` · Height `=34` · **Text** `=ThisItem.Valor` · **Size** `=18` · **FontWeight** `=FontWeight.Bold` · **Color** `=ColorValue("#0C384C")`
+- **`lblKpiSub`** · Label · X `=14` · Y `=60` · Width `=Parent.TemplateWidth - 18` · Height `=26` · **Text** `=ThisItem.Sub` · **Size** `=8` · **Color** `=ColorValue("#64748B")`
+
+### 8.5 Cuerpo
+
+#### `conResCuerpo` · Contenedor (horizontal) · `conResumen`
+**FillPortions** `=1` · **LayoutGap** `=10` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+
+#### `conResIzq` · Contenedor (vertical) · `conResCuerpo`
+**FillPortions** `=1` · **LayoutGap** `=6` · Padding `=10` · **LayoutAlignItems** `=LayoutAlignItems.Stretch` · **LayoutOverflowY** `=LayoutOverflow.Scroll`
+**Fill** `=Color.White` · **BorderColor** `=ColorValue("#DDE2E8")` · **BorderThickness** `=1`
+
+---
+
+### 8.6 Tabla "Semilleros"
+
+#### `lblResNurTitulo` · Label · `conResIzq`
+**Text** `="Semilleros · toca una fila para filtrar, → para planificarlo"` · **FontWeight** `=FontWeight.Bold` · **Height** `=24`
+
+#### `conEncNur` · Contenedor (horizontal) · `conResIzq` — encabezado
+**FillPortions** `=0` · **Height** `=28` · **Fill** `=ColorValue("#F8FAFC")` · **LayoutAlignItems** `=LayoutAlignItems.Center` · Padding `=0` · **LayoutGap** `=0`
+
+Once etiquetas (Label · **Size** `=8` · **FontWeight** `=FontWeight.Semibold` · **Color** `=ColorValue("#64748B")` · **PaddingLeft** `=6`), en este orden:
+
+| Control | Text | FillPortions |
+|---|---|---|
+| `lblEncN1` | `="Semillero"` | `=8` |
+| `lblEncN2` | `="Área"` | `=9` |
+| `lblEncN3` | `="Mesas"` | `=6` |
+| `lblEncN4` | `="Capacidad"` | `=8` |
+| `lblEncN5` | `="Ocupadas"` | `=8` |
+| `lblEncN6` | `="Disponibles"` | `=9` |
+| `lblEncN7` | `="Ocupación"` | `=13` |
+| `lblEncN8` | `="Últ. siembra"` | `=11` |
+| `lblEncN9` | `="Próx. trasplante"` | `=13` |
+| `lblEncN10` | `="Libre total"` | `=11` |
+| `lblEncN11` | `=""` | `=4` |
+
+#### `galResNur` · Gallery (vertical en blanco) · `conResIzq`
+**FillPortions** `=0` · **TemplateSize** `=38` · **TemplatePadding** `=0` · **WrapCount** `=1`
+**Height**
+```
+=Min(CountRows(Self.AllItems); 8) * 38 + 2
+```
+**Items**
+```
+=ForAll(
+    Filter(colNurseryConfig;
+        (varResArea = "Todas las áreas" Or Pool.Value = varResArea) And
+        (varResNursery = "Todos los semilleros" Or Nursery = varResNursery)) As N;
+    With(
+        { lot: Filter(colResLotes; Nursery = N.Nursery); cap: N.NumMesas * 60 };
+        With(
+            {
+                u: Sum(lot; Bandejas);
+                prox: First(Sort(Filter(lot; IsBlank(FechaTrasplanteReal)); FechaTrasplante; SortOrder.Ascending));
+                ult: First(Sort(lot; FechaDisponible; SortOrder.Descending));
+                sie: First(Sort(lot; FechaSiembra; SortOrder.Descending))
+            };
+            {
+                Nursery: N.Nursery;
+                Area: N.Pool.Value;
+                NumMesas: N.NumMesas;
+                Cap: cap;
+                Usadas: u;
+                Libres: cap - u;
+                Pct: If(cap = 0; 0; u / cap * 100);
+                Sets: CountRows(lot);
+                UltSiembra: sie.FechaSiembra;
+                ProxTrasplante: prox.FechaTrasplante;
+                ProxSet: prox.SetName;
+                LibreTotal: ult.FechaDisponible
+            }
+        )
+    )
+)
+```
+
+Plantilla de `galResNur` (posición fija). Todas las etiquetas: **Y** `=0` · **Height** `=Parent.TemplateHeight` · **Size** `=9` · **PaddingLeft** `=6` · **Color** `=ColorValue("#0C384C")`, salvo lo que se indique.
+Orden en el árbol, de arriba hacia abajo: `icoRNPlanificar`, `btnRNFiltrar`, todas las etiquetas y barras, `recRNLinea`, `recRNFila` (al fondo).
+
+- **`recRNFila`** · Rectangle · X `=0` · Y `=0` · Width `=Parent.TemplateWidth` · Height `=Parent.TemplateHeight`
+  - **Fill** `=If(varResNursery = ThisItem.Nursery; ColorValue("#F4FAEC"); Color.White)`
+- **`recRNLinea`** · Rectangle · X `=0` · Y `=Parent.TemplateHeight - 1` · Width `=Parent.TemplateWidth` · Height `=1` · **Fill** `=ColorValue("#EEF1F4")`
+- **`lblRNSem`** · Label · X `=0` · Width `=Parent.TemplateWidth * 0,08` · **Text** `=ThisItem.Nursery` · **FontWeight** `=FontWeight.Bold`
+- **`lblRNArea`** · Label · X `=Parent.TemplateWidth * 0,08` · Width `=Parent.TemplateWidth * 0,09` · **Text** `=ThisItem.Area`
+- **`lblRNMesas`** · Label · X `=Parent.TemplateWidth * 0,17` · Width `=Parent.TemplateWidth * 0,06` · **Text** `=ThisItem.NumMesas`
+- **`lblRNCap`** · Label · X `=Parent.TemplateWidth * 0,23` · Width `=Parent.TemplateWidth * 0,08` · **Text** `=ThisItem.Cap`
+- **`lblRNOcup`** · Label · X `=Parent.TemplateWidth * 0,31` · Width `=Parent.TemplateWidth * 0,08` · **Text** `=ThisItem.Usadas`
+- **`lblRNDisp`** · Label · X `=Parent.TemplateWidth * 0,39` · Width `=Parent.TemplateWidth * 0,09` · **Text** `=ThisItem.Libres` · **FontWeight** `=FontWeight.Semibold` · **Color** `=ColorValue("#1F7A3D")`
+- **`lblRNPct`** · Label · X `=Parent.TemplateWidth * 0,48` · Y `=2` · Width `=Parent.TemplateWidth * 0,13` · Height `=20` · **FontWeight** `=FontWeight.Semibold`
+  - **Text** `=Round(ThisItem.Pct; 1) & "%"`
+  - **Color** `=If(ThisItem.Pct < 50; ColorValue("#22A855"); ThisItem.Pct < 80; ColorValue("#F59E0B"); ColorValue("#DC2626"))`
+- **`recRNBarFondo`** · Rectangle · X `=Parent.TemplateWidth * 0,48 + 6` · Y `=24` · Width `=Parent.TemplateWidth * 0,13 - 12` · Height `=5` · **Fill** `=ColorValue("#E5E7EB")`
+- **`recRNBar`** · Rectangle · X `=Parent.TemplateWidth * 0,48 + 6` · Y `=24` · Height `=5`
+  - **Width** `=(Parent.TemplateWidth * 0,13 - 12) * Min(1; ThisItem.Pct / 100)`
+  - **Fill** `=If(ThisItem.Pct < 50; ColorValue("#22A855"); ThisItem.Pct < 80; ColorValue("#F59E0B"); ColorValue("#DC2626"))`
+- **`lblRNUltSiembra`** · Label · X `=Parent.TemplateWidth * 0,61` · Width `=Parent.TemplateWidth * 0,11`
+  - **Text** `=If(IsBlank(ThisItem.UltSiembra); "—"; Text(ThisItem.UltSiembra; "dd/mm/yyyy"))`
+- **`lblRNProx`** · Label · X `=Parent.TemplateWidth * 0,72` · Width `=Parent.TemplateWidth * 0,13` · **Size** `=8`
+  - **Text** `=If(IsBlank(ThisItem.ProxTrasplante); "—"; Text(ThisItem.ProxTrasplante; "dd/mm/yyyy") & " · " & ThisItem.ProxSet)`
+- **`lblRNLibre`** · Label · X `=Parent.TemplateWidth * 0,85` · Width `=Parent.TemplateWidth * 0,11`
+  - **Text** `=If(ThisItem.Sets = 0; "Libre ahora"; Text(ThisItem.LibreTotal; "dd/mm/yyyy"))`
+- **`btnRNFiltrar`** · Classic/Button transparente (copia `btnNurSel`) · X `=0` · Y `=0` · Width `=Parent.TemplateWidth * 0,96` · Height `=Parent.TemplateHeight` · Text `=""`
+  - **OnSelect**
+```
+=Set(varResNursery; If(varResNursery = ThisItem.Nursery; "Todos los semilleros"; ThisItem.Nursery))
+```
+- **`icoRNPlanificar`** · Classic/Icon · X `=Parent.TemplateWidth * 0,96` · Y `=8` · Width `=22` · Height `=22` · **Icon** `=Icon.ArrowRight` · **Color** `=ColorValue("#0E7490")` · **Tooltip** `="Planificar este semillero"`
+  - **OnSelect**
+```
+=Set(varNurserySeleccionado; ThisItem.Nursery);;
+Set(varPoolSeleccionado; ThisItem.Area);;
+Set(varNumMesas; ThisItem.NumMesas);;
+ClearCollect(colAsigBandejas;
+    Filter(NURSERY_ASSIGNMENTS; Nursery = ThisItem.Nursery And EstadoCiclo.Value = "Active")
+);;
+Clear(colSelBandejas);;
+Set(varLoteResaltado; "");;
+Set(varConfirmarFin; false);;
+Set(varVistaResumen; false)
+```
+
+---
+
+### 8.7 Tabla "Sets en semilleros"
+
+#### `lblResSetsTitulo` · Label · `conResIzq`
+**Text** `="Sets en semilleros · fechas de siembra, trasplante estimado y real"` · **FontWeight** `=FontWeight.Bold` · **Height** `=24`
+
+#### `conEncSets` · Contenedor (horizontal) · `conResIzq` — encabezado
+**FillPortions** `=0` · **Height** `=28` · **Fill** `=ColorValue("#F8FAFC")` · **LayoutAlignItems** `=LayoutAlignItems.Center` · Padding `=0` · **LayoutGap** `=0`
+
+Doce etiquetas (mismo formato que `conEncNur`), en este orden:
+
+| Control | Text | FillPortions |
+|---|---|---|
+| `lblEncS1` | `="Set"` | `=10` |
+| `lblEncS2` | `="Cultivo"` | `=8` |
+| `lblEncS3` | `="Gen"` | `=5` |
+| `lblEncS4` | `="Semillero"` | `=7` |
+| `lblEncS5` | `="Mesas"` | `=11` |
+| `lblEncS6` | `="Bandejas"` | `=7` |
+| `lblEncS7` | `="Siembra"` | `=9` |
+| `lblEncS8` | `="Trasplante est."` | `=10` |
+| `lblEncS9` | `="Trasplante real"` | `=9` |
+| `lblEncS10` | `="Disponible desde"` | `=9` |
+| `lblEncS11` | `="Estado"` | `=11` |
+| `lblEncS12` | `=""` | `=4` |
+
+#### `galResSets` · Gallery (vertical en blanco) · `conResIzq`
+**FillPortions** `=1` · **TemplateSize** `=38` · **TemplatePadding** `=0` · **WrapCount** `=1`
+**Items**
+```
+=Sort(
+    Filter(colResLotes;
+        (varResArea = "Todas las áreas" Or Pool = varResArea) And
+        (varResNursery = "Todos los semilleros" Or Nursery = varResNursery));
+    FechaDisponible;
+    SortOrder.Ascending
+)
+```
+
+Plantilla de `galResSets` (posición fija). Todas las etiquetas: **Y** `=0` · **Height** `=Parent.TemplateHeight` · **Size** `=9` · **PaddingLeft** `=6` · **Color** `=ColorValue("#0C384C")`, salvo lo que se indique.
+
+- **`recRSLinea`** · Rectangle · X `=0` · Y `=Parent.TemplateHeight - 1` · Width `=Parent.TemplateWidth` · Height `=1` · **Fill** `=ColorValue("#EEF1F4")`
+- **`recRSColor`** · Rectangle · X `=6` · Y `=15` · Width `=8` · Height `=8` · **Fill** `=ColorValue(ThisItem.ColorPunto)`
+- **`lblRSSet`** · Label · X `=14` · Width `=Parent.TemplateWidth * 0,10 - 14` · **Text** `=ThisItem.SetName` · **FontWeight** `=FontWeight.Bold` · **Color** `=ColorValue(ThisItem.ColorBarra)`
+- **`lblRSCultivo`** · Label · X `=Parent.TemplateWidth * 0,10` · Width `=Parent.TemplateWidth * 0,08` · **Text** `=ThisItem.Crop`
+- **`lblRSGen`** · Label · X `=Parent.TemplateWidth * 0,18` · Width `=Parent.TemplateWidth * 0,05` · **Text** `=ThisItem.Gen`
+- **`lblRSSem`** · Label · X `=Parent.TemplateWidth * 0,23` · Width `=Parent.TemplateWidth * 0,07` · **Text** `=ThisItem.Nursery`
+- **`lblRSMesas`** · Label · X `=Parent.TemplateWidth * 0,30` · Width `=Parent.TemplateWidth * 0,11` · **Text** `=ThisItem.Mesas` · **Size** `=8`
+- **`lblRSBand`** · Label · X `=Parent.TemplateWidth * 0,41` · Width `=Parent.TemplateWidth * 0,07` · **Text** `=ThisItem.Bandejas`
+- **`lblRSSiembra`** · Label · X `=Parent.TemplateWidth * 0,48` · Width `=Parent.TemplateWidth * 0,09` · **Text** `=Text(ThisItem.FechaSiembra; "dd/mm/yyyy")`
+- **`lblRSEst`** · Label · X `=Parent.TemplateWidth * 0,57` · Width `=Parent.TemplateWidth * 0,10`
+  - **Text** `=Text(ThisItem.FechaTrasplante; "dd/mm/yyyy") & " (" & ThisItem.Dias & "d)"`
+- **`lblRSReal`** · Label · X `=Parent.TemplateWidth * 0,67` · Width `=Parent.TemplateWidth * 0,09` · **FontWeight** `=FontWeight.Semibold` · **Color** `=ColorValue("#1F7A3D")`
+  - **Text** `=If(IsBlank(ThisItem.FechaTrasplanteReal); "—"; Text(ThisItem.FechaTrasplanteReal; "dd/mm/yyyy"))`
+- **`lblRSDisp`** · Label · X `=Parent.TemplateWidth * 0,76` · Width `=Parent.TemplateWidth * 0,09` · **FontWeight** `=FontWeight.Bold`
+  - **Text** `=Text(ThisItem.FechaDisponible; "dd/mm/yyyy")`
+- **`lblRSEstado`** · Label · X `=Parent.TemplateWidth * 0,85 + 4` · Y `=8` · Width `=Parent.TemplateWidth * 0,11 - 8` · Height `=22` · **Align** `=Align.Center` · **PaddingLeft** `=0` · **Size** `=8` · **FontWeight** `=FontWeight.Semibold` · Radios `=10`
+  - **Text**
+```
+=With(
+    { d: DateDiff(Today(); ThisItem.FechaTrasplante; TimeUnit.Days) };
+    If(
+        !IsBlank(ThisItem.FechaTrasplanteReal); "Real registrado";
+        d < 0; "Atrasado " & -d & " d";
+        d = 0; "Trasplante hoy";
+        "Faltan " & d & " d"
+    )
+)
+```
+  - **Fill**
+```
+=With(
+    { d: DateDiff(Today(); ThisItem.FechaTrasplante; TimeUnit.Days) };
+    If(
+        !IsBlank(ThisItem.FechaTrasplanteReal); ColorValue("#DCFCE7");
+        d < 0; ColorValue("#FEE2E2");
+        d <= 3; ColorValue("#FEF3C7");
+        ColorValue("#E0F2FE")
+    )
+)
+```
+  - **Color**
+```
+=With(
+    { d: DateDiff(Today(); ThisItem.FechaTrasplante; TimeUnit.Days) };
+    If(
+        !IsBlank(ThisItem.FechaTrasplanteReal); ColorValue("#166534");
+        d < 0; ColorValue("#B91C1C");
+        d <= 3; ColorValue("#92400E");
+        ColorValue("#075985")
+    )
+)
+```
+- **`icoRSFechas`** · Classic/Icon · X `=Parent.TemplateWidth * 0,96` · Y `=8` · Width `=22` · Height `=22` · **Icon** `=Icon.Edit` · **Tooltip** `="Cambiar siembra / registrar trasplante real"`
+  - **OnSelect**
+```
+=Set(varLoteFechas;
+    {
+        LoteId: ThisItem.LoteId;
+        SetName: ThisItem.SetName;
+        Crop: ThisItem.Crop;
+        Nursery: ThisItem.Nursery;
+        Dias: ThisItem.Dias;
+        FechaSiembra: ThisItem.FechaSiembra;
+        FechaTrasplante: ThisItem.FechaTrasplante;
+        FechaTrasplanteReal: ThisItem.FechaTrasplanteReal
+    }
+);;
+Reset(dpEditSiembra);;
+Reset(dpTrasplanteReal);;
+Reset(tglLiberarBandejas);;
+Set(varPopupFechas; true)
+```
+
+---
+
+### 8.8 Gráfica
+
+#### `conResDer` · Contenedor (vertical) · `conResCuerpo`
+**FillPortions** `=0` · **Width** `=400` · Padding `=12` · **LayoutGap** `=8` · **LayoutAlignItems** `=LayoutAlignItems.Stretch`
+**Fill** `=Color.White` · **BorderColor** `=ColorValue("#DDE2E8")` · **BorderThickness** `=1`
+
+##### `lblResGrafTitulo` · Label · `conResDer`
+**FontWeight** `=FontWeight.Bold` · **Height** `=24`
+**Text**
+```
+="Bandejas por cultivo · " & If(varResNursery <> "Todos los semilleros"; varResNursery; varResArea)
+```
+
+##### `htmlGraficaCultivos` · HtmlViewer · `conResDer`
+**FillPortions** `=1`
+**HtmlText**
+```
+=With(
+    {
+        lot: Filter(colResLotes;
+            (varResArea = "Todas las áreas" Or Pool = varResArea) And
+            (varResNursery = "Todos los semilleros" Or Nursery = varResNursery));
+        cap: Sum(
+            Filter(colNurseryConfig;
+                (varResArea = "Todas las áreas" Or Pool.Value = varResArea) And
+                (varResNursery = "Todos los semilleros" Or Nursery = varResNursery));
+            NumMesas) * 60
+    };
+    With(
+        {
+            tot: Sum(lot; Bandejas);
+            sol: Sum(Filter(lot; Familia = "Solanáceas"); Bandejas);
+            cuc: Sum(Filter(lot; Familia = "Cucurbitáceas"); Bandejas);
+            datos: Sort(
+                ForAll(
+                    Table(
+                        { C: "Tomato"; Col: "#EF4444" };
+                        { C: "Pepper"; Col: "#F59E0B" };
+                        { C: "Cucumber"; Col: "#22A855" };
+                        { C: "Melon"; Col: "#A855F7" };
+                        { C: "Watermelon"; Col: "#EC4899" }
+                    ) As K;
+                    { C: K.C; Col: K.Col; N: Sum(Filter(lot; Crop = K.C); Bandejas) }
+                );
+                N; SortOrder.Descending
+            )
+        };
+        "<div style='font-family:Segoe UI;color:#0C384C;font-size:12px;'>" &
+        If(
+            tot = 0;
+            "<div style='color:#64748B;padding:20px 0;text-align:center;'>No hay bandejas sembradas con este filtro.</div>";
+            "<div style='margin-bottom:10px;'>Cultivo predominante: <b>" & First(datos).C & "</b> (" & Round(First(datos).N / tot * 100; 0) & "% de lo sembrado)</div>" &
+            Concat(datos As d;
+                "<div style='display:flex;align-items:center;gap:8px;margin:7px 0;'>" &
+                "<div style='width:86px;'>" & d.C & "</div>" &
+                "<div style='flex:1;height:16px;background:#E5E7EB;border-radius:4px;overflow:hidden;'><div style='height:100%;width:" & Round(d.N / tot * 100; 0) & "%;background:" & d.Col & ";'></div></div>" &
+                "<div style='width:86px;text-align:right;font-weight:600;'>" & d.N & " · " & Round(d.N / tot * 100; 0) & "%</div></div>"
+            )
+        ) &
+        "<div style='margin-top:16px;font-weight:600;'>Uso de la capacidad instalada (" & cap & " bandejas)</div>" &
+        "<div style='display:flex;height:22px;border-radius:5px;overflow:hidden;margin-top:6px;background:#E5E7EB;'>" &
+        "<div style='width:" & If(cap = 0; 0; Round(sol / cap * 100; 0)) & "%;background:#EF4444;'></div>" &
+        "<div style='width:" & If(cap = 0; 0; Round(cuc / cap * 100; 0)) & "%;background:#A855F7;'></div></div>" &
+        "<div style='display:flex;gap:14px;margin-top:6px;font-size:11px;flex-wrap:wrap;'>" &
+        "<span><span style='display:inline-block;width:10px;height:10px;background:#EF4444;border-radius:2px;'></span> Solanáceas " & sol & " (" & If(cap = 0; 0; Round(sol / cap * 100; 1)) & "%)</span>" &
+        "<span><span style='display:inline-block;width:10px;height:10px;background:#A855F7;border-radius:2px;'></span> Cucurbitáceas " & cuc & " (" & If(cap = 0; 0; Round(cuc / cap * 100; 1)) & "%)</span>" &
+        "<span><span style='display:inline-block;width:10px;height:10px;background:#E5E7EB;border-radius:2px;'></span> Libre " & (cap - tot) & "</span>" &
+        "</div></div>"
+    )
+)
+```
+
+---
+
+## 9. Resumen de cambios
+
+**Corregir (ya existen):** `tglPrimeraColumna`, `lblResultadoBandejas`, `conSemillas_3`, `cmbSemPlotF1`, `lblErrorMsg_1`, `btnDistribuir`, `conFormAsignar_1`, `conPanelIzquierdo2_1`, `conPanelSets_2`, `galLotes`, `lblSetCiclo_4`, `icoCerrarNursery`, `galNurseries` (+ orden de capas), `lblNurNombre`, `btnNurSel`, `icoCerrarReub`, `conReubBody`, `conReubOrigen`, `conReubDestino`, `galPosiciones` (orden de capas), `lblPosNum`, `lblPosBandeja`, `btnPosSel`, `galSeleccion`, `recSelColor`, `lblSelItem`, `icoSubirSel`, `icoQuitarSel`, `btnTogglePanel_1`, `btnToggleSets_1`, `btnNurserySelector` (Visible), `conMainBody_2`.
+
+**Mover:** `Container15_1` → dentro de `conPopupSets`.
+
+**Nuevos:**
+- Calculadora: `conFechaSiembra`, `lblFechaSiembra`, `dpFechaSiembra`, `lblTrasplanteEst`.
+- Panel de sets: `icoFechasLote`.
+- Popups: `conPopupSets`; `conPopupFechas` con sus hijos.
+- Header: `btnVistaResumen`.
+- Tablero: `conResumen` con `conResFiltros`, `galResKpis`, tabla Semilleros (`conEncNur` + `galResNur`), tabla Sets (`conEncSets` + `galResSets`) y la gráfica (`conResDer` + `htmlGraficaCultivos`).
+
+**Eliminar:** ninguno.
+
+**SharePoint:** columna `FechaTrasplanteReal` (Fecha) en `NURSERY_ASSIGNMENTS`.
+**Variables nuevas:** `varLoteFechas`, `varPopupFechas`, `varVistaResumen`, `varResActualizado`, `varResArea`, `varResNursery`.
+**Colecciones nuevas:** `colResumen`, `colResLotes`, `colAreas`, `colResNurOpc`.
+
+---
+
+## 10. Prueba final
+
+1. El panel de fórmulas no muestra errores en `Semilleros`.
+2. DevX con 200 semillas → toggle apagado y **3 bandejas**. F2 → toggle encendido solo; 15 plots × 880 = **150**.
+3. Elegir fecha de siembra → "Trasplante estimado" cambia según el cultivo del set (28 / 30 / 18 días).
+4. **Seleccionar Set…** abre el popup encima de la pantalla y se cierra al elegir.
+5. Distribuir → en SharePoint `FechaSiembra` es la fecha elegida, no la de hoy.
+6. **⇄ Reubicar** → las bandejas se ven con su número; la lista de seleccionadas sale en filas; ▲ y ✕ funcionan.
+7. 📅 en un set → cambiar la siembra → el estimado se recalcula. Poner fecha real sin liberar → el set sigue en las mesas con "Real registrado". Volver a entrar y activar "liberar" → las bandejas desaparecen de las mesas.
+8. **📋 Tablero de semilleros** → aparecen 5 indicadores, la tabla Semilleros, la tabla Sets y la gráfica.
+9. Área = R&D → solo S1 y S2 en la tabla; indicadores, sets y gráfica cambian. El combo Semillero solo ofrece S1 y S2.
+10. Tocar la fila S1 → todo se filtra a S1 y el combo muestra S1. Tocar otra vez → vuelve a "Todos los semilleros". **Limpiar filtros** regresa todo.
+11. → en una fila abre ese semillero en planificación.
