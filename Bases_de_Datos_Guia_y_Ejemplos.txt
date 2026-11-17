@@ -1,0 +1,1001 @@
+═══════════════════════════════════════════════════════════════════════════════
+ BASES DE DATOS (LISTAS DE SHAREPOINT) DE LA APP DE PERSONAL
+ Qué va en cada columna, cómo se escribe y ejemplos   (16/11/2026)
+═══════════════════════════════════════════════════════════════════════════════
+ Los ejemplos usan nombres y correos de prueba: cámbialos por los reales.
+ Va junto con el Excel Plantillas_Listas_SharePoint.xlsx (una hoja por
+ lista, lista para copiar y pegar en SharePoint).
+
+ ÍNDICE
+   0. Reglas generales y cómo agregar datos (léelo primero)
+  A. LISTAS QUE LLENAS TÚ (configuración y catálogos)
+    1. CATALOGO_PERSONAL1
+    2. CONFIG_GRUPOS_JORNADA
+    3. CONFIG_AREAS_HORAS_EXTRAS
+    4. ListaActividades
+    5. CONFIG_ACTIVIDADES_EVAL
+    6. ROLES_PERMISOS
+    7. ACCESOS_USUARIOS
+    8. GAFETES_VISITA
+    9. CONFIG_PESO_CORREOS
+   10. AREAS
+  B. LISTAS QUE LLENA LA APP (no se escriben a mano)
+   11. TERMINOS_ACEPTACION
+   12. REGIST
+   13. REGISTRO_PERSONAL1
+   14. SOLICITUDES_HORAS_EXTRAS
+   15. BD_HORAS_EXTRAS_ACUMULADAS
+   16. SOLICITUDES_PERMISOS
+   17. ASISTENCIA_RESUMEN
+   18. HISTORIAL_ESTADO_PERSONAL
+   19. AUTORIZACIONES_INGRESO
+   20. EVALUACIONES · EVALUACIONES_DETALLE · EVALUACIONES_CRITERIOS
+   21. PROGRAMACION · PROGRAMACION_PERSONAS
+   22. RENDIMIENTOS_CATALOGO
+  C. LISTAS DE TUS OTRAS APPS (solo se leen)
+   23. DATASUMMARY1 · SOLICITUDESPA1 · PHENOLOGY_CONFIG1
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 0. REGLAS GENERALES Y CÓMO AGREGAR DATOS
+═══════════════════════════════════════════════════════════════════════════════
+ 1. NOMBRES DE COLUMNA: créalas con el nombre EXACTO de esta guía (sin tildes
+     ni espacios). SharePoint guarda el nombre con el que se CREA; si la creas
+     con otro nombre y luego la renombras, Power Apps sigue viendo el nombre
+     viejo.
+ 2. TEXTOS QUE UNEN LISTAS se comparan exacto (mayúsculas, tildes, espacios):
+     CODIGO, DEPARTAMENTO, AREA_GENERAL, SUBAREA, SEDE, GrupoJornada,
+     Actividad, Rol, Title de configuración. Un espacio de más = no lo
+     encuentra.
+ 3. SI/NO: hay columnas de TEXTO que llevan SI o NO
+     (CATALOGO_PERSONAL1.Activo, CONFIG_AREAS_HORAS_EXTRAS.Activa y
+     PermiteFinSemana) y columnas Sí/No de SharePoint
+     (ACCESOS_USUARIOS.Activo, CONFIG_GRUPOS_JORNADA.Activo…). Respeta el tipo
+     que dice cada lista.
+ 4. COLUMNAS DE OPCIÓN (Choice): el valor tiene que estar en la lista de
+     opciones. Si la app guarda un valor que no está, da error. Configuración
+     de la lista → columna → agrega las opciones, o activa 'Permitir valores
+     de relleno'.
+ 5. FECHAS: tipo Fecha (solo fecha) para días; Fecha y hora para registros con
+     hora. Zona horaria del sitio: (UTC-06:00) América Central.
+ 6. NÚMEROS: en SharePoint escribe el número según la configuración regional
+     del sitio (8 o 8,5). En Power Apps la coma es el decimal.
+ 7. CORREOS: en minúsculas y completos (nombre@empresa.com). Varios correos:
+     separados por punto y coma ';' sin espacios.
+ 8. NO BORRES filas de catálogo ni de historial: desactiva (Activo = NO / No).
+
+ CÓMO AGREGAR UNA FILA
+   • Una sola: abre la lista en SharePoint → + Nuevo → llena → Guardar.
+   • Varias: abre la hoja de esa lista en Plantillas_Listas_SharePoint.xlsx,
+     llena las filas, selecciona SOLO las filas de datos (sin encabezado ni la
+     fila de tipos) → Copiar. En SharePoint → Editar en vista de cuadrícula →
+     clic en la primera celda vacía de la primera columna → Pegar → Salir de
+     la vista de cuadrícula. Las columnas de la lista deben estar en el MISMO
+     orden que en el Excel (si no, crea una vista con ese orden).
+   • Desde la app: Accesos (usuarios), Reglas y Áreas de HE, Jornadas por
+     persona, Cambiar estado del personal.
+
+ DESPUÉS DE CREAR COLUMNAS O LISTAS
+   Power Apps Studio → Datos → la lista → ⋯ → Actualizar (o + Agregar datos si
+     es nueva) → guarda y publica. Los cambios de FILAS no requieren publicar:
+     el usuario solo cierra y abre la app.
+
+
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+ A. LISTAS QUE LLENAS TÚ (configuración y catálogos)
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. CATALOGO_PERSONAL1
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Catálogo de TODO el personal. Lo usan Personal, garita, horas
+ extras, permisos y rendimientos.
+ Quién la llena: Tú o RR. HH. Una fila por persona. Nunca borres filas: para
+ una baja usa Activo = NO (desde la app).
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  CODIGO                Una línea de texto  Sí      Código único del gafete.
+                                                    Exactamente igual al
+                                                    QR/código de barras. Sin
+                                                    espacios.
+  Nombre                Una línea de texto  Sí      Nombre completo, como debe
+                                                    salir en reportes.
+  DEPARTAMENTO          Una línea de texto  Sí      Igual que en CONFIG_AREAS_HOR
+                                                    AS_EXTRAS.Title (ej. NURSERY,
+                                                    MANTENIMIENTO).
+  AREA_GENERAL          Una línea de texto  Sí      NURSERY · CROP · SITE (en
+                                                    mayúsculas).
+  SUBAREA               Una línea de texto  No      SSD · VTI · COCINA ·
+                                                    LAVANDERIA · MANTENIMIENTO…
+                                                    Vacío si no aplica.
+  Categoria             Opción              Sí      Una de las opciones que ya
+                                                    tiene la columna. Debe
+                                                    existir también en
+                                                    REGIST.CATEGORIA.
+  SEDE                  Una línea de texto  Sí      Código de la sede de garita
+                                                    (ej. RD, CNP). Debe existir
+                                                    en REGIST.AREA.
+  INGRESO               Fecha (solo fecha)  No      Fecha de ingreso a la
+                                                    empresa.
+  TELEFONO              Una línea de texto  No      Solo números.
+  FOTO                  La que ya tiene     No      No cambies el tipo de
+                                                    columna.
+  Activo                Una línea de texto  Sí      SI o NO (en mayúsculas, sin
+                                                    tilde). La app solo cuenta
+                                                    SI.
+  GrupoJornada          Una línea de texto  No      Title de
+                                                    CONFIG_GRUPOS_JORNADA (ej.
+                                                    L-V, L-S). Vacío = L-V.
+  CorreoSupervisor      Una línea de texto  No      Correo del jefe directo. Si
+                                                    se llena, le llegan a él los
+                                                    avisos de HE, permisos e
+                                                    ingreso.
+  MaxDiasConsecutivos   Número              No      Días seguidos permitidos.
+                                                    Vacío = 6.
+  MaxDiasSemana         Número              No      Días por semana permitidos.
+                                                    Vacío = 6.
+  TopeDiarioHE          Número              No      Máximo de horas extras por
+                                                    día solo para esta persona.
+                                                    Vacío = el general.
+  ExcepcionHasta        Fecha (solo fecha)  No      Hasta qué fecha puede pasar
+                                                    el límite de días sin pedir
+                                                    autorización.
+  FECHA_BAJA            Fecha (solo fecha)  No      La llena la app al dar de
+                                                    baja.
+  FECHA_REINGRESO       Fecha (solo fecha)  No      La llena la app al reactivar.
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     CODIGO: 10234
+     Nombre: Juan Carlos Pérez López
+     DEPARTAMENTO: NURSERY
+     AREA_GENERAL: NURSERY
+     SUBAREA: SSD
+     Categoria: (opción existente)
+     SEDE: RD
+     INGRESO: 15/03/2021
+     TELEFONO: 55551234
+     Activo: SI
+     GrupoJornada: L-S
+     CorreoSupervisor: supervisor.ssd@empresa.com
+  ▸ Ejemplo 2
+     CODIGO: 10567
+     Nombre: María Fernanda García
+     DEPARTAMENTO: MANTENIMIENTO
+     AREA_GENERAL: SITE
+     SUBAREA: MANTENIMIENTO
+     Categoria: (opción existente)
+     SEDE: RD
+     INGRESO: 02/08/2019
+     Activo: SI
+     GrupoJornada: L-V
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     TopeDiarioHE: 2
+  ▸ Ejemplo 3
+     CODIGO: 10891
+     Nombre: Pedro Antonio Ruiz
+     DEPARTAMENTO: CROP / PROTECCIÓN VEGETAL
+     AREA_GENERAL: CROP
+     Categoria: (opción existente)
+     SEDE: CNP
+     INGRESO: 10/01/2024
+     Activo: NO
+     FECHA_BAJA: 30/09/2026
+
+  ⚠ Los textos (DEPARTAMENTO, AREA_GENERAL, SUBAREA, SEDE, GrupoJornada) se
+    comparan EXACTO: mismas mayúsculas, tildes y espacios que en las otras
+    listas.
+
+  ⚠ Carga masiva: Excel con estas columnas → SharePoint → Editar en vista de
+    cuadrícula → copiar y pegar.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. CONFIG_GRUPOS_JORNADA
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Grupos de jornada: qué días trabaja cada grupo y cuántas horas. Lo
+ usan garita (días de descanso, horas esperadas), HE y asistencia.
+ Quién la llena: Tú. Una fila por tipo de jornada.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Nombre corto del grupo. Es lo
+                                                    que se escribe en CATALOGO_PE
+                                                    RSONAL1.GrupoJornada.
+  Descripcion           Una línea de texto  No      Texto para mostrar.
+  DiasLaborales         Una línea de texto  Sí      Números de día separados por
+                                                    ';'  1=lunes … 7=domingo. Ej.
+                                                    1;2;3;4;5
+  HorasDia              Número              Sí      Horas de un día normal (con
+                                                    coma decimal en la app; en
+                                                    SharePoint escribe 8 o 8.5
+                                                    según tu configuración
+                                                    regional).
+  HorasUltimoDia        Número              Sí      Horas del último día de la
+                                                    semana (ej. sábado medio
+                                                    día).
+  Activo                Sí/No               Sí      Sí
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: L-V
+     Descripcion: Lunes a viernes
+     DiasLaborales: 1;2;3;4;5
+     HorasDia: 8
+     HorasUltimoDia: 8
+     Activo: Sí
+  ▸ Ejemplo 2
+     Title: L-S
+     Descripcion: Lunes a sábado (sábado medio día)
+     DiasLaborales: 1;2;3;4;5;6
+     HorasDia: 8
+     HorasUltimoDia: 4
+     Activo: Sí
+  ▸ Ejemplo 3
+     Title: TURNO-ROT
+     Descripcion: Martes a sábado
+     DiasLaborales: 2;3;4;5;6
+     HorasDia: 8
+     HorasUltimoDia: 8
+     Activo: Sí
+
+  ⚠ Debe existir SIEMPRE la fila L-V: es la que se usa cuando una persona no
+    tiene GrupoJornada.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. CONFIG_AREAS_HORAS_EXTRAS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Reglas de horas extras y días por área, y el CORREO DEL ENCARGADO
+ de cada área/subárea (avisos de HE, permisos y autorización de ingreso).
+ Quién la llena: Tú (también desde la app: Horas extras → Reglas y Áreas). Una
+ fila por DEPARTAMENTO y una por SUBAREA o AREA_GENERAL que tenga encargado
+ propio.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Nombre EXACTO del
+                                                    DEPARTAMENTO, SUBAREA o
+                                                    AREA_GENERAL.
+  CorreoResponsable     Una línea de texto  Sí      Correo del encargado. Varios:
+                                                    separados por ';'.
+  TopeDiarioHE          Número              Sí      Máximo de HE por día (ej. 2).
+  AlertaHESemana        Número              Sí      Horas de HE por semana que
+                                                    disparan la alerta (6).
+  MaxDiasConsecutivos   Número              Sí      6
+  MaxDiasSemana         Número              Sí      6
+  PermiteFinSemana      Una línea de texto  Sí      SI o NO
+  MaxSabDom             Número              Sí      Horas máximas sábado/domingo
+                                                    (ej. 8).
+  Activa                Una línea de texto  Sí      SI o NO (texto)
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: NURSERY
+     CorreoResponsable: encargado.nursery@empresa.com
+     TopeDiarioHE: 2
+     AlertaHESemana: 6
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     PermiteFinSemana: SI
+     MaxSabDom: 8
+     Activa: SI
+  ▸ Ejemplo 2
+     Title: SSD
+     CorreoResponsable: encargado.ssd@empresa.com
+     TopeDiarioHE: 2
+     AlertaHESemana: 6
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     PermiteFinSemana: SI
+     MaxSabDom: 8
+     Activa: SI
+  ▸ Ejemplo 3
+     Title: VTI
+     CorreoResponsable: encargado.vti@empresa.com
+     TopeDiarioHE: 2
+     AlertaHESemana: 6
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     PermiteFinSemana: SI
+     MaxSabDom: 8
+     Activa: SI
+  ▸ Ejemplo 4
+     Title: MANTENIMIENTO
+     CorreoResponsable: jefe.mantenimiento@empresa.com
+     TopeDiarioHE: 3
+     AlertaHESemana: 6
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     PermiteFinSemana: SI
+     MaxSabDom: 8
+     Activa: SI
+  ▸ Ejemplo 5
+     Title: CROP
+     CorreoResponsable: encargado.crop@empresa.com
+     TopeDiarioHE: 2
+     AlertaHESemana: 6
+     MaxDiasConsecutivos: 6
+     MaxDiasSemana: 6
+     PermiteFinSemana: NO
+     MaxSabDom: 0
+     Activa: SI
+
+  ⚠ Orden en que se busca el encargado de una persona: CorreoSupervisor
+    (catálogo) → fila de su SUBAREA → fila de su DEPARTAMENTO → fila de su
+    AREA_GENERAL.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. ListaActividades
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Lista de actividades. Alimenta la evaluación/matriz, Rendimientos
+ (las de NURSERY) y Horas extras.
+ Quién la llena: Tú. Una fila por actividad.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Actividad             Una línea de texto  Sí      Nombre EXACTO (mismas
+                                                    mayúsculas y tildes en todas
+                                                    las listas).
+  AREA                  Una línea de texto  Sí      NURSERY · CROP · SITE
+                                                    (texto). NURSERY = también
+                                                    sale en Rendimientos.
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Actividad: Polinización
+     AREA: NURSERY
+  ▸ Ejemplo 2
+     Actividad: Colecta de tejido
+     AREA: NURSERY
+  ▸ Ejemplo 3
+     Actividad: Proceso de semilla
+     AREA: NURSERY
+  ▸ Ejemplo 4
+     Actividad: Mantenimiento de equipo
+     AREA: SITE
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. CONFIG_ACTIVIDADES_EVAL
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Cómo se evalúa cada actividad en la matriz de competencias.
+ Quién la llena: Tú. Una fila por actividad que quieras evaluar por Familia o
+ Cultivo (las demás se evalúan como General).
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Mismo nombre EXACTO que en
+                                                    ListaActividades.
+  NivelCultivo          Una línea de texto  Sí      General · Familia · Cultivo
+  Activa                Sí/No (o texto SI,  Sí      Sí
+                        ver txt anterior
+                        B3)
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: Polinización
+     NivelCultivo: Cultivo
+     Activa: Sí
+  ▸ Ejemplo 2
+     Title: Colecta de tejido
+     NivelCultivo: Familia
+     Activa: Sí
+  ▸ Ejemplo 3
+     Title: Proceso de semilla
+     NivelCultivo: General
+     Activa: Sí
+
+  ⚠ Cultivo = una nota por Tomato, Pepper, Melon, Watermelon, Cucumber. Familia
+    = Solanáceas y Cucurbitáceas.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. ROLES_PERMISOS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Roles y las claves de permiso de cada uno.
+ Quién la llena: Tú (solo el administrador). Una fila por rol.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Nombre del rol (se elige en
+                                                    Accesos).
+  Permisos              Varias líneas de    Sí      Claves separadas por ';' sin
+                        texto                       espacios. * = todo.
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: Administrador
+     Permisos: *
+  ▸ Ejemplo 2
+     Title: EncargadoArea
+     Permisos: personal;matriz;evaluar;evaluar_resp;prog;calendario;ganttpers;
+       tiempo;horasextras;he_autorizar;he_reporte;permisos;permisos_ver;permisos
+       _autorizar;rendimientos;rendimientos_analisis;rendimientos_procesos
+  ▸ Ejemplo 3
+     Title: SolicitanteHE
+     Permisos: horasextras;permisos
+  ▸ Ejemplo 4
+     Title: Garita
+     Permisos: garita;garita_permisos
+  ▸ Ejemplo 5
+     Title: RegistroActividades
+     Permisos: rendimientos
+  ▸ Ejemplo 6
+     Title: EncargadoProcesos
+     Permisos: rendimientos;rendimientos_procesos
+  ▸ Ejemplo 7
+     Title: Procesos01
+     Permisos: procesos01
+  ▸ Ejemplo 8
+     Title: Peso (SPA)
+     Permisos: rendimientos;rendimientos_peso
+
+═══════════════════════════════════════════════════════════════════════════════
+ 7. ACCESOS_USUARIOS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Quién entra a la app, con qué rol y qué áreas ve.
+ Quién la llena: El administrador desde la app (Personal → Accesos). Una fila
+ por usuario.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Correo de Microsoft del
+                                                    usuario, en minúsculas.
+  NombreUsuario         Una línea de texto  Sí      Nombre para mostrar.
+  Rol                   Una línea de texto  Sí      Title exacto de
+                                                    ROLES_PERMISOS.
+  PermisosExtra         Varias líneas de    No      Claves extra separadas por
+                        texto                       ';'.
+  PermisosQuitar        Varias líneas de    No      Claves que se le quitan
+                        texto                       aunque su rol las tenga.
+  SedeGarita            Una línea de texto  Solo    RD, CNP… (igual que
+                                            Garita  CATALOGO.SEDE).
+  AREAS_VISIBLES        Una línea de texto  No      Vacío o TODAS = todo. Si no:
+                                                    NURSERY · SSD;VTI ·
+                                                    MANTENIMIENTO;COCINA
+  Activo                Sí/No               Sí      Sí
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: admin.personal@empresa.com
+     NombreUsuario: Administrador App
+     Rol: Administrador
+     Activo: Sí
+  ▸ Ejemplo 2
+     Title: encargado.ssd@empresa.com
+     NombreUsuario: Encargado SSD
+     Rol: EncargadoArea
+     PermisosExtra: personal_editar
+     AREAS_VISIBLES: SSD;VTI
+     Activo: Sí
+  ▸ Ejemplo 3
+     Title: supervisor.nursery@empresa.com
+     NombreUsuario: Supervisor Nursery
+     Rol: SolicitanteHE
+     AREAS_VISIBLES: NURSERY
+     Activo: Sí
+  ▸ Ejemplo 4
+     Title: garita.rd@empresa.com
+     NombreUsuario: Garita RD
+     Rol: Garita
+     PermisosExtra: garita_historial
+     SedeGarita: RD
+     Activo: Sí
+  ▸ Ejemplo 5
+     Title: registro.tablet@empresa.com
+     NombreUsuario: Tablet registro
+     Rol: RegistroActividades
+     PermisosExtra: rendimientos_peso
+     Activo: Sí
+
+═══════════════════════════════════════════════════════════════════════════════
+ 8. GAFETES_VISITA
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Gafetes QR fijos para visitantes.
+ Quién la llena: Tú creas las filas (una por gafete impreso); el resto de
+ columnas las llena la app al asignar y liberar.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Código impreso en el QR del
+                                                    gafete (ej. VIS001). Que NO
+                                                    coincida con ningún CODIGO
+                                                    del personal.
+  Estado                Una línea de texto  Sí      Libre al crearlo. La app pone
+                                                    Asignado / Libre.
+  Nombre                Una línea de texto  No      La app
+  DPI                   Una línea de texto  No      La app
+  Empresa               Una línea de texto  No      La app
+  VisitaA               Una línea de texto  No      La app
+  Motivo                Una línea de texto  No      La app
+  Placa                 Una línea de texto  No      La app
+  VigenteHasta          Fecha (solo fecha)  No      La app
+  GrupoVisita           Una línea de texto  No      La app
+  AsignadoPor           Una línea de texto  No      La app
+  FechaAsignacion       Fecha y hora        No      La app
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: VIS001
+     Estado: Libre
+  ▸ Ejemplo 2
+     Title: VIS002
+     Estado: Libre
+  ▸ Ejemplo 3
+     Title: VIS003
+     Estado: Libre
+
+  ⚠ Crea tantos como gafetes físicos tengas (VIS001 … VIS050).
+
+═══════════════════════════════════════════════════════════════════════════════
+ 9. CONFIG_PESO_CORREOS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: A quién le llega el correo de 'registrar peso' según el cultivo del
+ set.
+ Quién la llena: Tú. Una fila por cultivo + una fila DEFAULT.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                 Una línea de texto  Sí      Cultivo EXACTO como sale en
+                                                    DATASUMMARY1.Crop, o DEFAULT.
+  Para                  Una línea de texto  Sí      Correos separados por ';'.
+  Copia                 Una línea de texto  No      Correos en copia separados
+                                                    por ';'.
+  Activo                Sí/No               Sí      Sí
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: Tomato
+     Para: peso.tomate@empresa.com
+     Copia: jefe.spa@empresa.com
+     Activo: Sí
+  ▸ Ejemplo 2
+     Title: Pepper
+     Para: peso.chile@empresa.com
+     Copia: jefe.spa@empresa.com
+     Activo: Sí
+  ▸ Ejemplo 3
+     Title: Watermelon
+     Para: peso.cucurbitas@empresa.com
+     Activo: Sí
+  ▸ Ejemplo 4
+     Title: DEFAULT
+     Para: peso.general@empresa.com
+     Activo: Sí
+
+═══════════════════════════════════════════════════════════════════════════════
+ 10. AREAS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Áreas físicas (invernaderos, nursery, SPA…) para la Distribución
+ diaria y la programación.
+ Quién la llena: Tú. Una fila por área física.
+
+  COLUMNA               TIPO                OBLIG.  QUÉ SE ESCRIBE
+  ─────────────────────────────────────────────────────────────────────────────
+  Area                  Una línea de texto  Sí      Nombre del área. Para
+                                                    invernaderos: igual al
+                                                    Greenhouse de los sets.
+  Tipos                 Opción              Sí      Greenhouse · Produccion ·
+                                                    Nursery · Semilleros · SPA ·
+                                                    Procesos · Crop
+  Ubicacion             Una línea de texto  No      Texto libre.
+  Orden                 Número              No      Orden en pantalla (1, 2, 3…).
+  TieneSets             Sí/No               No      Sí si tiene sets en
+                                                    DATASUMMARY1.
+  Hex                   Una línea de texto  No      Color #RRGGBB. Vacío = color
+                                                    por tipo.
+  Activa                Sí/No               Sí      Sí
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Area: GH-01
+     Tipos: Greenhouse
+     Ubicacion: Bloque norte
+     Orden: 1
+     TieneSets: Sí
+     Activa: Sí
+  ▸ Ejemplo 2
+     Area: NURSERY
+     Tipos: Nursery
+     Ubicacion: Área central
+     Orden: 10
+     TieneSets: No
+     Hex: #E8A93C
+     Activa: Sí
+  ▸ Ejemplo 3
+     Area: SPA
+     Tipos: SPA
+     Ubicacion: Bodega SPA
+     Orden: 20
+     TieneSets: No
+     Activa: Sí
+
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+ B. LISTAS QUE LLENA LA APP (no se escriben a mano)
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+
+═══════════════════════════════════════════════════════════════════════════════
+ 11. TERMINOS_ACEPTACION
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Registro de quién aceptó los términos y condiciones.
+ Quién la llena: La app (al aceptar el popup). No se llena a mano.
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  Correo del usuario
+  NombreUsuario               Una línea de texto
+  VersionTerminos             Una línea de texto  1.0
+  Aceptado                    Sí/No               Sí
+  FechaAceptacion             Fecha y hora
+  Origen                      Una línea de texto  Personal
+
+ EJEMPLOS (una fila = un registro; columna: valor)
+  ▸ Ejemplo 1
+     Title: usuario@empresa.com
+     NombreUsuario: Nombre Usuario
+     VersionTerminos: 1.0
+     Aceptado: Sí
+     FechaAceptacion: 16/11/2026 07:45
+     Origen: Personal
+
+  ⚠ Si cambias el texto de los términos, sube TerminosVersion en las fórmulas
+    de App (ej. 1.1): todos los vuelven a aceptar.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 12. REGIST
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Ingresos y salidas de garita (empleados y visitantes).
+ Quién la llena: La app (escáner y visitantes). No se escribe a mano; solo se
+ corrige en casos puntuales.
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  CODIGO - yyyymmdd
+  FECHA                       Fecha (solo fecha)
+  CODIGO                      Una línea de texto
+  NOMBRE                      Una línea de texto
+  TIPO                        Una línea de texto  Empleado · Visitante
+  AREA                        Opción              OPCIONES = códigos de sede (RD,
+                                                  CNP…): deben estar TODAS las de
+                                                  CATALOGO.SEDE y
+                                                  ACCESOS.SedeGarita
+  DEPARTAMENTO                Una línea de texto
+  CATEGORIA                   Opción              OPCIONES = las mismas de
+                                                  CATALOGO.Categoria + V
+                                                  (visitante)
+  GRUPO_JORNADA               Una línea de texto
+  INGRESO                     Fecha y hora
+  SALIDA                      Fecha y hora
+  INGRESO_PLANILLA            Una línea de texto  hh:mm redondeado
+  SALIDA_PLANILLA             Una línea de texto  hh:mm redondeado
+  HORAS                       Número
+  HE_REALES                   Número
+  ESTADO                      Opción              OPCIONES: ADENTRO · AFUERA ·
+                                                  SIN SALIDA · DENEGADO
+  MOTIVO_SALIDA               Una línea de texto
+  DIA_LABORADO                Sí/No
+  DIA_CONSECUTIVO             Número
+  DIA_DESCANSO                Sí/No
+  EXCEPCION                   Sí/No
+  JUSTIFICACION               Varias líneas de
+                              texto
+  AUTORIZA_EXCEPCION          Una línea de texto
+  OBSERVACION                 Varias líneas de
+                              texto
+  REGISTRA_INGRESO            Una línea de texto
+  REGISTRA_SALIDA             Una línea de texto
+  VISITA_EMPRESA              Una línea de texto
+  VISITA_A                    Una línea de texto
+  VISITA_MOTIVO               Una línea de texto
+  VISITA_PLACA                Una línea de texto
+  VISITA_DPI                  Una línea de texto
+  VISITA_GRUPO                Una línea de texto
+
+  ⚠ Lo importante a revisar: que las columnas de OPCIÓN (AREA, CATEGORIA,
+    ESTADO) tengan todas las opciones listadas, o activa 'Permitir valores de
+    relleno' en cada una.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 13. REGISTRO_PERSONAL1
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Registros de labores (inicio/fin) de Rendimientos y pesos.
+ Quién la llena: La app (Rendimientos). No se escribe a mano; las correcciones
+ van por Mantenimiento de datos.
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto
+  CODIGO                      Una línea de texto  Igual al catálogo
+  NombrePersona               Una línea de texto
+  DEPARTAMENTO                Una línea de texto
+  SetName                     Una línea de texto  Igual a DATASUMMARY1.SetName
+  Job                         Una línea de texto  Actividad (igual a
+                                                  ListaActividades)
+  SubActividad                Opción              Opciones de subactividades
+  Estado                      Opción              OPCIONES: En Proceso ·
+                                                  Finalizado
+  TipoRegistro                Opción              Grupal · Individual
+  FechaInicio                 Fecha y hora
+  FechaFin                    Fecha y hora
+  HoraInicio                  Una línea de texto  hh:mm
+  HoraFin                     Una línea de texto  hh:mm
+  HorasTotales                Número
+  MinutosTotales              Número
+  CantidadMateriales          Una línea de texto  Número escrito como texto
+  NumeroFrutos                Número
+  NumeroPeso                  Número
+  CantidadPersonas            Número
+  Comentarios                 Varias líneas de
+                              texto
+  Responsable                 Una línea de texto
+  Cultivo · Program ·         Una línea de texto  Copiados del set
+  Generation · MTC · Field ·
+  Greenhouse · TrialIntent
+  TypeOperation               Opción              Copiado del set
+
+═══════════════════════════════════════════════════════════════════════════════
+ 14. SOLICITUDES_HORAS_EXTRAS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Solicitudes de horas extras.
+ Quién la llena: La app (Horas extras).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto
+  FechaRequerida              Fecha (solo fecha)
+  Codigo                      Una línea de texto
+  NombrePersona               Una línea de texto
+  Area                        Una línea de texto
+  Rol                         Una línea de texto
+  Actividad                   Una línea de texto
+  SubActividad                Una línea de texto
+  HoraInicio                  Una línea de texto  hh:mm
+  HoraFin                     Una línea de texto  hh:mm
+  HorasSolicitadas            Número
+  Justificacion               Varias líneas de
+                              texto
+  SolicitadoPor               Una línea de texto
+  FechaHoraSolicitud          Fecha y hora
+  Estado                      Opción              OPCIONES: Pendiente ·
+                                                  Autorizado · Rechazado
+  AutorizadoPor               Una línea de texto
+  FechaHoraAutorizacion       Fecha y hora
+  SemanaAnio                  Una línea de texto  2026-W46
+  HoraInicioReal              Una línea de texto  hh:mm
+  HoraFinReal                 Una línea de texto  hh:mm
+  HorasReales                 Número
+  RegistroRealPor             Una línea de texto
+  FechaRegistroReal           Fecha y hora
+
+═══════════════════════════════════════════════════════════════════════════════
+ 15. BD_HORAS_EXTRAS_ACUMULADAS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Acumulado de HE autorizadas por persona.
+ Quién la llena: La app. Una fila por persona (Title = código).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  Código
+  Codigo                      Una línea de texto
+  NombrePersona               Una línea de texto
+  Area                        Una línea de texto
+  Rol                         Una línea de texto
+  TotalHorasAutorizadas       Número
+  TotalSesiones               Número
+  UltimaFechaAutorizacion     Fecha y hora
+  UltimoAutorizador           Una línea de texto
+
+═══════════════════════════════════════════════════════════════════════════════
+ 16. SOLICITUDES_PERMISOS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Permisos del personal.
+ Quién la llena: La app (Permisos). Con datos adjuntos habilitados
+ (evidencia).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto
+  Codigo                      Una línea de texto
+  NombrePersona               Una línea de texto
+  Departamento                Una línea de texto
+  TipoPermiso                 Una línea de texto  Personal · IGSS · Médico ·
+                                                  Vacaciones · Capacitación ·
+                                                  Comisión de trabajo · Duelo ·
+                                                  Otro
+  FechaInicio                 Fecha y hora
+  FechaFin                    Fecha y hora
+  DiaCompleto                 Sí/No
+  SinHoraRegreso              Sí/No
+  Horas                       Número
+  Motivo                      Varias líneas de
+                              texto
+  Estado                      Una línea de texto  Pendiente · Autorizado ·
+                                                  Rechazado (texto)
+  SolicitadoPor               Una línea de texto
+  FechaSolicitud              Fecha y hora
+  AutorizadoPor               Una línea de texto
+  FechaAutorizacion           Fecha y hora
+  FechaRegresoReal            Fecha y hora
+  HorasReales                 Número
+
+═══════════════════════════════════════════════════════════════════════════════
+ 17. ASISTENCIA_RESUMEN
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Resumen por persona para la garita (estado en sitio, días
+ seguidos).
+ Quién la llena: La app. Una fila por persona (Title = código).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  Código
+  Nombre                      Una línea de texto
+  EstadoSitio                 Una línea de texto  ADENTRO · AFUERA
+  UltimoIngreso               Fecha y hora
+  UltimaSalida                Fecha y hora
+  UltimoDiaLaborado           Fecha (solo fecha)
+  DiasConsecutivos            Número
+  DiasLaboradosAcum           Número
+  HorasSitioAcum              Número
+  HEDetectadasAcum            Número
+
+═══════════════════════════════════════════════════════════════════════════════
+ 18. HISTORIAL_ESTADO_PERSONAL
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Historial de bajas y reingresos.
+ Quién la llena: La app (Personal → Cambiar estado).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  Código
+  Nombre                      Una línea de texto
+  Departamento                Una línea de texto
+  Accion                      Una línea de texto  Baja · Reingreso
+  Fecha                       Fecha (solo fecha)
+  Motivo                      Varias líneas de
+                              texto
+  RegistradoPor               Una línea de texto
+  FechaRegistro               Fecha y hora
+
+═══════════════════════════════════════════════════════════════════════════════
+ 19. AUTORIZACIONES_INGRESO
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Solicitudes de autorización de ingreso (6 días / día de descanso).
+ Quién la llena: La app (garita) y el flujo SolicitarAutorizacionIngreso.
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto
+  Codigo                      Una línea de texto
+  Nombre                      Una línea de texto
+  Departamento                Una línea de texto
+  SubArea                     Una línea de texto
+  Fecha                       Fecha (solo fecha)
+  Motivo                      Varias líneas de
+                              texto
+  NotaGarita                  Varias líneas de
+                              texto
+  Estado                      Una línea de texto  Pendiente · Aprobado ·
+                                                  Rechazado
+  CorreoEncargado             Una línea de texto
+  RespondidoPor               Una línea de texto
+  Comentario                  Varias líneas de
+                              texto
+  FechaRespuesta              Fecha y hora
+  SolicitadoPor               Una línea de texto
+
+═══════════════════════════════════════════════════════════════════════════════
+ 20. EVALUACIONES · EVALUACIONES_DETALLE · EVALUACIONES_CRITERIOS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Evaluaciones de la matriz de competencias.
+ Quién la llena: La app (popup de evaluación).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  EVALUACIONES                                    Encabezado: PersonaEvaluada,
+                                                  CodigoPersona, Evaluador,
+                                                  TipoEvaluacion (opción),
+                                                  FechaEvaluacion, Promedios,
+                                                  Comentarios
+  EVALUACIONES_DETALLE                            Una fila por actividad/cultivo:
+                                                  IDEvaluacion, PersonaEvaluada,
+                                                  Actividad, Cultivo,
+                                                  NivelCultivo, Puntaje, Tipos
+                                                  (opción)
+  EVALUACIONES_CRITERIOS                          Una fila por criterio:
+                                                  IDEvaluacion, PersonaEvaluada,
+                                                  Criterio, Puntaje, Tipos
+                                                  (opción)
+  Tipos / TipoEvaluacion      Opción              OPCIONES: Autoevaluación ·
+                                                  Encargado · Responsable
+
+═══════════════════════════════════════════════════════════════════════════════
+ 21. PROGRAMACION · PROGRAMACION_PERSONAS
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Programación de personal por área y por persona.
+ Quién la llena: La app (Programación).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  PROGRAMACION                                    Un registro por programa:
+                                                  Fecha, Area, Actividad,
+                                                  Cultivo, Operaciones, Personas,
+                                                  RendMeta, HorasEstimadas…
+  PROGRAMACION_PERSONAS                           Una fila por persona asignada:
+                                                  IDPrograma, Codigo, Persona,
+                                                  Area, Actividad, FechaInicio,
+                                                  FechaFin, MetaOpHora…
+
+═══════════════════════════════════════════════════════════════════════════════
+ 22. RENDIMIENTOS_CATALOGO
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Metas P75 por actividad y nivel.
+ Quién la llena: La app (Rendimientos → Análisis global → Recalcular metas).
+ No se llena a mano.
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  Title                       Una línea de texto  Clave
+  Nivel                       Número              1 a 8
+  Actividad · SubActividad ·  Una línea de texto
+  Cultivo · Program ·
+  Generation · MCT ·
+  OperationType ·
+  TrialIntent
+  RendMeta (P75) ·            Número
+  RendMediana · RendP25 ·
+  RendP90 · RendPromedio
+  NumRegistros · NumPersonas  Número
+  · TotalHoras · TotalOps
+  Confiabilidad               Una línea de texto
+  FechaCalculo                Fecha y hora
+
+  ⚠ Si una meta sale rara, no la edites: corrige los registros y vuelve a
+    Recalcular.
+
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+ C. LISTAS DE TUS OTRAS APPS (solo se leen)
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+
+═══════════════════════════════════════════════════════════════════════════════
+ 23. DATASUMMARY1 · SOLICITUDESPA1 · PHENOLOGY_CONFIG1
+═══════════════════════════════════════════════════════════════════════════════
+ Para qué: Sets, solicitudes SPA y configuración fenológica.
+ Quién la llena: Las llenan tus otras apps (sets / SPA / pipeline). La app de
+ Personal solo LEE, y en DATASUMMARY1 actualiza NumPesos, UltimoPeso(Por),
+ FinPeso(Por), FinCosecha(Por).
+
+  COLUMNA                     TIPO                VALORES / NOTA
+  ─────────────────────────────────────────────────────────────────────────────
+  DATASUMMARY1.SetName        Una línea de texto  Nombre del set: debe ser único;
+                                                  es lo que se escanea.
+  DATASUMMARY1.Crop           Opción              Su valor debe coincidir con
+                                                  CONFIG_PESO_CORREOS.Title.
+  DATASUMMARY1.Greenhouse     Una línea de texto  Debe coincidir con AREAS.Area
+                                                  para invernaderos.
+
+═══════════════════════════════════════════════════════════════════════════════
+ ORDEN RECOMENDADO PARA LLENARLAS
+═══════════════════════════════════════════════════════════════════════════════
+  1. CONFIG_GRUPOS_JORNADA (al menos L-V)
+  2. CONFIG_AREAS_HORAS_EXTRAS (departamentos, subáreas, encargados)
+  3. CATALOGO_PERSONAL1 (con DEPARTAMENTO, AREA_GENERAL, SUBAREA, SEDE y
+     GrupoJornada que ya existan arriba)
+  4. Opciones de REGIST.AREA (sedes) y REGIST.CATEGORIA (categorías del
+     catálogo + V)
+  5. ROLES_PERMISOS → ACCESOS_USUARIOS (tu fila de Administrador primero)
+  6. ListaActividades → CONFIG_ACTIVIDADES_EVAL
+  7. AREAS
+  8. GAFETES_VISITA
+  9. CONFIG_PESO_CORREOS
+
+ REVISIÓN RÁPIDA DE QUE TODO CUADRA
+  ☐ Cada DEPARTAMENTO del catálogo tiene su fila en CONFIG_AREAS_HORAS_EXTRAS
+    (o su SUBAREA / AREA_GENERAL la tiene).
+  ☐ Cada GrupoJornada del catálogo existe como Title en
+    CONFIG_GRUPOS_JORNADA.
+  ☐ Cada SEDE del catálogo y cada SedeGarita de accesos es una opción de
+    REGIST.AREA.
+  ☐ Cada Categoria del catálogo es una opción de REGIST.CATEGORIA (más V).
+  ☐ Cada Rol de ACCESOS_USUARIOS existe como Title en ROLES_PERMISOS.
+  ☐ Cada Title de CONFIG_ACTIVIDADES_EVAL existe en
+    ListaActividades.Actividad.
+  ☐ Ningún gafete VIS### coincide con un CODIGO del personal.
