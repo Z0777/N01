@@ -1,0 +1,578 @@
+═══════════════════════════════════════════════════════════════════════════════
+ REVISIÓN: PERMISOS → GARITA · REGISTROS EN RENDIMIENTOS · PROGRAMACIÓN ·
+ LÍNEA DE TIEMPO   (17/11/2026)
+ Revisado sobre tus exportaciones de hoy: Personal, REGISTROS,
+ scrRendimientos, Fórmulas de App y OnStart.
+═══════════════════════════════════════════════════════════════════════════════
+ Sintaxis en español: ";" separa argumentos, ";;" encadena, coma decimal.
+ Fórmulas SIN "=" al inicio. Solo van los controles que hay que cambiar.
+
+═══════════════════════════════════════════════════════════════════════════════
+ 0. QUÉ ENCONTRÉ (RESUMEN)
+═══════════════════════════════════════════════════════════════════════════════
+ A. PERMISO → GARITA
+    • btnGuardarPermiso está CORRECTO: si quien guarda tiene
+      permisos_autorizar (Administrador o EncargadoArea) queda "Autorizado";
+      si no, queda "Pendiente" y le llega correo al encargado.
+    • La garita solo carga permisos "Autorizado" (correcto). Si tu prueba
+      la hiciste con un usuario que NO era encargado, el permiso quedó
+      Pendiente y no podía salir hasta que alguien tocara ✔ en Personal →
+      Permisos.
+    • PERO además había un error en la tarjeta CON PERMISO de galGarKpi:
+      solo contaba a quien tenía permiso Y ya había marcado salida HOY en la
+      garita. Una persona de vacaciones (o con permiso de día completo) nunca
+      marca, así que NUNCA aparecía. Por eso no viste nada aunque estuviera
+      autorizado.
+    • También: EN SITIO contaba los registros abiertos de días anteriores.
+    → Se corrige con la sección 2 (nueva tarjeta VACACIONES y CON PERMISO
+      cuenta a todos los que tienen permiso ahora y no están adentro).
+
+ B. ADMINISTRADOR Y PERMISOS DE USUARIO (afecta TODO)
+    • varAdmin ahora sale SOLO de ACCESOS_USUARIOS. Si tu fila no está, el
+      correo no coincide exacto (minúsculas) o Activo no está en Sí, la app
+      te trata como usuario sin permisos: los permisos quedan Pendientes,
+      Rendimientos no carga (OnVisible pide fxPuede("rendimientos")) y se
+      ocultan botones. → Sección 1 deja tu correo como respaldo.
+
+ C. RENDIMIENTOS · "no aparecen los registros de REGISTRO_PERSONAL1"
+    Las fórmulas de carga están bien. Lo que puede estar pasando (en orden
+    de probabilidad) y la etiqueta de la sección 3 te dice cuál es:
+    1) El usuario no tiene el permiso "rendimientos" (punto B) → no carga.
+    2) Finalizar solo muestra lo "En Proceso" que se INICIÓ HOY (cambio que
+       pediste). Lo iniciado ayer ya no aparece para cerrar.
+    3) Los análisis solo usan registros Finalizado, cerrados el mismo día,
+       con materiales > 0 y de 0 a 9 h. Registros de prueba sin materiales
+       o con 0 horas no aparecen.
+    4) Las tarjetas de sets (actividades / activos) cuentan solo lo de hoy.
+
+ D. PROGRAMACIÓN · "no aparecen los datos de rendimiento y no me deja
+    programar" — encontré 5 errores reales:
+    1) btnArea manda al paso equivocado: si el área TIENE sets salta a
+       Actividades (sin elegir sets) y si NO tiene sets te manda a elegir
+       sets (que salen vacíos). Está invertido.
+    2) btnSiguiente solo se habilita cuando ya hay personas asignadas
+       (colAsignados), así que en los pasos Área / Sets / Actividad queda
+       deshabilitado → te quedas trabado.
+    3) btnCrearPrograma no deja guardar si no hay meta (gloRendMeta = 0). La
+       meta solo se busca en RENDIMIENTOS_CATALOGO; si esa actividad no tiene
+       meta calculada no hay forma de programar. Ahora usa la meta fija de
+       colMetasReferencia como respaldo.
+    4) tglSoloEval inicia en "Solo habilitados (≥3)": solo salen personas
+       evaluadas por Encargado/Responsable con nota ≥ 3 en esa actividad. Si
+       no hay evaluaciones la lista sale VACÍA. Ahora inicia en "Todo el
+       personal".
+    5) El historial de rendimiento por persona (Mediana, Cumplimiento) se
+       busca por NOMBRE y sin rango de fechas (con más de 2000 registros
+       toma los más viejos). Ahora busca por CÓDIGO o nombre, en los
+       últimos 6 meses, por meses.
+    Además: CONFIG_ACTIVIDADES_EVAL.Activa se lee como "SI" en OnStart y
+    como true en btnCalcNotaEval (sección 4.8).
+
+ E. LÍNEA DE TIEMPO
+    Usa las fechas de etapas del set en DATASUMMARY1 (SowingMaleExp/Real,
+    TransplantExp/Real…). Si el set no tiene esas fechas, sale vacía. Ahora
+    agrega la fila "Labores registradas" con la primera y última labor de
+    REGISTRO_PERSONAL1 de ese set, el selector muestra primero los sets más
+    nuevos y el mensaje dice por qué está vacía.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 1. FÓRMULAS DE APP (App → Formulas)
+═══════════════════════════════════════════════════════════════════════════════
+ varAdmin (REEMPLAZAR la línea):
+varAdmin = gAccUsuario.Rol = "Administrador" Or gCorreoUsuario in adminEmails;;
+
+ (adminEmails ya existe con tu correo: es tu llave de respaldo. Los demás
+  administradores se siguen dando por ACCESOS_USUARIOS.)
+
+ Revisa tu fila en ACCESOS_USUARIOS: Title = tu correo EXACTO en minúsculas
+ (como sale en la etiqueta de la sección 3), Rol = Administrador,
+ Activo = Sí (columna Sí/No).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 2. REGISTROS · TARJETAS DE LA GARITA
+═══════════════════════════════════════════════════════════════════════════════
+ Quedan 6 tarjetas:
+   EN SITIO       empleados + visitantes con ingreso HOY y adentro
+   EMPLEADOS      empleados adentro hoy
+   VISITANTES     visitantes adentro hoy
+   CON PERMISO    con permiso AUTORIZADO vigente ahora (no vacaciones) y que
+                  no están adentro (salieron o no vinieron)
+   VACACIONES     con vacaciones autorizadas hoy
+   TOTAL ACTIVOS  personal activo del catálogo
+ Los permisos Pendientes no cuentan hasta que se autoricen (en máximo 30 s
+ aparecen, por tmrSyncGarita).
+
+─────────────────────────────────────────────────────────────────
+ galGarKpi  (Gallery)  ·  conGarita > conGarDer
+─────────────────────────────────────────────────────────────────
+ TemplateSize:
+Max(110; (Self.Width - 7 * Self.TemplatePadding) / 6)
+ Items:
+With(
+    { _ad: Filter(colAdentro; FECHA = Today()) };
+    With(
+        {
+            _codAd:  ForAll(_ad; Upper(Trim(CODIGO)));
+            _pAhora: Filter(colPermHoy; FechaInicio <= Now(); FechaFin >= Now())
+        };
+        With(
+            { _pFuera: Filter(_pAhora; Not(Upper(Trim(Codigo)) in _codAd)) };
+            Table(
+                { Titulo: "EN SITIO";      Filtro: "Todos";      Valor: CountRows(_ad); Hex: "#0E2018"; HexSoft: "#E9ECE8" };
+                { Titulo: "EMPLEADOS";     Filtro: "Empleado";   Valor: CountRows(Filter(_ad; Not(TIPO = "Visitante" Or CATEGORIA.Value = "V"))); Hex: "#2F9E44"; HexSoft: "#E8F5EC" };
+                { Titulo: "VISITANTES";    Filtro: "Visitante";  Valor: CountRows(Filter(_ad; TIPO = "Visitante" Or CATEGORIA.Value = "V")); Hex: "#2563EB"; HexSoft: "#E6EDFD" };
+                { Titulo: "CON PERMISO";   Filtro: "Permiso";    Valor: CountRows(Distinct(Filter(_pFuera; TipoPermiso <> "Vacaciones"); Upper(Trim(Codigo)))); Hex: "#7C3AED"; HexSoft: "#F1EAFE" };
+                { Titulo: "VACACIONES";    Filtro: "Vacaciones"; Valor: CountRows(Distinct(Filter(_pFuera; TipoPermiso = "Vacaciones"); Upper(Trim(Codigo)))); Hex: "#0E7C86"; HexSoft: "#E0F1F2" };
+                { Titulo: "TOTAL ACTIVOS"; Filtro: "Total";      Valor: CountRows(colPersGar); Hex: "#B45309"; HexSoft: "#FBF1DC" }
+            )
+        )
+    )
+)
+
+─────────────────────────────────────────────────────────────────
+ btnKpiFiltro  (Classic/Button)  ·  galGarKpi
+─────────────────────────────────────────────────────────────────
+ OnSelect:
+Switch(
+    ThisItem.Filtro;
+    "Permiso";
+        If(
+            fxPuede("garita_permisos") Or fxPuede("garita_historial");
+            Set(gGarTab; "Perm");; Set(gGarPermVista; "Lista");; Set(gAsisFiltro; "Permiso");;
+            Set(gGarPD; Today());; Set(gGarPH; Today());; Reset(dpPermFDesde_1);; Reset(dpPermFHasta_1);;
+            Select(btnPermFCargar_1);
+            Notify("Con permiso ahora: " & ThisItem.Valor; NotificationType.Information)
+        );
+    "Vacaciones";
+        If(
+            fxPuede("garita_permisos") Or fxPuede("garita_historial");
+            Set(gGarTab; "Perm");; Set(gGarPermVista; "Lista");; Set(gAsisFiltro; "Permiso");;
+            Set(gGarPD; Today());; Set(gGarPH; Today());; Reset(dpPermFDesde_1);; Reset(dpPermFHasta_1);;
+            Select(btnPermFCargar_1);
+            Notify("De vacaciones hoy: " & ThisItem.Valor; NotificationType.Information)
+        );
+    "Total";
+        Notify("Personal activo: " & CountRows(colPersGar) & " · Empleados en sitio: " & CountRows(Filter(colAdentro; FECHA = Today() And Not(TIPO = "Visitante" Or CATEGORIA.Value = "V"))); NotificationType.Information);
+    Set(gFiltroAdentro; If(gFiltroAdentro = ThisItem.Filtro; "Todos"; ThisItem.Filtro))
+);;
+If(gGarTab = "Scan"; SetFocus(txtScan))
+
+ (galAdentro sigue mostrando a todos los que están adentro, incluidos los
+  abiertos de días anteriores en rojo: está correcto. btnCargarGarita,
+  tmrSyncGarita y btnPermFCargar_1 están correctos.)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 3. RENDIMIENTOS · ETIQUETA DE DIAGNÓSTICO (temporal)
+═══════════════════════════════════════════════════════════════════════════════
+ Pégala, abre la pantalla con el usuario que "no ve registros" y lee la
+ etiqueta: te dice si es el permiso, si hay registros y de qué fecha/estado
+ es el último. Cuando quede claro, bórrala.
+
+ lblDiagRend (Label) · AGREGAR en conRaiz_Sets, DEBAJO de conHeaderST
+   Height: 70 · Size: 10 · Fill: RGBA(255; 248; 220; 1) · AutoHeight: false
+   Width: Parent.Width - 16 · FillPortions: 0
+   Text:
+"Usuario: " & gCorreoUsuario &
+" · Rol: " & Coalesce(gAccUsuario.Rol; "⚠ SIN FILA EN ACCESOS_USUARIOS") &
+" · Admin: " & If(varAdmin; "Sí"; "No") &
+" · rendimientos: " & If(fxPuede("rendimientos"); "Sí"; "⚠ NO") &
+" · análisis: " & If(fxPuede("rendimientos_analisis"); "Sí"; "No") & Char(10) &
+With(
+    { _u: First(Sort(REGISTRO_PERSONAL1; ID; SortOrder.Descending)) };
+    If(
+        IsBlank(_u);
+        "⚠ REGISTRO_PERSONAL1 no devuelve registros (conexión, permisos del sitio o lista vacía).";
+        "Último registro: " & _u.NombrePersona & " · " & _u.SetName & " · " & _u.Job & " · inicio " &
+        Text(_u.FechaInicio; "dd/mm/yyyy hh:mm") & " · " & _u.Estado.Value &
+        " · materiales " & Coalesce(_u.CantidadMateriales; "0") & " · horas " & Coalesce(_u.HorasTotales; 0)
+    )
+) & Char(10) &
+"En proceso HOY: " & CountRows(colEnProceso) & " · en este set: " & CountRows(colPendSet)
+
+ Cómo leerla:
+   • "rendimientos: ⚠ NO" o "SIN FILA" → arregla ACCESOS_USUARIOS (punto 1).
+   • "no devuelve registros" → en SharePoint el usuario no tiene permiso en
+     el sitio, o la conexión apunta a otra lista: Datos → REGISTRO_PERSONAL1
+     → ⋯ → Actualizar; si cambiaste de sitio, quítala y agrégala de nuevo
+     con el MISMO nombre.
+   • Último registro de otro día / "En Proceso" → es normal que no salga en
+     Finalizar (solo lo de hoy).
+   • materiales 0 u horas 0 → no entra en análisis.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 4. PERSONAL · PROGRAMACIÓN
+═══════════════════════════════════════════════════════════════════════════════
+ 4.1 btnArea (Classic/Button) · conPaso1 > galAreas
+   OnSelect:
+Set(gloAreaSel; ThisItem.Area);;
+Set(gloAreaRec; ThisItem);;
+Set(gloTipos; Coalesce(ThisItem.Tipos.Value; ""));;
+Set(gloUbicacion; Coalesce(ThisItem.Ubicacion; ""));;
+Set(gloK1; ThisItem.Area);;
+Set(gloK2; "GH" & ThisItem.Area);;
+Set(gloK3; Left(ThisItem.Area; 1) & " " & Mid(ThisItem.Area; 2; 9));;
+Clear(colSetsSel);;
+Clear(colAsignados);;
+Set(gloActividadSel; "");;
+Set(gloPasoProg; If(gloModoSet And Coalesce(ThisItem.TieneSets; false); "sets"; "act"))
+
+ 4.2 btnSiguiente (Classic/Button) · conProgramacion > conNav
+   DisplayMode:
+If(
+    Switch(
+        gloPasoProg;
+        "area"; gloAreaSel <> "";
+        "sets"; CountRows(colSetsSel) > 0;
+        "act";  gloActividadSel <> "";
+        true
+    );
+    DisplayMode.Edit;
+    DisplayMode.Disabled
+)
+ (btnCrearPrograma.DisplayMode con colAsignados está correcto.)
+
+ 4.3 btnResolverMeta (Classic/Button, oculto) · conProgramacion > conNav
+   OnSelect (REEMPLAZAR COMPLETO):
+Set(gloSetRef; First(colSetsSel));;
+Set(
+    gloClaveMeta;
+    {
+        N5: fxClave(5; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; "*");
+        N6: fxClave(6; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; "*");
+        N7: fxClave(7; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; "*");
+        N8: fxClave(8; gloSetRef.Generation.Value; gloSetRef.MCT.Value; gloSetRef.Program.Value; gloSetRef.OperationType.Value; gloActividadSel; "*")
+    }
+);;
+Set(
+    gloRefMeta;
+    Coalesce(
+        LookUp(colRendCat; Title = gloClaveMeta.N5 And Confiabilidad <> "Baja");
+        LookUp(colRendCat; Title = gloClaveMeta.N6 And Confiabilidad <> "Baja");
+        LookUp(colRendCat; Title = gloClaveMeta.N7);
+        LookUp(colRendCat; Title = gloClaveMeta.N8)
+    )
+);;
+Set(
+    gloMetaFija;
+    With(
+        { _k: Lower(Trim(gloActividadSel)) };
+        LookUp(
+            colMetasReferencia;
+            Lower(Act) = _k Or
+            Lower(Act) = Substitute(Substitute(Substitute(Substitute(Substitute(_k; "á"; "a"); "é"; "e"); "í"; "i"); "ó"; "o"); "ú"; "u")
+        ).Meta
+    )
+);;
+If(
+    !IsBlank(gloRefMeta);
+    Set(gloRendMeta; Coalesce(gloRefMeta.RendMeta; 0));;
+    Set(gloRendMin; Coalesce(gloRefMeta.RendP25; 0));;
+    Set(gloRendMax; Coalesce(gloRefMeta.RendP90; 0));;
+    Set(gloRendProm; Coalesce(gloRefMeta.RendPromedio; 0));;
+    Set(gloRendMedRef; Coalesce(gloRefMeta.RendMediana; 0));;
+    Set(gloConfiabMeta; Coalesce(gloRefMeta.Confiabilidad; "Sin meta"));;
+    Set(gloNivelMeta; Coalesce(gloRefMeta.Nivel; 0));;
+    Set(gloRegMeta; Coalesce(gloRefMeta.NumRegistros; 0));;
+    Set(gloPersMeta; Coalesce(gloRefMeta.NumPersonas; 0));;
+    Set(gloClaveMetaUsada; Coalesce(gloRefMeta.Title; "—"));
+
+    !IsBlank(gloMetaFija);
+    Set(gloRendMeta; gloMetaFija);;
+    Set(gloRendMin; Round(gloMetaFija * 0,8; 1));;
+    Set(gloRendMax; Round(gloMetaFija * 1,2; 1));;
+    Set(gloRendProm; gloMetaFija);;
+    Set(gloRendMedRef; gloMetaFija);;
+    Set(gloConfiabMeta; "Referencia fija");;
+    Set(gloNivelMeta; 0);;
+    Set(gloRegMeta; 0);;
+    Set(gloPersMeta; 0);;
+    Set(gloClaveMetaUsada; "colMetasReferencia");;
+    Notify("ℹ️ " & gloActividadSel & " no tiene meta calculada: se usa la meta fija de referencia (" & gloMetaFija & " op/h). Recalcula metas en Rendimientos."; NotificationType.Information);
+
+    Set(gloRendMeta; 0);;
+    Set(gloRendMin; 0);;
+    Set(gloRendMax; 0);;
+    Set(gloRendProm; 0);;
+    Set(gloRendMedRef; 0);;
+    Set(gloConfiabMeta; "Sin meta");;
+    Set(gloNivelMeta; 0);;
+    Set(gloRegMeta; 0);;
+    Set(gloPersMeta; 0);;
+    Set(gloClaveMetaUsada; "—")
+)
+
+ 4.4 lblRendReconocido (Label) · conPaso3 > galActividades
+   Text:
+With(
+    { s: First(colSetsSel) };
+    With(
+        {
+            _r: Coalesce(
+                    LookUp(colRendCat; Title = fxClave(5; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; "*") And Confiabilidad <> "Baja");
+                    LookUp(colRendCat; Title = fxClave(6; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; "*") And Confiabilidad <> "Baja");
+                    LookUp(colRendCat; Title = fxClave(7; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; "*"));
+                    LookUp(colRendCat; Title = fxClave(8; s.Generation.Value; s.MCT.Value; s.Program.Value; s.OperationType.Value; ThisItem.Actividad; "*"))
+                );
+            _f: LookUp(colMetasReferencia; Lower(Act) = Lower(Trim(ThisItem.Actividad))).Meta
+        };
+        If(
+            !IsBlank(_r);
+            "META " & Text(_r.RendMeta; "[$-es]0,0") & " op/h  (" & Text(_r.RendP25; "[$-es]0,0") & " – " & Text(_r.RendP90; "[$-es]0,0") & ")" &
+            Char(10) & "Nivel " & _r.Nivel & " · " & _r.Confiabilidad & " · " & _r.NumRegistros & " reg / " & _r.NumPersonas & " pers.";
+            !IsBlank(_f);
+            "META " & Text(_f; "[$-es]0,0") & " op/h · referencia fija" & Char(10) & "Sin datos suficientes: recalcula metas";
+            "sin meta · recalcular catálogo"
+        )
+    )
+)
+
+ 4.5 tglSoloEval (Classic/Toggle) · conPaso4 > colPersonal1 > Container120
+   Default: false
+
+ 4.6 btnLoadPaso4 (Classic/Button, oculto) · conProgramacion
+   OnSelect (REEMPLAZAR COMPLETO):
+Clear(colRegActBruto);;
+ForAll(
+    Sequence(6; 0) As _m;
+    With(
+        {
+            _d1: DateAdd(Today(); -30 * (_m.Value + 1); TimeUnit.Days);
+            _d2: If(_m.Value = 0; DateAdd(Today(); 1; TimeUnit.Days); DateAdd(Today(); -30 * _m.Value; TimeUnit.Days))
+        };
+        Collect(
+            colRegActBruto;
+            ForAll(
+                Filter(
+                    REGISTRO_PERSONAL1;
+                    Job = gloActividadSel;
+                    Estado.Value = "Finalizado";
+                    HorasTotales > 0;
+                    HorasTotales <= MaxHorasRegistro;
+                    FechaInicio >= _d1;
+                    FechaInicio < _d2
+                ) As _r;
+                With(
+                    {
+                        _h:  Coalesce(_r.HorasTotales; 0);
+                        _mt: IfError(Value(Coalesce(_r.CantidadMateriales; "0")); 0);
+                        _fi: Date(Year(_r.FechaInicio); Month(_r.FechaInicio); Day(_r.FechaInicio));
+                        _ff: Date(Year(Coalesce(_r.FechaFin; _r.FechaInicio)); Month(Coalesce(_r.FechaFin; _r.FechaInicio)); Day(Coalesce(_r.FechaFin; _r.FechaInicio)))
+                    };
+                    {
+                        Codigo:  Upper(Trim(Coalesce(_r.CODIGO; "")));
+                        Persona: Coalesce(_r.NombrePersona; "");
+                        Horas:   _h;
+                        Mat:     _mt;
+                        Rend:    If(_h > 0; _mt / _h; 0);
+                        Ok:      DateDiff(_fi; _ff; TimeUnit.Days) = 0
+                                 And (_mt > 0 Or Coalesce(_r.SetName; "") in SetsSinMaterialOK Or fxTxt(_r.Job) in ActividadesSinMaterialOK)
+                    }
+                )
+            )
+        )
+    )
+);;
+ClearCollect(colRegAct; Filter(colRegActBruto; Ok; Rend > 0));;
+ClearCollect(
+    colPersonalPaso4;
+    ForAll(
+        Filter(CATALOGO_PERSONAL1; Activo = "SI") As p;
+        With(
+            {
+                _ev:  LookUp(colNotaEval; Persona = p.Nombre);
+                regs: Filter(colRegAct; Codigo = Upper(Trim(p.CODIGO)) Or Persona = p.Nombre)
+            };
+            With(
+                {
+                    _n:    CountRows(regs);
+                    _o:    Sort(regs; Rend; SortOrder.Ascending);
+                    _h:    Sum(regs; Horas);
+                    _mt:   Sum(regs; Mat);
+                    _nota: Coalesce(_ev.Nota; 0)
+                };
+                With(
+                    {
+                        _med: If(
+                                  _n = 0; 0;
+                                  Mod(_n; 2) = 1; Round(Last(FirstN(_o; (_n + 1) / 2)).Rend; 1);
+                                  Round((Last(FirstN(_o; _n / 2)).Rend + Last(FirstN(_o; _n / 2 + 1)).Rend) / 2; 1)
+                              )
+                    };
+                    {
+                        Persona:    p.Nombre;
+                        Codigo:     p.CODIGO;
+                        Depto:      p.DEPARTAMENTO;
+                        Area:       p.AREA_GENERAL;
+                        Sub:        p.SUBAREA;
+                        Nivel:      _nota;
+                        Registros:  _n;
+                        Promedio:   If(_h > 0; Round(_mt / _h; 1); 0);
+                        Mediana:    _med;
+                        MetaRef:    gloRendMeta;
+                        Cumpl:      If(gloRendMeta > 0 And _n > 0; Round(_med / gloRendMeta; 2); 0);
+                        Match:      If(_n >= MinRegMeta; "histórico"; _n > 0; "pocos datos"; "sin historia");
+                        Habilitado: _nota >= UmbralHabilitado And Coalesce(_ev.Externa; false)
+                    }
+                )
+            )
+        )
+    )
+);;
+Set(gloEstadoArea; "Disponible de inmediato");;
+Set(gloOpsPorPlanta; Coalesce(gloOpsPorPlanta; 1));;
+Set(
+    gloOps;
+    If(
+        Sum(colSetsSel; PlantsRequired) > 0;
+        Sum(colSetsSel; PlantsRequired) * gloOpsPorPlanta;
+        Value(Coalesce(txtOpsManual.Text; "0"))
+    )
+);;
+Set(gloMeta; Coalesce(gloMeta; 8));;
+Set(gloPersonasMin; If(gloRendMeta > 0; RoundUp(gloOps / Max(gloRendMeta * JornadaEfectiva; 1); 0); 0));;
+If(
+    gloRendMeta <= 0;
+    Notify("⚠️ " & gloActividadSel & " no tiene meta (ni calculada ni fija). Ve a Rendimientos → Análisis global → Recalcular metas, o agrégala en colMetasReferencia."; NotificationType.Warning)
+);;
+If(
+    IsEmpty(colRegAct);
+    Notify("ℹ️ No hay registros finalizados de " & gloActividadSel & " en los últimos 6 meses: las personas salen sin historial."; NotificationType.Information)
+)
+
+ 4.7 galHabilitados (Gallery) · conPaso4 > colPersonal1
+   Items:
+Sort(
+    Filter(
+        colPersonalPaso4;
+        If(tglSoloEval.Value; ThisRecord.Habilitado; true);
+        IsBlank(txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Persona; txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Codigo; txtBuscarPersonas.Text)
+            Or StartsWith(ThisRecord.Depto; txtBuscarPersonas.Text);
+        fxVeArea(ThisRecord.Area; ThisRecord.Depto; ThisRecord.Sub)
+    );
+    Cumpl;
+    SortOrder.Descending
+)
+ (Antes filtraba con drpFiltroAreaHE, el combo de Horas extras: si ahí
+  quedaba elegida un área, aquí desaparecía el personal de otras áreas.)
+
+ 4.8 CONFIG_ACTIVIDADES_EVAL · columna Activa (un solo tipo)
+   OnStart (línea 5) usa  Activa = "SI"  y btnCalcNotaEval / btnAbrirEval
+   usan  Activa = true. Solo una es la correcta: la otra no carga el nivel
+   (General/Familia/Cultivo) y la nota de evaluación sale 0 → nadie queda
+   "habilitado".
+   • Si la columna es Sí/No → OnStart, cambia la línea 5 por:
+ClearCollect(colCfgActEval; Filter(CONFIG_ACTIVIDADES_EVAL; Activa = true));;
+   • Si es texto SI/NO → en btnCalcNotaEval y btnAbrirEval cambia la
+     primera línea por:
+ClearCollect(colCfgActEval; Filter(CONFIG_ACTIVIDADES_EVAL; Activa = "SI"));;
+
+ 4.9 Datos que la programación necesita (revísalos)
+   • AREAS: al menos una fila con Activa = Sí (si está vacía el paso 1 no
+     muestra nada). TieneSets = Sí solo para invernaderos con sets.
+   • El nombre de la actividad en ListaActividades debe ser IGUAL al Job de
+     REGISTRO_PERSONAL1 (ej. "Polinización" ≠ "Polinizacion"). Si no, no hay
+     historial ni meta.
+   • Metas: Rendimientos → Análisis global → ⚙️ Recalcular metas (con el
+     rango de 180 días). Después en Programación toca 🔄 Recargar metas.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 5. PERSONAL · LÍNEA DE TIEMPO
+═══════════════════════════════════════════════════════════════════════════════
+ 5.1 btnBuildTimeline (Classic/Button, oculto) · Personal (raíz)
+   OnSelect (REEMPLAZAR COMPLETO):
+If(
+    IsBlank(gloSetTL);
+    Clear(colTimeline);;
+    Set(gloTLMin; Today());;
+    Set(gloTLMax; Today());;
+    Set(gloTLSpan; 1);
+
+    ClearCollect(
+        colTimeline;
+        Table(
+            {Orden: 1;  Etapa: "Siembra ♂";    Hex: "#2F9E44"; Inicio: Coalesce(gloSetTL.SowingMaleReal; gloSetTL.SowingMaleExp);       Fin: Coalesce(gloSetTL.SowingFemReal; gloSetTL.SowingFemExp; gloSetTL.SowingMaleExp)};
+            {Orden: 2;  Etapa: "Trasplante";   Hex: "#16A34A"; Inicio: Coalesce(gloSetTL.TransplantReal; gloSetTL.TransplantExp);        Fin: Coalesce(gloSetTL.TransplantDeliv; gloSetTL.TransplantExp)};
+            {Orden: 3;  Etapa: "Tejido pre";   Hex: "#7C5CFF"; Inicio: Coalesce(gloSetTL.TissuePreReal; gloSetTL.TissuePreExp);          Fin: Coalesce(gloSetTL.TissuePreDeliv; gloSetTL.TissuePreExp)};
+            {Orden: 4;  Etapa: "Polinización"; Hex: "#E8A93C"; Inicio: Coalesce(gloSetTL.PolStartReal; gloSetTL.PolStartExp);            Fin: Coalesce(gloSetTL.PolEndReal; gloSetTL.PolEndExp)};
+            {Orden: 5;  Etapa: "Tejido post";  Hex: "#A855F7"; Inicio: Coalesce(gloSetTL.TissuePostReal; gloSetTL.TissuePostExp);        Fin: Coalesce(gloSetTL.TissuePostDeliv; gloSetTL.TissuePostExp)};
+            {Orden: 6;  Etapa: "Cosecha";      Hex: "#DC2626"; Inicio: Coalesce(gloSetTL.HarvestFirstReal; gloSetTL.HarvestFirstExp);    Fin: Coalesce(gloSetTL.HarvestLastReal; gloSetTL.HarvestLastExp)};
+            {Orden: 7;  Etapa: "Procesos";     Hex: "#B45309"; Inicio: Coalesce(gloSetTL.ProcessingReal; gloSetTL.ProcessingExp);        Fin: Coalesce(gloSetTL.ProcessingDeliv; gloSetTL.ProcessingExp)};
+            {Orden: 8;  Etapa: "Fingerprint";  Hex: "#C026D3"; Inicio: Coalesce(gloSetTL.FingerprintSeedsReal; gloSetTL.FingerprintSeedsExp); Fin: Coalesce(gloSetTL.FingerprintSeedsDeliv; gloSetTL.FingerprintSeedsExp)};
+            {Orden: 9;  Etapa: "SPA";          Hex: "#2563EB"; Inicio: Coalesce(gloSetTL.SPAReal; gloSetTL.SPAExp);                      Fin: Coalesce(gloSetTL.SPADeliv; gloSetTL.SPAExp)};
+            {Orden: 10; Etapa: "Envío";        Hex: "#0F766E"; Inicio: Coalesce(gloSetTL.ShippingReal; gloSetTL.ShippingExp);            Fin: Coalesce(gloSetTL.ShippingDeliv; gloSetTL.ShippingExp)}
+        )
+    );;
+    With(
+        {
+            _li: First(Sort(Filter(REGISTRO_PERSONAL1; SetName = gloSetTL.SetName); FechaInicio; SortOrder.Ascending)).FechaInicio;
+            _lf: First(Sort(Filter(REGISTRO_PERSONAL1; SetName = gloSetTL.SetName); FechaInicio; SortOrder.Descending)).FechaInicio
+        };
+        If(
+            !IsBlank(_li);
+            Collect(
+                colTimeline;
+                {
+                    Orden:  11;
+                    Etapa:  "Labores registradas";
+                    Hex:    "#0E2018";
+                    Inicio: Date(Year(_li); Month(_li); Day(_li));
+                    Fin:    Date(Year(_lf); Month(_lf); Day(_lf))
+                }
+            )
+        )
+    );;
+    ClearCollect(colTimeline; Filter(colTimeline; !IsBlank(Inicio)));;
+    Set(gloTLMin; Min(colTimeline; Inicio));;
+    Set(gloTLMax; Max(colTimeline; Coalesce(Fin; Inicio)));;
+    Set(gloTLSpan; Max(1; DateDiff(gloTLMin; gloTLMax; TimeUnit.Days)))
+)
+ (Si al pegar marca error de tipo en "Inicio" de la fila 11 —porque las
+  columnas …Exp/…Real de DATASUMMARY1 son Fecha y hora—, cambia
+  Date(Year(_li); Month(_li); Day(_li)) por _li y Date(…_lf…) por _lf.)
+
+ 5.2 galPickSet (Gallery) · conPickSet > conPickSetCard
+   Items:
+Sort(
+    Filter(
+        DATASUMMARY1;
+        IsBlank(Trim(txtPickSetBuscar.Text)) Or StartsWith(SetName; Trim(txtPickSetBuscar.Text));
+        IsBlank(drpPickSetCultivo.Selected.Value) Or Crop.Value = drpPickSetCultivo.Selected.Value;
+        IsBlank(drpPickSetArea.Selected.Value) Or Area.Value = drpPickSetArea.Selected.Value
+    );
+    Created;
+    SortOrder.Descending
+)
+
+ 5.3 lblTLVacio (Label) · conLineaTiempo > conTLCuerpo
+   Text:
+If(
+    IsBlank(gloSetTL);
+    "Elige un set con 📂 Elegir set para ver su línea de tiempo.";
+    "El set " & gloSetTL.SetName & " no tiene fechas de etapas en DATASUMMARY1 (Siembra, Trasplante, Polinización, Cosecha… Exp/Real) ni labores registradas en Rendimientos."
+)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ 6. CÓMO PROBAR (en este orden)
+═══════════════════════════════════════════════════════════════════════════════
+  1. Pega la sección 1 → cierra y abre la app. La etiqueta de la sección 3
+     debe decir Rol: Administrador · Admin: Sí.
+  2. Permiso: con TU usuario registra Vacaciones de hoy para una persona →
+     queda Autorizado. En garita, en máximo 30 s, VACACIONES sube a 1.
+     Con un usuario SolicitanteHE registra un permiso Personal → queda
+     Pendiente → NO sale en garita → autorízalo con ✔ → sale en CON PERMISO
+     (si la persona no está adentro).
+  3. Rendimientos: lee la etiqueta de diagnóstico; inicia una labor y
+     finalízala con materiales hoy → aparece en el análisis del set.
+  4. Programación (modo sets): área con sets → pasa a Sets → elige → Siguiente
+     → Actividad (ves META o "referencia fija") → aparecen TODAS las personas
+     con su Mediana / Cumplimiento → asigna → Crear programa.
+  5. Línea de tiempo: elige un set reciente → salen sus etapas y la fila
+     "Labores registradas".
